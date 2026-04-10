@@ -1,0 +1,17 @@
+{
+  "name": "Siri Mane – Ladies PG",
+  "short_name": "Siri Mane",
+  "description": "Siri Mane Ladies Paying Guest – Tumakuru",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FEF3C7",
+  "theme_color": "#F59E0B",
+  "icons": [
+    {
+      "src": "/images/logo.png",
+      "sizes": "any",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
