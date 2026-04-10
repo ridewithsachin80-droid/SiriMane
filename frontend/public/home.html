@@ -3,42 +3,745 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Siri Mane PG</title>
+<title>Siri Mane — Ladies PG Accommodation · Bengaluru</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:Arial,sans-serif;background:linear-gradient(135deg,#F59E0B 0%,#D97706 40%,#1E3A5F 100%);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
-.card{background:white;border-radius:24px;padding:40px 32px;width:100%;max-width:400px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.3)}
-svg{margin-bottom:16px}
-h1{font-size:28px;font-weight:800;color:#1E293B;margin-bottom:4px}
-p{color:#64748B;font-size:14px;margin-bottom:6px}
-.sub{color:#94A3B8;font-size:12px;margin-bottom:28px}
-.label{font-size:11px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:1px;margin-bottom:14px}
-.btn{display:block;width:100%;padding:16px;border-radius:12px;font-size:15px;font-weight:700;border:none;cursor:pointer;margin-bottom:12px;color:white;text-decoration:none}
-.btn1{background:linear-gradient(135deg,#F59E0B,#D97706);box-shadow:0 4px 15px rgba(245,158,11,0.4)}
-.btn2{background:linear-gradient(135deg,#1E3A5F,#0F2040);box-shadow:0 4px 15px rgba(30,58,95,0.4)}
-.btn:active{opacity:0.9;transform:scale(0.98)}
-.or{color:#CBD5E1;font-size:12px;margin:4px 0 12px;display:flex;align-items:center;gap:10px}
-.or::before,.or::after{content:'';flex:1;height:1px;background:#E2E8F0}
-footer{margin-top:20px;font-size:11px;color:#94A3B8}
+:root {
+  --gold: #C9A96E;
+  --gold-light: #E8C98A;
+  --gold-dark: #9A7A45;
+  --bg: #0A0A0A;
+  --bg2: #111111;
+  --bg3: #181818;
+  --text: #F0EDE8;
+  --text-muted: #8A8580;
+  --border: rgba(201,169,110,0.15);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ── NOISE TEXTURE ── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.4;
+}
+
+/* ── NAV ── */
+nav {
+  position: fixed;
+  top: 0;
+  width: 100%;
+  padding: 24px 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  z-index: 100;
+  background: linear-gradient(to bottom, rgba(10,10,10,0.95) 0%, transparent 100%);
+}
+
+.nav-logo {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 22px;
+  font-weight: 400;
+  color: var(--gold);
+  letter-spacing: 0.08em;
+  text-decoration: none;
+}
+
+.nav-logo span {
+  display: block;
+  font-size: 10px;
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 300;
+  color: var(--text-muted);
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  list-style: none;
+}
+
+.nav-links a {
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 300;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  transition: color 0.3s;
+}
+
+.nav-links a:hover { color: var(--gold); }
+
+/* ── HERO ── */
+.hero {
+  min-height: 100vh;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+/* Ambient glow */
+.hero::after {
+  content: '';
+  position: absolute;
+  width: 600px;
+  height: 600px;
+  background: radial-gradient(circle, rgba(201,169,110,0.06) 0%, transparent 70%);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+/* Decorative lines */
+.hero-lines {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.hero-lines::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 1px;
+  height: 100%;
+  background: linear-gradient(to bottom, transparent, rgba(201,169,110,0.08), transparent);
+}
+
+.hero-lines::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(to right, transparent, rgba(201,169,110,0.06), transparent);
+}
+
+.hero-content {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  padding: 0 24px;
+  max-width: 900px;
+  animation: fadeUp 1.2s ease both;
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(30px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.hero-eyebrow {
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.4em;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 24px;
+  animation: fadeUp 1.2s ease 0.1s both;
+}
+
+.hero-title {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: clamp(56px, 10vw, 108px);
+  font-weight: 300;
+  line-height: 0.92;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  margin-bottom: 8px;
+  animation: fadeUp 1.2s ease 0.2s both;
+}
+
+.hero-title em {
+  font-style: italic;
+  color: var(--gold);
+}
+
+.hero-kannada {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: clamp(20px, 4vw, 36px);
+  font-weight: 300;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+  margin-bottom: 32px;
+  animation: fadeUp 1.2s ease 0.3s both;
+}
+
+.hero-divider {
+  width: 60px;
+  height: 1px;
+  background: linear-gradient(to right, transparent, var(--gold), transparent);
+  margin: 0 auto 32px;
+  animation: fadeUp 1.2s ease 0.4s both;
+}
+
+.hero-desc {
+  font-size: 15px;
+  font-weight: 300;
+  color: var(--text-muted);
+  line-height: 1.8;
+  max-width: 480px;
+  margin: 0 auto 56px;
+  animation: fadeUp 1.2s ease 0.5s both;
+}
+
+/* ── LOGIN CARDS ── */
+.login-cards {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+  flex-wrap: wrap;
+  animation: fadeUp 1.2s ease 0.6s both;
+}
+
+.login-card {
+  position: relative;
+  display: block;
+  text-decoration: none;
+  width: 240px;
+  padding: 32px 28px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: rgba(255,255,255,0.02);
+  backdrop-filter: blur(10px);
+  transition: all 0.4s cubic-bezier(0.23, 1, 0.32, 1);
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.login-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(201,169,110,0.05) 0%, transparent 60%);
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+
+.login-card::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(to right, var(--gold-dark), var(--gold), var(--gold-dark));
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.4s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.login-card:hover {
+  transform: translateY(-6px);
+  border-color: rgba(201,169,110,0.4);
+  background: rgba(201,169,110,0.04);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(201,169,110,0.1);
+}
+
+.login-card:hover::before { opacity: 1; }
+.login-card:hover::after { transform: scaleX(1); }
+
+.login-card:hover .card-icon { transform: scale(1.1); }
+.login-card:hover .card-arrow { transform: translateX(4px); opacity: 1; }
+
+.card-icon {
+  font-size: 28px;
+  margin-bottom: 16px;
+  display: block;
+  transition: transform 0.3s;
+  filter: grayscale(0.3);
+}
+
+.card-title {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 22px;
+  font-weight: 400;
+  color: var(--text);
+  margin-bottom: 8px;
+  letter-spacing: 0.02em;
+}
+
+.card-desc {
+  font-size: 12px;
+  font-weight: 300;
+  color: var(--text-muted);
+  line-height: 1.6;
+  letter-spacing: 0.03em;
+}
+
+.card-arrow {
+  position: absolute;
+  top: 28px;
+  right: 24px;
+  color: var(--gold);
+  font-size: 18px;
+  opacity: 0;
+  transition: all 0.3s;
+}
+
+/* ── FEATURES SECTION ── */
+.features {
+  padding: 120px 48px;
+  max-width: 1200px;
+  margin: 0 auto;
+  position: relative;
+  z-index: 1;
+}
+
+.section-header {
+  text-align: center;
+  margin-bottom: 80px;
+}
+
+.section-label {
+  font-size: 11px;
+  letter-spacing: 0.4em;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 16px;
+}
+
+.section-title {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: clamp(32px, 5vw, 52px);
+  font-weight: 300;
+  color: var(--text);
+  line-height: 1.1;
+}
+
+.section-title em { font-style: italic; color: var(--gold); }
+
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+}
+
+.feature-item {
+  background: var(--bg);
+  padding: 40px 32px;
+  transition: background 0.3s;
+}
+
+.feature-item:hover { background: rgba(201,169,110,0.03); }
+
+.feature-number {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 11px;
+  color: var(--gold-dark);
+  letter-spacing: 0.3em;
+  margin-bottom: 20px;
+}
+
+.feature-icon { font-size: 24px; margin-bottom: 16px; }
+
+.feature-title {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 20px;
+  font-weight: 400;
+  color: var(--text);
+  margin-bottom: 10px;
+}
+
+.feature-desc {
+  font-size: 13px;
+  font-weight: 300;
+  color: var(--text-muted);
+  line-height: 1.7;
+}
+
+/* ── HIGHLIGHTS STRIP ── */
+.highlights {
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 40px 48px;
+  display: flex;
+  justify-content: center;
+  gap: 80px;
+  flex-wrap: wrap;
+  position: relative;
+  z-index: 1;
+}
+
+.highlight-item { text-align: center; }
+
+.highlight-value {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 42px;
+  font-weight: 300;
+  color: var(--gold);
+  line-height: 1;
+  margin-bottom: 6px;
+}
+
+.highlight-label {
+  font-size: 11px;
+  font-weight: 300;
+  color: var(--text-muted);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+/* ── CONTACT / CTA ── */
+.cta-section {
+  padding: 120px 48px;
+  text-align: center;
+  position: relative;
+  z-index: 1;
+}
+
+.cta-section::before {
+  content: '';
+  position: absolute;
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, rgba(201,169,110,0.05) 0%, transparent 70%);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.cta-title {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: clamp(36px, 6vw, 64px);
+  font-weight: 300;
+  color: var(--text);
+  margin-bottom: 16px;
+  line-height: 1.1;
+}
+
+.cta-title em { font-style: italic; color: var(--gold); }
+
+.cta-sub {
+  font-size: 14px;
+  font-weight: 300;
+  color: var(--text-muted);
+  margin-bottom: 40px;
+  letter-spacing: 0.05em;
+}
+
+.cta-contact {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.cta-btn {
+  display: inline-block;
+  padding: 14px 32px;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  text-decoration: none;
+  border-radius: 1px;
+  transition: all 0.3s;
+}
+
+.cta-btn-primary {
+  background: var(--gold);
+  color: var(--bg);
+}
+
+.cta-btn-primary:hover {
+  background: var(--gold-light);
+  box-shadow: 0 8px 30px rgba(201,169,110,0.3);
+  transform: translateY(-2px);
+}
+
+.cta-btn-outline {
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+.cta-btn-outline:hover {
+  border-color: var(--gold);
+  color: var(--gold);
+  transform: translateY(-2px);
+}
+
+/* ── FOOTER ── */
+footer {
+  border-top: 1px solid var(--border);
+  padding: 32px 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  position: relative;
+  z-index: 1;
+}
+
+.footer-brand {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 18px;
+  color: var(--gold);
+  letter-spacing: 0.08em;
+}
+
+.footer-copy {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 300;
+}
+
+.footer-links {
+  display: flex;
+  gap: 24px;
+}
+
+.footer-links a {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-decoration: none;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  transition: color 0.3s;
+}
+
+.footer-links a:hover { color: var(--gold); }
+
+/* ── SCROLL INDICATOR ── */
+.scroll-indicator {
+  position: absolute;
+  bottom: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 10px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  animation: fadeUp 1.2s ease 1s both;
+}
+
+.scroll-line {
+  width: 1px;
+  height: 40px;
+  background: linear-gradient(to bottom, var(--gold), transparent);
+  animation: scrollAnim 2s ease-in-out infinite;
+}
+
+@keyframes scrollAnim {
+  0%, 100% { opacity: 0.3; transform: scaleY(1); }
+  50% { opacity: 1; transform: scaleY(1.1); }
+}
+
+/* ── CORNER DECORATIONS ── */
+.corner-tl, .corner-br {
+  position: fixed;
+  width: 60px;
+  height: 60px;
+  pointer-events: none;
+  z-index: 50;
+  opacity: 0.2;
+}
+
+.corner-tl {
+  top: 20px;
+  left: 20px;
+  border-top: 1px solid var(--gold);
+  border-left: 1px solid var(--gold);
+}
+
+.corner-br {
+  bottom: 20px;
+  right: 20px;
+  border-bottom: 1px solid var(--gold);
+  border-right: 1px solid var(--gold);
+}
+
+/* ── RESPONSIVE ── */
+@media (max-width: 768px) {
+  nav { padding: 20px 24px; }
+  .nav-links { display: none; }
+  .features { padding: 80px 24px; }
+  .features-grid { grid-template-columns: 1fr; }
+  .highlights { padding: 40px 24px; gap: 40px; }
+  .cta-section { padding: 80px 24px; }
+  footer { padding: 24px; flex-direction: column; text-align: center; }
+  .login-cards { flex-direction: column; align-items: center; }
+  .login-card { width: 280px; }
+}
 </style>
 </head>
 <body>
-<div class="card">
-  <svg width="130" height="65" viewBox="0 0 130 65" xmlns="http://www.w3.org/2000/svg">
-    <rect width="130" height="65" rx="10" fill="#F59E0B"/>
-    <text x="65" y="17" font-family="serif" font-size="8" fill="#1E3A5F" text-anchor="middle" font-weight="bold">ಸಿರಿ ಮಾನೆ</text>
-    <text x="65" y="36" font-family="Georgia,serif" font-size="17" fill="#1E3A5F" text-anchor="middle" font-weight="bold" font-style="italic">Siri Mane</text>
-    <text x="65" y="49" font-family="serif" font-size="8" fill="#1E3A5F" text-anchor="middle">Ladies Paying Guest</text>
-    <text x="65" y="60" font-family="serif" font-size="7" fill="#1E3A5F" text-anchor="middle">ಸಿರಿ ಮನೆ</text>
-  </svg>
-  <h1>Siri Mane</h1>
-  <p>Ladies PG Accommodation · Bengaluru</p>
-  <p class="sub">ಸಿರಿ ಮನೆ · ಬೆಂಗಳೂರು</p>
-  <p class="label">Choose how to continue</p>
-  <a href="/guest.html" class="btn btn1">🏠 &nbsp; I'm a Guest</a>
-  <div class="or">or</div>
-  <a href="/management.html" class="btn btn2">🔐 &nbsp; Management Login</a>
-  <footer>sirimane.in · Bengaluru, Karnataka</footer>
+
+<!-- Corner decorations -->
+<div class="corner-tl"></div>
+<div class="corner-br"></div>
+
+<!-- Navigation -->
+<nav>
+  <a href="/" class="nav-logo">
+    Siri Mane
+    <span>Ladies Paying Guest</span>
+  </a>
+  <ul class="nav-links">
+    <li><a href="#about">About</a></li>
+    <li><a href="#amenities">Amenities</a></li>
+    <li><a href="#contact">Contact</a></li>
+  </ul>
+</nav>
+
+<!-- Hero Section -->
+<section class="hero">
+  <div class="hero-lines"></div>
+
+  <div class="hero-content">
+    <p class="hero-eyebrow">Tumakuru · Karnataka · Est. 2020</p>
+    <h1 class="hero-title">
+      <em>Siri</em> Mane
+    </h1>
+    <p class="hero-kannada">ಸಿರಿ ಮನೆ</p>
+    <div class="hero-divider"></div>
+    <p class="hero-desc">
+      A refined haven for women seeking comfort, safety, and community
+      in the heart of Tumakuru. Where every resident feels at home.
+    </p>
+
+    <!-- Login Cards -->
+    <div class="login-cards">
+      <a href="/guest.html" class="login-card">
+        <span class="card-arrow">→</span>
+        <span class="card-icon">🏠</span>
+        <div class="card-title">I'm a Resident</div>
+        <p class="card-desc">View your room details, payments, menu & notices</p>
+      </a>
+      <a href="/management.html" class="login-card">
+        <span class="card-arrow">→</span>
+        <span class="card-icon">🔐</span>
+        <div class="card-title">Management</div>
+        <p class="card-desc">Access the admin dashboard and control panel</p>
+      </a>
+    </div>
+  </div>
+
+  <div class="scroll-indicator">
+    <div class="scroll-line"></div>
+    <span>Scroll</span>
+  </div>
+</section>
+
+<!-- Highlights Strip -->
+<div class="highlights" id="about">
+  <div class="highlight-item">
+    <div class="highlight-value">100%</div>
+    <div class="highlight-label">Ladies Only</div>
+  </div>
+  <div class="highlight-item">
+    <div class="highlight-value">24/7</div>
+    <div class="highlight-label">Security</div>
+  </div>
+  <div class="highlight-item">
+    <div class="highlight-value">3×</div>
+    <div class="highlight-label">Daily Meals</div>
+  </div>
+  <div class="highlight-item">
+    <div class="highlight-value">WiFi</div>
+    <div class="highlight-label">High Speed</div>
+  </div>
 </div>
+
+<!-- Features Section -->
+<section class="features" id="amenities">
+  <div class="section-header">
+    <p class="section-label">What We Offer</p>
+    <h2 class="section-title">Crafted for <em>Comfort</em></h2>
+  </div>
+
+  <div class="features-grid">
+    <div class="feature-item">
+      <p class="feature-number">01</p>
+      <div class="feature-icon">🛏️</div>
+      <h3 class="feature-title">Furnished Rooms</h3>
+      <p class="feature-desc">Thoughtfully designed 2 sharing, 3 sharing &amp; 4 sharing rooms with quality furnishings and ample storage space for every resident.</p>
+    </div>
+    <div class="feature-item">
+      <p class="feature-number">02</p>
+      <div class="feature-icon">🍽️</div>
+      <h3 class="feature-title">Home-Cooked Meals</h3>
+      <p class="feature-desc">Nutritious breakfast, lunch and dinner prepared fresh daily — including South Indian favourites.</p>
+    </div>
+    <div class="feature-item">
+      <p class="feature-number">03</p>
+      <div class="feature-icon">🔒</div>
+      <h3 class="feature-title">Safe & Secure</h3>
+      <p class="feature-desc">CCTV surveillance, secure entry and a welcoming community for complete peace of mind.</p>
+    </div>
+    <div class="feature-item">
+      <p class="feature-number">04</p>
+      <div class="feature-icon">📶</div>
+      <h3 class="feature-title">High-Speed WiFi</h3>
+      <p class="feature-desc">Reliable broadband across all rooms — perfect for work, study and staying connected.</p>
+    </div>
+    <div class="feature-item">
+      <p class="feature-number">05</p>
+      <div class="feature-icon">🧺</div>
+      <h3 class="feature-title">Housekeeping & Washing</h3>
+      <p class="feature-desc">Regular housekeeping with dedicated washing machine facilities to keep your space and clothes fresh and clean.</p>
+    </div>
+    <div class="feature-item">
+      <p class="feature-number">06</p>
+      <div class="feature-icon">📱</div>
+      <h3 class="feature-title">Digital Portal</h3>
+      <p class="feature-desc">Track your payments, view menus, send messages to management — all from your phone.</p>
+    </div>
+  </div>
+</section>
+
+<!-- CTA Section -->
+<section class="cta-section" id="contact">
+  <h2 class="cta-title">Ready to call it <em>home?</em></h2>
+  <p class="cta-sub">Reach out to enquire about availability · Tumakuru</p>
+  <div class="cta-contact">
+    <a href="tel:+919999999999" class="cta-btn cta-btn-primary">📞 &nbsp; Call Us</a>
+    <a href="https://wa.me/919999999999" class="cta-btn cta-btn-outline">💬 &nbsp; WhatsApp</a>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer>
+  <div class="footer-brand">Siri Mane · ಸಿರಿ ಮನೆ</div>
+  <div class="footer-copy">© 2024 Siri Mane PG · Tumakuru, Karnataka</div>
+  <div class="footer-links">
+    <a href="/guest.html">Resident Login</a>
+    <a href="/management.html">Management</a>
+  </div>
+</footer>
+
 </body>
 </html>
