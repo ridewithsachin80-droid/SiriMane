@@ -61,34 +61,76 @@ async function migrate() {
     console.log('✅ guests table ready');
 
     await client.query(`
-      CREATE TABLE IF NOT EXISTS payments (
+      CREATE TABLE IF NOT EXISTS collections (
         id SERIAL PRIMARY KEY,
-        guest_id INTEGER REFERENCES guests(id) ON DELETE CASCADE,
+        guest_id INTEGER REFERENCES guests(id) ON DELETE SET NULL,
+        guest_name VARCHAR(100),
         amount DECIMAL(10,2) NOT NULL,
-        payment_date DATE NOT NULL DEFAULT CURRENT_DATE,
-        payment_for_month VARCHAR(20),
-        payment_type VARCHAR(50) DEFAULT 'rent',
+        collection_date DATE NOT NULL DEFAULT CURRENT_DATE,
+        collection_month VARCHAR(20),
+        collection_type VARCHAR(50) DEFAULT 'rent',
         payment_mode VARCHAR(50) DEFAULT 'cash',
+        description TEXT,
         receipt_number VARCHAR(50),
-        notes TEXT,
         created_at TIMESTAMP DEFAULT NOW()
       );
     `);
-    console.log('✅ payments table ready');
+    console.log('✅ collections table ready');
 
     await client.query(`
-      CREATE TABLE IF NOT EXISTS expenses (
+      CREATE TABLE IF NOT EXISTS purchases (
         id SERIAL PRIMARY KEY,
         amount DECIMAL(10,2) NOT NULL,
-        category VARCHAR(100) NOT NULL,
+        category VARCHAR(100) NOT NULL DEFAULT 'other',
         description TEXT,
-        expense_date DATE NOT NULL DEFAULT CURRENT_DATE,
+        purchase_date DATE NOT NULL DEFAULT CURRENT_DATE,
         paid_to VARCHAR(100),
+        payment_mode VARCHAR(50) DEFAULT 'cash',
         receipt_number VARCHAR(50),
         created_at TIMESTAMP DEFAULT NOW()
       );
     `);
-    console.log('✅ expenses table ready');
+    console.log('✅ purchases table ready');
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS daily_menu (
+        id SERIAL PRIMARY KEY,
+        day_of_week VARCHAR(10) NOT NULL,
+        meal_type VARCHAR(20) NOT NULL,
+        items TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(day_of_week, meal_type)
+      );
+    `);
+    console.log('✅ daily_menu table ready');
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS announcements (
+        id SERIAL PRIMARY KEY,
+        title VARCHAR(200) NOT NULL,
+        message TEXT NOT NULL,
+        priority VARCHAR(20) DEFAULT 'normal',
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    console.log('✅ announcements table ready');
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS inbox_messages (
+        id SERIAL PRIMARY KEY,
+        guest_name VARCHAR(100) NOT NULL,
+        guest_phone VARCHAR(15),
+        room_number VARCHAR(20),
+        subject VARCHAR(200),
+        message TEXT NOT NULL,
+        is_read BOOLEAN DEFAULT FALSE,
+        reply TEXT,
+        replied_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    console.log('✅ inbox_messages table ready');
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS activity_log (

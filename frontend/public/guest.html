@@ -1,183 +1,275 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Siri Mane – Guest Portal</title>
-  <link rel="stylesheet" href="/css/style.css"/>
   <style>
-    body { background: linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%); min-height: 100vh; }
-    .guest-wrap { max-width: 480px; margin: 0 auto; padding: 24px 16px; }
-    .guest-header {
-      text-align: center;
-      padding: 32px 24px;
-      background: white;
-      border-radius: 20px;
-      margin-bottom: 20px;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-    }
-    .guest-header h1 { font-size: 28px; font-weight: 800; color: #1E3A5F; }
-    .guest-header p { color: #6B7280; font-size: 14px; margin-top: 4px; }
-    .search-card {
-      background: white;
-      border-radius: 16px;
-      padding: 24px;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-      margin-bottom: 20px;
-    }
-    .info-card {
-      background: white;
-      border-radius: 16px;
-      padding: 24px;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-    }
-    .info-row {
-      display: flex;
-      justify-content: space-between;
-      padding: 12px 0;
-      border-bottom: 1px solid #F3F4F6;
-      font-size: 14px;
-    }
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', sans-serif; background: #FEF3C7; min-height: 100vh; }
+    .wrap { max-width: 480px; margin: 0 auto; padding: 20px 16px 40px; }
+    .header { text-align: center; background: white; border-radius: 16px; padding: 28px 20px; margin-bottom: 16px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
+    .header svg { margin-bottom: 12px; }
+    .header h1 { font-size: 24px; font-weight: 700; color: #1E293B; }
+    .header p { color: #64748B; font-size: 13px; margin-top: 3px; }
+    .card { background: white; border-radius: 14px; margin-bottom: 16px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); overflow: hidden; }
+    .card-h { padding: 14px 18px; border-bottom: 1px solid #E2E8F0; font-size: 14px; font-weight: 600; color: #1E293B; }
+    .card-b { padding: 18px; }
+    label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px; color: #475569; }
+    input, textarea { width: 100%; padding: 10px 12px; border: 1px solid #E2E8F0; border-radius: 8px; font-size: 14px; font-family: inherit; outline: none; }
+    input:focus, textarea:focus { border-color: #F59E0B; box-shadow: 0 0 0 3px rgba(245,158,11,0.15); }
+    .btn { display: block; width: 100%; padding: 12px; border-radius: 10px; font-size: 14px; font-weight: 600; text-align: center; cursor: pointer; border: none; font-family: inherit; }
+    .btn-amber { background: #F59E0B; color: white; }
+    .btn-amber:hover { background: #D97706; }
+    .btn-outline { background: white; border: 1px solid #E2E8F0; color: #475569; margin-top: 8px; }
+    .info-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #F1F5F9; font-size: 13px; }
     .info-row:last-child { border-bottom: none; }
-    .info-row .lbl { color: #6B7280; }
-    .info-row .val { font-weight: 600; color: #1F2937; }
-    .pay-item {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 12px 0;
-      border-bottom: 1px solid #F3F4F6;
-      font-size: 14px;
-    }
+    .info-row .lbl { color: #64748B; }
+    .info-row .val { font-weight: 600; }
+    .pay-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #F1F5F9; font-size: 13px; }
     .pay-item:last-child { border-bottom: none; }
+    .badge { display: inline-block; padding: 3px 9px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+    .badge-green { background: #ECFDF5; color: #065F46; }
+    .badge-red { background: #FEF2F2; color: #991B1B; }
+    .badge-amber { background: #FFFBEB; color: #92400E; }
+    .badge-blue { background: #EFF6FF; color: #1E40AF; }
+    .alert { padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-top: 12px; }
+    .alert-danger { background: #FEF2F2; color: #991B1B; border: 1px solid #FECACA; }
+    .alert-success { background: #ECFDF5; color: #065F46; border: 1px solid #A7F3D0; }
+    .hidden { display: none !important; }
+    .spinner { border: 3px solid #E2E8F0; border-top: 3px solid #F59E0B; border-radius: 50%; width: 20px; height: 20px; animation: spin 0.7s linear infinite; display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .tab-bar { display: flex; background: white; border-radius: 14px; padding: 4px; margin-bottom: 16px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
+    .tab { flex: 1; padding: 9px; text-align: center; font-size: 13px; font-weight: 500; color: #64748B; cursor: pointer; border-radius: 10px; border: none; background: none; font-family: inherit; }
+    .tab.active { background: #F59E0B; color: white; font-weight: 600; }
+    .menu-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .menu-table th { background: #F8FAFC; padding: 8px 10px; font-size: 10px; font-weight: 700; color: #64748B; text-transform: uppercase; text-align: left; border-bottom: 1px solid #E2E8F0; }
+    .menu-table td { padding: 8px 10px; border-bottom: 1px solid #F1F5F9; }
+    .menu-table tr:last-child td { border-bottom: none; }
   </style>
 </head>
 <body>
-  <div class="guest-wrap">
-    <div class="guest-header">
-      <div style="font-size:48px;margin-bottom:8px">🏠</div>
-      <h1>Siri Mane</h1>
-      <p>Ladies PG Accommodation · Bengaluru</p>
-      <p style="font-size:11px;color:#9CA3AF;margin-top:8px">ಸಿರಿ ಮನೆ</p>
-    </div>
+<div class="wrap">
+  <div class="header">
+    <svg width="120" height="60" viewBox="0 0 120 60" xmlns="http://www.w3.org/2000/svg">
+      <rect width="120" height="60" rx="8" fill="#F59E0B"/>
+      <text x="60" y="16" font-family="serif" font-size="8" fill="#1E3A5F" text-anchor="middle" font-weight="bold">ಸಿರಿ ಮಾನೆ</text>
+      <text x="60" y="32" font-family="Georgia,serif" font-size="15" fill="#1E3A5F" text-anchor="middle" font-weight="bold" font-style="italic">Siri Mane</text>
+      <text x="60" y="44" font-family="serif" font-size="7" fill="#1E3A5F" text-anchor="middle">Ladies Paying Guest</text>
+      <text x="60" y="55" font-family="serif" font-size="7" fill="#1E3A5F" text-anchor="middle">ಸಿರಿ ಮನೆ</text>
+    </svg>
+    <h1>Siri Mane</h1>
+    <p>Ladies PG Accommodation · Bengaluru</p>
+  </div>
 
-    <div class="search-card">
-      <h2 style="font-size:16px;font-weight:600;margin-bottom:16px">🔍 Check Your Details</h2>
-      <div class="form-group">
+  <!-- Tab bar -->
+  <div class="tab-bar" id="tab-bar" style="display:none">
+    <button class="tab active" onclick="showTab('details')">My Details</button>
+    <button class="tab" onclick="showTab('menu')">Daily Menu</button>
+    <button class="tab" onclick="showTab('notices')">Notices</button>
+    <button class="tab" onclick="showTab('message')">Message Us</button>
+  </div>
+
+  <!-- Search -->
+  <div class="card" id="search-card">
+    <div class="card-h">🔍 Check Your Details</div>
+    <div class="card-b">
+      <div style="margin-bottom:12px">
         <label>Your Phone Number</label>
-        <input type="tel" id="phone-input" placeholder="Enter your mobile number" maxlength="10"/>
+        <input type="tel" id="phone-input" placeholder="Enter 10-digit mobile number" maxlength="10"/>
       </div>
-      <button class="btn btn-primary" style="width:100%;justify-content:center" id="search-btn">
-        Search
-      </button>
-      <div id="search-alert" class="alert alert-danger hidden" style="margin-top:12px"></div>
-    </div>
-
-    <div id="guest-info" class="hidden">
-      <div class="info-card">
-        <div style="text-align:center;margin-bottom:20px">
-          <div style="font-size:40px">👩</div>
-          <h2 id="guest-name" style="font-size:20px;font-weight:700;color:#1E3A5F"></h2>
-          <span id="guest-status" class="badge" style="margin-top:6px"></span>
-        </div>
-
-        <h3 style="font-size:13px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Room Info</h3>
-        <div class="info-row"><span class="lbl">Room</span><span class="val" id="gi-room"></span></div>
-        <div class="info-row"><span class="lbl">Bed No.</span><span class="val" id="gi-bed"></span></div>
-        <div class="info-row"><span class="lbl">Join Date</span><span class="val" id="gi-join"></span></div>
-        <div class="info-row"><span class="lbl">Monthly Rent</span><span class="val" id="gi-rent" style="color:#F59E0B"></span></div>
-
-        <h3 style="font-size:13px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:.5px;margin:16px 0 8px">Payment History</h3>
-        <div id="gi-payments"></div>
-      </div>
-    </div>
-
-    <div style="text-align:center;margin-top:24px">
-      <a href="/" style="font-size:13px;color:#6B7280;text-decoration:none">← Back to Home</a>
+      <button class="btn btn-amber" id="search-btn" onclick="searchGuest()">Search</button>
+      <div id="search-alert" class="hidden"></div>
     </div>
   </div>
 
-  <script src="/js/api.js"></script>
-  <script>
-    document.getElementById('search-btn').addEventListener('click', searchGuest);
-    document.getElementById('phone-input').addEventListener('keypress', e => {
-      if (e.key === 'Enter') searchGuest();
+  <!-- My Details tab -->
+  <div id="tab-details" class="hidden">
+    <div class="card">
+      <div class="card-h" id="guest-name-h"></div>
+      <div class="card-b">
+        <div class="info-row"><span class="lbl">Status</span><span class="val" id="gi-status"></span></div>
+        <div class="info-row"><span class="lbl">Room</span><span class="val" id="gi-room"></span></div>
+        <div class="info-row"><span class="lbl">Bed No.</span><span class="val" id="gi-bed"></span></div>
+        <div class="info-row"><span class="lbl">Check-in</span><span class="val" id="gi-join"></span></div>
+        <div class="info-row"><span class="lbl">Monthly Rent</span><span class="val text-amber" id="gi-rent"></span></div>
+        <div class="info-row"><span class="lbl">Deposit</span><span class="val" id="gi-dep"></span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-h">💰 Payment History</div>
+      <div class="card-b" id="gi-payments"></div>
+    </div>
+    <button class="btn btn-outline" onclick="resetSearch()">← Search Again</button>
+  </div>
+
+  <!-- Menu tab -->
+  <div id="tab-menu" class="hidden">
+    <div class="card">
+      <div class="card-h">🍽️ Weekly Menu</div>
+      <div style="overflow-x:auto">
+        <table class="menu-table" id="menu-table">
+          <thead><tr><th>Day</th><th>Breakfast</th><th>Lunch</th><th>Dinner</th></tr></thead>
+          <tbody id="menu-tb"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notices tab -->
+  <div id="tab-notices" class="hidden">
+    <div id="notices-container"></div>
+  </div>
+
+  <!-- Message tab -->
+  <div id="tab-message" class="hidden">
+    <div class="card">
+      <div class="card-h">💬 Send a Message</div>
+      <div class="card-b">
+        <div id="msg-alert" class="hidden"></div>
+        <div style="margin-bottom:10px">
+          <label>Your Name *</label>
+          <input id="msg-name" placeholder="Your full name"/>
+        </div>
+        <div style="margin-bottom:10px">
+          <label>Subject</label>
+          <input id="msg-subject" placeholder="e.g. Water issue, Maintenance request"/>
+        </div>
+        <div style="margin-bottom:12px">
+          <label>Message *</label>
+          <textarea id="msg-body" rows="4" placeholder="Write your message here..."></textarea>
+        </div>
+        <button class="btn btn-amber" id="msg-btn" onclick="sendMsg()">Send Message</button>
+      </div>
+    </div>
+  </div>
+
+  <div style="text-align:center;margin-top:20px">
+    <a href="/" style="font-size:12px;color:#64748B;text-decoration:none">← Back to Home</a>
+  </div>
+</div>
+
+<script>
+let guestData = null;
+
+async function searchGuest() {
+  const phone = document.getElementById('phone-input').value.trim();
+  const al = document.getElementById('search-alert');
+  if(phone.length < 10) { showAl(al,'Enter a valid 10-digit phone number','danger'); return; }
+  al.className = 'hidden';
+  const btn = document.getElementById('search-btn');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+  try {
+    const res = await fetch('/api/guest-lookup?phone=' + phone);
+    const data = await res.json();
+    if(!res.ok) { showAl(al, 'No account found. Please contact management.', 'danger'); return; }
+    guestData = data;
+    renderGuest(data);
+    document.getElementById('search-card').classList.add('hidden');
+    document.getElementById('tab-bar').style.display = 'flex';
+    showTab('details');
+  } catch(e) { showAl(al,'Something went wrong. Try again.','danger'); }
+  finally { btn.disabled=false; btn.innerHTML='Search'; }
+}
+
+function renderGuest(g) {
+  document.getElementById('guest-name-h').textContent = '👤 ' + g.name;
+  document.getElementById('gi-status').innerHTML = g.is_active ? '<span class="badge badge-green">Active Resident</span>' : '<span class="badge badge-red">Checked Out</span>';
+  document.getElementById('gi-room').textContent = g.room_number ? 'Room ' + g.room_number : '—';
+  document.getElementById('gi-bed').textContent = g.bed_number || '—';
+  document.getElementById('gi-join').textContent = fmtDate(g.join_date);
+  document.getElementById('gi-rent').textContent = fmt(g.monthly_rent) + '/month';
+  document.getElementById('gi-dep').textContent = fmt(g.deposit_amount);
+  document.getElementById('msg-name').value = g.name;
+  if(g.room_number) document.getElementById('msg-subject').placeholder = 'Room ' + g.room_number + ' — write subject...';
+
+  const pays = g.payments || [];
+  const pc = document.getElementById('gi-payments');
+  if(!pays.length) { pc.innerHTML = '<p style="color:#64748B;font-size:13px;text-align:center;padding:16px">No payment records</p>'; return; }
+  pc.innerHTML = pays.map(p => `
+    <div class="pay-item">
+      <div>
+        <div style="font-weight:600;text-transform:capitalize">${p.collection_type}</div>
+        <div style="color:#64748B;font-size:11px">${fmtDate(p.collection_date)} · ${p.payment_mode}</div>
+      </div>
+      <span style="color:#10B981;font-weight:700">${fmt(p.amount)}</span>
+    </div>`).join('');
+
+  // Menu
+  const menu = g.menu || [];
+  const days = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+  const meals = ['Breakfast','Lunch','Dinner'];
+  const byDay = {};
+  menu.forEach(m => { if(!byDay[m.day_of_week]) byDay[m.day_of_week]={}; byDay[m.day_of_week][m.meal_type]=m.items; });
+  document.getElementById('menu-tb').innerHTML = days.map(d => `
+    <tr><td><strong>${d.substr(0,3)}</strong></td>
+    ${meals.map(ml => `<td>${byDay[d]&&byDay[d][ml]?byDay[d][ml]:'—'}</td>`).join('')}
+    </tr>`).join('');
+
+  // Notices
+  const notices = g.announcements || [];
+  document.getElementById('notices-container').innerHTML = notices.length===0
+    ? '<div class="card"><div class="card-b" style="text-align:center;color:#64748B">No notices at the moment</div></div>'
+    : notices.map(a => `
+      <div class="card" style="margin-bottom:12px">
+        <div style="padding:12px 16px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #E2E8F0">
+          <span class="badge ${a.priority==='urgent'?'badge-red':a.priority==='important'?'badge-amber':'badge-blue'}">${a.priority}</span>
+          <span style="font-size:11px;color:#64748B">${fmtDate(a.created_at)}</span>
+        </div>
+        <div style="padding:14px 16px">
+          <strong style="font-size:14px">${a.title}</strong>
+          <p style="margin-top:6px;font-size:13px;color:#475569">${a.message}</p>
+        </div>
+      </div>`).join('');
+}
+
+async function sendMsg() {
+  const al = document.getElementById('msg-alert');
+  const name = document.getElementById('msg-name').value.trim();
+  const body = document.getElementById('msg-body').value.trim();
+  if(!name||!body) { showAl(al,'Name and message are required','danger'); return; }
+  const btn = document.getElementById('msg-btn');
+  btn.disabled = true; btn.textContent = 'Sending...';
+  try {
+    await fetch('/api/guest-message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ guest_name:name, guest_phone:guestData?.phone||'', room_number:guestData?.room_number||'', subject:document.getElementById('msg-subject').value, message:body })
     });
+    document.getElementById('msg-body').value = '';
+    showAl(al,'Message sent to management!','success');
+  } catch { showAl(al,'Failed to send. Try again.','danger'); }
+  finally { btn.disabled=false; btn.textContent='Send Message'; }
+}
 
-    async function searchGuest() {
-      const phone = document.getElementById('phone-input').value.trim();
-      const alert = document.getElementById('search-alert');
-      if (!phone || phone.length < 10) {
-        alert.textContent = 'Please enter a valid 10-digit phone number';
-        alert.classList.remove('hidden');
-        return;
-      }
-      alert.classList.add('hidden');
+function showTab(tab) {
+  ['details','menu','notices','message'].forEach(t => {
+    document.getElementById('tab-'+t).classList.add('hidden');
+  });
+  document.getElementById('tab-'+tab).classList.remove('hidden');
+  document.querySelectorAll('.tab').forEach((b,i) => {
+    b.classList.toggle('active', ['details','menu','notices','message'][i]===tab);
+  });
+}
 
-      const btn = document.getElementById('search-btn');
-      btn.disabled = true;
-      btn.innerHTML = '<span class="spinner"></span>';
+function resetSearch() {
+  guestData = null;
+  document.getElementById('search-card').classList.remove('hidden');
+  document.getElementById('tab-bar').style.display = 'none';
+  ['details','menu','notices','message'].forEach(t => document.getElementById('tab-'+t).classList.add('hidden'));
+  document.getElementById('phone-input').value = '';
+}
 
-      try {
-        const guests = await apiFetch(`/guests?search=${phone}&active=all`);
-        const guest = guests?.[0];
+function showAl(el, msg, type) {
+  el.className = `alert alert-${type}`;
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  if(type==='success') setTimeout(()=>el.classList.add('hidden'),3000);
+}
 
-        if (!guest) {
-          alert.textContent = 'No guest found with this phone number. Please contact management.';
-          alert.classList.remove('hidden');
-          document.getElementById('guest-info').classList.add('hidden');
-          return;
-        }
-
-        const full = await apiFetch(`/guests/${guest.id}`);
-        renderGuest(full);
-      } catch (err) {
-        alert.textContent = 'Something went wrong. Please try again.';
-        alert.classList.remove('hidden');
-      } finally {
-        btn.disabled = false;
-        btn.innerHTML = 'Search';
-      }
-    }
-
-    function renderGuest(g) {
-      document.getElementById('guest-name').textContent = g.name;
-      const statusEl = document.getElementById('guest-status');
-      statusEl.textContent = g.is_active ? 'Active Resident' : 'Checked Out';
-      statusEl.className = 'badge ' + (g.is_active ? 'badge-green' : 'badge-red');
-      document.getElementById('gi-room').textContent = g.room_number ? 'Room ' + g.room_number : '—';
-      document.getElementById('gi-bed').textContent = g.bed_number || '—';
-      document.getElementById('gi-join').textContent = formatDate(g.join_date);
-      document.getElementById('gi-rent').textContent = formatCurrency(g.monthly_rent) + '/month';
-
-      const pays = g.payments || [];
-      const container = document.getElementById('gi-payments');
-      if (pays.length === 0) {
-        container.innerHTML = '<p style="color:#9CA3AF;font-size:14px;text-align:center;padding:16px">No payment records found</p>';
-      } else {
-        container.innerHTML = pays.slice(0, 6).map(p => `
-          <div class="pay-item">
-            <div>
-              <div style="font-weight:600">${p.payment_type.charAt(0).toUpperCase()+p.payment_type.slice(1)}</div>
-              <div style="color:#6B7280;font-size:12px">${formatDate(p.payment_date)} · ${p.payment_mode}</div>
-            </div>
-            <span style="color:#10B981;font-weight:700">${formatCurrency(p.amount)}</span>
-          </div>`).join('');
-      }
-
-      document.getElementById('guest-info').classList.remove('hidden');
-    }
-
-    function formatCurrency(n) {
-      return '₹' + parseFloat(n||0).toLocaleString('en-IN');
-    }
-    function formatDate(d) {
-      if (!d) return '—';
-      return new Date(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' });
-    }
-    function apiFetch(endpoint) {
-      return fetch('/api' + endpoint).then(r => r.json());
-    }
-  </script>
+function fmt(n) { return '₹' + parseFloat(n||0).toLocaleString('en-IN'); }
+function fmtDate(d) { if(!d) return '—'; return new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}); }
+</script>
 </body>
 </html>
