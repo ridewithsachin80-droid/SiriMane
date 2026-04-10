@@ -5,40 +5,143 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Siri Mane PG</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Inter', sans-serif; background: linear-gradient(135deg, #F59E0B 0%, #D97706 40%, #1E3A5F 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
-    .card { background: white; border-radius: 20px; padding: 40px 36px; width: 100%; max-width: 400px; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,0.2); }
-    .logo-wrap { margin-bottom: 24px; }
-    h1 { font-size: 28px; font-weight: 700; color: #1E293B; margin-bottom: 4px; }
-    .sub { color: #64748B; font-size: 14px; margin-bottom: 32px; }
-    .btn { display: block; width: 100%; padding: 15px; border-radius: 12px; font-size: 15px; font-weight: 600; text-decoration: none; text-align: center; margin-bottom: 14px; cursor: pointer; border: none; font-family: inherit; transition: all 0.2s; }
-    .btn-guest { background: #F59E0B; color: white; box-shadow: 0 4px 14px rgba(245,158,11,0.4); }
-    .btn-guest:hover { background: #D97706; }
-    .btn-mgmt { background: #1E3A5F; color: white; box-shadow: 0 4px 14px rgba(30,58,95,0.3); }
-    .btn-mgmt:hover { background: #152D4A; }
-    .divider { display: flex; align-items: center; gap: 10px; color: #9CA3AF; font-size: 12px; margin: 4px 0; }
-    .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: #E2E8F0; }
-    footer { margin-top: 24px; font-size: 11px; color: #9CA3AF; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: linear-gradient(135deg, #F59E0B 0%, #D97706 40%, #1E3A5F 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .card {
+      background: white;
+      border-radius: 24px;
+      padding: 40px 36px;
+      width: 100%;
+      max-width: 420px;
+      text-align: center;
+      box-shadow: 0 24px 80px rgba(0,0,0,0.25);
+    }
+    .logo-wrap { margin-bottom: 20px; }
+    h1 { font-size: 30px; font-weight: 800; color: #1E293B; margin-bottom: 4px; }
+    .tagline { color: #64748B; font-size: 14px; margin-bottom: 8px; }
+    .kannada { color: #94A3B8; font-size: 13px; margin-bottom: 32px; }
+
+    .section-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: #94A3B8;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 14px;
+    }
+
+    .btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      width: 100%;
+      padding: 18px 24px;
+      border-radius: 14px;
+      font-size: 16px;
+      font-weight: 700;
+      text-decoration: none;
+      margin-bottom: 14px;
+      cursor: pointer;
+      border: none;
+      font-family: inherit;
+      transition: all 0.2s;
+    }
+
+    .btn-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+
+    .btn-guest {
+      background: linear-gradient(135deg, #F59E0B, #D97706);
+      color: white;
+      box-shadow: 0 6px 20px rgba(245,158,11,0.4);
+    }
+    .btn-guest:hover { transform: translateY(-2px); box-shadow: 0 10px 28px rgba(245,158,11,0.5); }
+    .btn-guest .btn-icon { background: rgba(255,255,255,0.25); }
+
+    .btn-mgmt {
+      background: linear-gradient(135deg, #1E3A5F, #152D4A);
+      color: white;
+      box-shadow: 0 6px 20px rgba(30,58,95,0.4);
+    }
+    .btn-mgmt:hover { transform: translateY(-2px); box-shadow: 0 10px 28px rgba(30,58,95,0.5); }
+    .btn-mgmt .btn-icon { background: rgba(255,255,255,0.15); }
+
+    .btn-text { text-align: left; }
+    .btn-text .title { font-size: 16px; font-weight: 700; }
+    .btn-text .sub { font-size: 12px; font-weight: 400; opacity: 0.8; margin-top: 2px; }
+
+    .divider {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: #CBD5E1;
+      font-size: 12px;
+      margin: 4px 0 14px;
+    }
+    .divider::before, .divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: #E2E8F0;
+    }
+
+    footer { margin-top: 24px; font-size: 11px; color: #94A3B8; }
   </style>
 </head>
 <body>
   <div class="card">
     <div class="logo-wrap">
-      <svg width="160" height="80" viewBox="0 0 160 80" xmlns="http://www.w3.org/2000/svg">
-        <rect width="160" height="80" rx="10" fill="#F59E0B"/>
-        <text x="80" y="20" font-family="serif" font-size="10" fill="#1E3A5F" text-anchor="middle" font-weight="bold">ಸಿರಿ ಮಾನೆ</text>
-        <text x="80" y="42" font-family="Georgia, serif" font-size="20" fill="#1E3A5F" text-anchor="middle" font-weight="bold" font-style="italic">Siri Mane</text>
-        <text x="80" y="58" font-family="serif" font-size="9" fill="#1E3A5F" text-anchor="middle">Ladies Paying Guest</text>
-        <text x="80" y="72" font-family="serif" font-size="8" fill="#1E3A5F" text-anchor="middle">ಸಿರಿ ಮನೆ</text>
+      <svg width="140" height="70" viewBox="0 0 140 70" xmlns="http://www.w3.org/2000/svg">
+        <rect width="140" height="70" rx="12" fill="#F59E0B"/>
+        <text x="70" y="18" font-family="serif" font-size="9" fill="#1E3A5F" text-anchor="middle" font-weight="bold">ಸಿರಿ ಮಾನೆ</text>
+        <text x="70" y="38" font-family="Georgia,serif" font-size="18" fill="#1E3A5F" text-anchor="middle" font-weight="bold" font-style="italic">Siri Mane</text>
+        <text x="70" y="52" font-family="serif" font-size="8" fill="#1E3A5F" text-anchor="middle">Ladies Paying Guest</text>
+        <text x="70" y="64" font-family="serif" font-size="7" fill="#1E3A5F" text-anchor="middle">ಸಿರಿ ಮನೆ</text>
       </svg>
     </div>
+
     <h1>Siri Mane</h1>
-    <p class="sub">Ladies PG Accommodation · Bengaluru</p>
-    <a href="/guest.html" class="btn btn-guest">🏠 I'm a Guest</a>
+    <p class="tagline">Ladies PG Accommodation · Bengaluru</p>
+    <p class="kannada">ಸಿರಿ ಮನೆ · ಬೆಂಗಳೂರು</p>
+
+    <p class="section-title">Please choose how to continue</p>
+
+    <a href="/guest.html" class="btn btn-guest">
+      <div class="btn-icon">🏠</div>
+      <div class="btn-text">
+        <div class="title">I'm a Guest</div>
+        <div class="sub">View your room, payments & menu</div>
+      </div>
+    </a>
+
     <div class="divider">or</div>
-    <a href="/index.html" class="btn btn-mgmt">🔐 Management Login</a>
-    <footer>ಸಿರಿ ಮನೆ · sirimane.in</footer>
+
+    <a href="/index.html" class="btn btn-mgmt">
+      <div class="btn-icon">🔐</div>
+      <div class="btn-text">
+        <div class="title">Management Login</div>
+        <div class="sub">Admin dashboard & controls</div>
+      </div>
+    </a>
+
+    <footer>sirimane.in · Bengaluru, Karnataka</footer>
   </div>
 </body>
 </html>
