@@ -1,17 +1,28 @@
 {
-  "name": "Siri Mane – Ladies PG",
+  "name": "Siri Mane – Ladies PG Tumakuru",
   "short_name": "Siri Mane",
-  "description": "Siri Mane Ladies Paying Guest – Tumakuru",
+  "description": "Premium ladies-only paying guest accommodation in Tumakuru, Karnataka. Furnished rooms, home-cooked meals, WiFi & security.",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#FEF3C7",
-  "theme_color": "#F59E0B",
+  "orientation": "portrait",
+  "background_color": "#0A0A0A",
+  "theme_color": "#C9A96E",
+  "lang": "en-IN",
+  "categories": ["lifestyle", "travel"],
   "icons": [
     {
       "src": "/images/logo.png",
       "sizes": "any",
       "type": "image/png",
       "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Resident Login",
+      "url": "/guest.html",
+      "description": "Access your room details and payments"
     }
   ]
 }

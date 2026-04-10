@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /guest.html
+Disallow: /management.html
+
+Sitemap: https://sirimane.in/sitemap.xml
