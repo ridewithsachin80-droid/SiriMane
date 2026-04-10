@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Siri Mane PG</title>
+  <link rel="stylesheet" href="/css/style.css"/>
+  <style>
+    body {
+      background: linear-gradient(135deg, #F59E0B 0%, #D97706 40%, #1E3A5F 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .home-card {
+      background: white;
+      border-radius: 24px;
+      padding: 48px 40px;
+      width: 100%;
+      max-width: 420px;
+      text-align: center;
+      box-shadow: 0 24px 80px rgba(0,0,0,0.25);
+    }
+    .logo-box {
+      width: 100px;
+      height: 100px;
+      background: linear-gradient(135deg, #FEF3C7, #FDE68A);
+      border-radius: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 20px;
+      font-size: 48px;
+      box-shadow: 0 4px 16px rgba(245,158,11,0.3);
+    }
+    h1 { font-size: 32px; font-weight: 800; color: #1E3A5F; margin-bottom: 4px; }
+    .tagline { color: #6B7280; font-size: 15px; margin-bottom: 36px; }
+    .btn-home {
+      display: block;
+      width: 100%;
+      padding: 16px;
+      border-radius: 14px;
+      font-size: 16px;
+      font-weight: 600;
+      text-decoration: none;
+      text-align: center;
+      margin-bottom: 14px;
+      transition: all 0.2s;
+      cursor: pointer;
+      border: none;
+      font-family: 'Poppins', sans-serif;
+    }
+    .btn-home.guest {
+      background: #F59E0B;
+      color: white;
+      box-shadow: 0 4px 16px rgba(245,158,11,0.4);
+    }
+    .btn-home.guest:hover { background: #D97706; transform: translateY(-1px); }
+    .btn-home.mgmt {
+      background: #1E3A5F;
+      color: white;
+      box-shadow: 0 4px 16px rgba(30,58,95,0.3);
+    }
+    .btn-home.mgmt:hover { background: #152D4A; transform: translateY(-1px); }
+    .divider {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: #9CA3AF;
+      font-size: 13px;
+      margin: 4px 0;
+    }
+    .divider::before, .divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: #E5E7EB;
+    }
+    footer { margin-top: 28px; font-size: 12px; color: #9CA3AF; }
+  </style>
+</head>
+<body>
+  <div class="home-card">
+    <div class="logo-box">🏠</div>
+    <h1>Siri Mane</h1>
+    <p class="tagline">Ladies PG Accommodation · Bengaluru</p>
+
+    <a href="/guest.html" class="btn-home guest">🏠 I'm a Guest</a>
+    <div class="divider">or</div>
+    <a href="/index.html" class="btn-home mgmt">🔐 Management Login</a>
+
+    <footer>ಸಿರಿ ಮನೆ · sirimane.in</footer>
+  </div>
+</body>
+</html>

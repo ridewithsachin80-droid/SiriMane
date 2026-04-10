@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Siri Mane PG Management</title>
+  <link rel="stylesheet" href="/css/style.css" />
+  <link rel="icon" href="/favicon.ico" />
+</head>
+<body>
+
+<!-- ── LOGIN PAGE ─────────────────────────────── -->
+<div id="login-page" class="login-page">
+  <div class="login-card">
+    <div class="logo">🏠 Siri Mane</div>
+    <p class="sub">PG Management System · Bengaluru</p>
+
+    <div id="login-alert" class="alert alert-danger hidden"></div>
+
+    <div class="form-group" style="text-align:left">
+      <label>Username</label>
+      <input type="text" id="login-username" placeholder="Enter username" autocomplete="username" />
+    </div>
+    <div class="form-group" style="text-align:left">
+      <label>Password</label>
+      <input type="password" id="login-password" placeholder="Enter password" autocomplete="current-password" />
+    </div>
+    <button class="btn btn-primary" style="width:100%;justify-content:center;padding:12px" id="login-btn">
+      🔐 Login
+    </button>
+    <p style="margin-top:20px;font-size:12px;color:#9CA3AF">ಸಿರಿ ಮನೆ · Ladies PG Accommodation</p>
+  </div>
+</div>
+
+<!-- ── MAIN APP ────────────────────────────────── -->
+<div id="app" class="app hidden">
+
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+      <h2>🏠 Siri Mane</h2>
+      <p>PG Management</p>
+    </div>
+    <nav class="sidebar-nav">
+      <button class="nav-item active" data-page="dashboard">
+        <span class="icon">📊</span> Dashboard
+      </button>
+      <button class="nav-item" data-page="guests">
+        <span class="icon">👩</span> Guests
+      </button>
+      <button class="nav-item" data-page="rooms">
+        <span class="icon">🛏️</span> Rooms
+      </button>
+      <button class="nav-item" data-page="payments">
+        <span class="icon">💰</span> Payments
+      </button>
+      <button class="nav-item" data-page="expenses">
+        <span class="icon">🧾</span> Expenses
+      </button>
+      <button class="nav-item" data-page="reports">
+        <span class="icon">📈</span> Reports
+      </button>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="nav-item" id="logout-btn">
+        <span class="icon">🚪</span> Logout
+      </button>
+    </div>
+  </aside>
+
+  <!-- Main content -->
+  <div class="main">
+    <header class="topbar">
+      <div class="flex items-center gap-3">
+        <button id="menu-toggle" style="background:none;border:none;font-size:20px;cursor:pointer">☰</button>
+        <h1 id="page-title">Dashboard</h1>
+      </div>
+      <div class="flex items-center gap-2">
+        <span id="topbar-user" style="font-size:13px;color:#6B7280"></span>
+        <div id="topbar-actions"></div>
+      </div>
+    </header>
+
+    <div class="content" id="page-content">
+      <div style="text-align:center;padding:60px">
+        <div class="spinner"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── MODAL CONTAINER ─────────────────────────── -->
+<div id="modal-container"></div>
+
+<!-- ── SCRIPTS ─────────────────────────────────── -->
+<script src="/js/api.js"></script>
+<script src="/js/app.js"></script>
+</body>
+</html>

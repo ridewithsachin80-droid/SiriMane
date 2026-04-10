@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Siri Mane – Guest Portal</title>
+  <link rel="stylesheet" href="/css/style.css"/>
+  <style>
+    body { background: linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%); min-height: 100vh; }
+    .guest-wrap { max-width: 480px; margin: 0 auto; padding: 24px 16px; }
+    .guest-header {
+      text-align: center;
+      padding: 32px 24px;
+      background: white;
+      border-radius: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+    }
+    .guest-header h1 { font-size: 28px; font-weight: 800; color: #1E3A5F; }
+    .guest-header p { color: #6B7280; font-size: 14px; margin-top: 4px; }
+    .search-card {
+      background: white;
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+      margin-bottom: 20px;
+    }
+    .info-card {
+      background: white;
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+    }
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 12px 0;
+      border-bottom: 1px solid #F3F4F6;
+      font-size: 14px;
+    }
+    .info-row:last-child { border-bottom: none; }
+    .info-row .lbl { color: #6B7280; }
+    .info-row .val { font-weight: 600; color: #1F2937; }
+    .pay-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 0;
+      border-bottom: 1px solid #F3F4F6;
+      font-size: 14px;
+    }
+    .pay-item:last-child { border-bottom: none; }
+  </style>
+</head>
+<body>
+  <div class="guest-wrap">
+    <div class="guest-header">
+      <div style="font-size:48px;margin-bottom:8px">🏠</div>
+      <h1>Siri Mane</h1>
+      <p>Ladies PG Accommodation · Bengaluru</p>
+      <p style="font-size:11px;color:#9CA3AF;margin-top:8px">ಸಿರಿ ಮನೆ</p>
+    </div>
+
+    <div class="search-card">
+      <h2 style="font-size:16px;font-weight:600;margin-bottom:16px">🔍 Check Your Details</h2>
+      <div class="form-group">
+        <label>Your Phone Number</label>
+        <input type="tel" id="phone-input" placeholder="Enter your mobile number" maxlength="10"/>
+      </div>
+      <button class="btn btn-primary" style="width:100%;justify-content:center" id="search-btn">
+        Search
+      </button>
+      <div id="search-alert" class="alert alert-danger hidden" style="margin-top:12px"></div>
+    </div>
+
+    <div id="guest-info" class="hidden">
+      <div class="info-card">
+        <div style="text-align:center;margin-bottom:20px">
+          <div style="font-size:40px">👩</div>
+          <h2 id="guest-name" style="font-size:20px;font-weight:700;color:#1E3A5F"></h2>
+          <span id="guest-status" class="badge" style="margin-top:6px"></span>
+        </div>
+
+        <h3 style="font-size:13px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Room Info</h3>
+        <div class="info-row"><span class="lbl">Room</span><span class="val" id="gi-room"></span></div>
+        <div class="info-row"><span class="lbl">Bed No.</span><span class="val" id="gi-bed"></span></div>
+        <div class="info-row"><span class="lbl">Join Date</span><span class="val" id="gi-join"></span></div>
+        <div class="info-row"><span class="lbl">Monthly Rent</span><span class="val" id="gi-rent" style="color:#F59E0B"></span></div>
+
+        <h3 style="font-size:13px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:.5px;margin:16px 0 8px">Payment History</h3>
+        <div id="gi-payments"></div>
+      </div>
+    </div>
+
+    <div style="text-align:center;margin-top:24px">
+      <a href="/" style="font-size:13px;color:#6B7280;text-decoration:none">← Back to Home</a>
+    </div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script>
+    document.getElementById('search-btn').addEventListener('click', searchGuest);
+    document.getElementById('phone-input').addEventListener('keypress', e => {
+      if (e.key === 'Enter') searchGuest();
+    });
+
+    async function searchGuest() {
+      const phone = document.getElementById('phone-input').value.trim();
+      const alert = document.getElementById('search-alert');
+      if (!phone || phone.length < 10) {
+        alert.textContent = 'Please enter a valid 10-digit phone number';
+        alert.classList.remove('hidden');
+        return;
+      }
+      alert.classList.add('hidden');
+
+      const btn = document.getElementById('search-btn');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span>';
+
+      try {
+        const guests = await apiFetch(`/guests?search=${phone}&active=all`);
+        const guest = guests?.[0];
+
+        if (!guest) {
+          alert.textContent = 'No guest found with this phone number. Please contact management.';
+          alert.classList.remove('hidden');
+          document.getElementById('guest-info').classList.add('hidden');
+          return;
+        }
+
+        const full = await apiFetch(`/guests/${guest.id}`);
+        renderGuest(full);
+      } catch (err) {
+        alert.textContent = 'Something went wrong. Please try again.';
+        alert.classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = 'Search';
+      }
+    }
+
+    function renderGuest(g) {
+      document.getElementById('guest-name').textContent = g.name;
+      const statusEl = document.getElementById('guest-status');
+      statusEl.textContent = g.is_active ? 'Active Resident' : 'Checked Out';
+      statusEl.className = 'badge ' + (g.is_active ? 'badge-green' : 'badge-red');
+      document.getElementById('gi-room').textContent = g.room_number ? 'Room ' + g.room_number : '—';
+      document.getElementById('gi-bed').textContent = g.bed_number || '—';
+      document.getElementById('gi-join').textContent = formatDate(g.join_date);
+      document.getElementById('gi-rent').textContent = formatCurrency(g.monthly_rent) + '/month';
+
+      const pays = g.payments || [];
+      const container = document.getElementById('gi-payments');
+      if (pays.length === 0) {
+        container.innerHTML = '<p style="color:#9CA3AF;font-size:14px;text-align:center;padding:16px">No payment records found</p>';
+      } else {
+        container.innerHTML = pays.slice(0, 6).map(p => `
+          <div class="pay-item">
+            <div>
+              <div style="font-weight:600">${p.payment_type.charAt(0).toUpperCase()+p.payment_type.slice(1)}</div>
+              <div style="color:#6B7280;font-size:12px">${formatDate(p.payment_date)} · ${p.payment_mode}</div>
+            </div>
+            <span style="color:#10B981;font-weight:700">${formatCurrency(p.amount)}</span>
+          </div>`).join('');
+      }
+
+      document.getElementById('guest-info').classList.remove('hidden');
+    }
+
+    function formatCurrency(n) {
+      return '₹' + parseFloat(n||0).toLocaleString('en-IN');
+    }
+    function formatDate(d) {
+      if (!d) return '—';
+      return new Date(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' });
+    }
+    function apiFetch(endpoint) {
+      return fetch('/api' + endpoint).then(r => r.json());
+    }
+  </script>
+</body>
+</html>

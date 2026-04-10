@@ -1,0 +1,16 @@
+{
+  "name": "siri-mane",
+  "version": "1.0.0",
+  "description": "Siri Mane PG Management System",
+  "scripts": {
+    "start": "node backend/server.js",
+    "dev": "cd backend && npm run dev",
+    "install:backend": "cd backend && npm install",
+    "migrate": "cd backend && node scripts/migrate.js",
+    "seed": "cd backend && node scripts/seed.js",
+    "setup": "npm run install:backend && npm run migrate && npm run seed"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
