@@ -6,9 +6,24 @@ const rateLimit = require('express-rate-limit');
 const path = require('path');
 
 const app = express();
+
+// Required for Railway/proxies
+app.set('trust proxy', 1);
+
 app.use(helmet({ contentSecurityPolicy: false }));
-app.use(cors({ origin: process.env.FRONTEND_URL || '*', methods: ['GET','POST','PUT','DELETE'], allowedHeaders: ['Content-Type','Authorization'] }));
-app.use(rateLimit({ windowMs: 15*60*1000, max: 200 }));
+app.use(cors({
+  origin: process.env.FRONTEND_URL || '*',
+  methods: ['GET','POST','PUT','DELETE'],
+  allowedHeaders: ['Content-Type','Authorization']
+}));
+
+app.use(rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false
+}));
+
 app.use(express.json({ limit: '10kb' }));
 
 app.use('/api', require('./routes/index'));
@@ -19,11 +34,11 @@ app.use(express.static(path.join(__dirname, '../frontend/public')));
 // Root
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, '../frontend/public/home.html')));
 
-// Guest portal - old Firebase URL + new short URLs
+// Guest portal
 app.get('/siri-mane-guest-portal', (req, res) => res.sendFile(path.join(__dirname, '../frontend/public/guest.html')));
 app.get('/guest', (req, res) => res.sendFile(path.join(__dirname, '../frontend/public/guest.html')));
 
-// Management - old Firebase URL + new short URLs
+// Management
 app.get('/siri-mane-management', (req, res) => res.sendFile(path.join(__dirname, '../frontend/public/index.html')));
 app.get('/management', (req, res) => res.sendFile(path.join(__dirname, '../frontend/public/index.html')));
 
