@@ -9,208 +9,373 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Inter', sans-serif; background: #FEF3C7; min-height: 100vh; }
     .wrap { max-width: 480px; margin: 0 auto; padding: 20px 16px 40px; }
-    .header { text-align: center; background: white; border-radius: 16px; padding: 28px 20px; margin-bottom: 16px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
-    .header svg { margin-bottom: 12px; }
-    .header h1 { font-size: 24px; font-weight: 700; color: #1E293B; }
+
+    /* Header */
+    .header { text-align: center; background: white; border-radius: 16px; padding: 24px 20px; margin-bottom: 16px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
+    .header h1 { font-size: 22px; font-weight: 700; color: #1E293B; margin-top: 10px; }
     .header p { color: #64748B; font-size: 13px; margin-top: 3px; }
+
+    /* Cards */
     .card { background: white; border-radius: 14px; margin-bottom: 16px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); overflow: hidden; }
-    .card-h { padding: 14px 18px; border-bottom: 1px solid #E2E8F0; font-size: 14px; font-weight: 600; color: #1E293B; }
+    .card-h { padding: 14px 18px; border-bottom: 1px solid #E2E8F0; font-size: 14px; font-weight: 600; color: #1E293B; display: flex; justify-content: space-between; align-items: center; }
     .card-b { padding: 18px; }
+
+    /* Forms */
     label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px; color: #475569; }
-    input, textarea { width: 100%; padding: 10px 12px; border: 1px solid #E2E8F0; border-radius: 8px; font-size: 14px; font-family: inherit; outline: none; }
-    input:focus, textarea:focus { border-color: #F59E0B; box-shadow: 0 0 0 3px rgba(245,158,11,0.15); }
-    .btn { display: block; width: 100%; padding: 12px; border-radius: 10px; font-size: 14px; font-weight: 600; text-align: center; cursor: pointer; border: none; font-family: inherit; }
+    input { width: 100%; padding: 11px 14px; border: 1.5px solid #E2E8F0; border-radius: 10px; font-size: 14px; font-family: inherit; outline: none; transition: border-color 0.2s; }
+    input:focus { border-color: #F59E0B; box-shadow: 0 0 0 3px rgba(245,158,11,0.15); }
+
+    /* Buttons */
+    .btn { display: block; width: 100%; padding: 12px; border-radius: 10px; font-size: 14px; font-weight: 600; text-align: center; cursor: pointer; border: none; font-family: inherit; transition: all 0.2s; }
     .btn-amber { background: #F59E0B; color: white; }
     .btn-amber:hover { background: #D97706; }
-    .btn-outline { background: white; border: 1px solid #E2E8F0; color: #475569; margin-top: 8px; }
+    .btn-outline { background: white; border: 1.5px solid #E2E8F0; color: #475569; margin-top: 8px; font-size: 13px; padding: 9px; }
+    .btn-outline:hover { border-color: #F59E0B; color: #F59E0B; }
+    .btn-sm { padding: 8px 14px; font-size: 12px; width: auto; display: inline-block; border-radius: 8px; }
+    .btn-danger { background: #EF4444; color: white; }
+
+    /* Info rows */
     .info-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #F1F5F9; font-size: 13px; }
     .info-row:last-child { border-bottom: none; }
     .info-row .lbl { color: #64748B; }
     .info-row .val { font-weight: 600; }
+
+    /* Pay items */
     .pay-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #F1F5F9; font-size: 13px; }
     .pay-item:last-child { border-bottom: none; }
+
+    /* Badges */
     .badge { display: inline-block; padding: 3px 9px; border-radius: 20px; font-size: 11px; font-weight: 600; }
     .badge-green { background: #ECFDF5; color: #065F46; }
     .badge-red { background: #FEF2F2; color: #991B1B; }
     .badge-amber { background: #FFFBEB; color: #92400E; }
     .badge-blue { background: #EFF6FF; color: #1E40AF; }
-    .alert { padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-top: 12px; }
+
+    /* Alerts */
+    .alert { padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 14px; }
     .alert-danger { background: #FEF2F2; color: #991B1B; border: 1px solid #FECACA; }
     .alert-success { background: #ECFDF5; color: #065F46; border: 1px solid #A7F3D0; }
-    .hidden { display: none !important; }
-    .spinner { border: 3px solid #E2E8F0; border-top: 3px solid #F59E0B; border-radius: 50%; width: 20px; height: 20px; animation: spin 0.7s linear infinite; display: inline-block; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .tab-bar { display: flex; background: white; border-radius: 14px; padding: 4px; margin-bottom: 16px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
-    .tab { flex: 1; padding: 9px; text-align: center; font-size: 13px; font-weight: 500; color: #64748B; cursor: pointer; border-radius: 10px; border: none; background: none; font-family: inherit; }
+
+    /* Tabs */
+    .tab-bar { display: flex; background: white; border-radius: 14px; padding: 4px; margin-bottom: 16px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); gap: 2px; }
+    .tab { flex: 1; padding: 8px 4px; text-align: center; font-size: 12px; font-weight: 500; color: #64748B; cursor: pointer; border-radius: 10px; border: none; background: none; font-family: inherit; }
     .tab.active { background: #F59E0B; color: white; font-weight: 600; }
+
+    /* Menu table */
     .menu-table { width: 100%; border-collapse: collapse; font-size: 12px; }
     .menu-table th { background: #F8FAFC; padding: 8px 10px; font-size: 10px; font-weight: 700; color: #64748B; text-transform: uppercase; text-align: left; border-bottom: 1px solid #E2E8F0; }
-    .menu-table td { padding: 8px 10px; border-bottom: 1px solid #F1F5F9; }
+    .menu-table td { padding: 8px 10px; border-bottom: 1px solid #F1F5F9; vertical-align: top; }
     .menu-table tr:last-child td { border-bottom: none; }
+
+    /* User info bar */
+    .user-bar { background: white; border-radius: 12px; padding: 12px 16px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    .user-bar .name { font-weight: 600; font-size: 14px; }
+    .user-bar .room { font-size: 12px; color: #64748B; }
+
+    /* Change password form */
+    .pwd-form { margin-top: 12px; padding-top: 12px; border-top: 1px solid #F1F5F9; }
+
+    .hidden { display: none !important; }
+    .spinner { border: 3px solid #E2E8F0; border-top: 3px solid #F59E0B; border-radius: 50%; width: 18px; height: 18px; animation: spin 0.7s linear infinite; display: inline-block; vertical-align: middle; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .form-group { margin-bottom: 12px; }
+    .text-green { color: #10B981; font-weight: 700; }
+    .text-red { color: #EF4444; }
+    textarea { width: 100%; padding: 10px 12px; border: 1.5px solid #E2E8F0; border-radius: 10px; font-size: 13px; font-family: inherit; outline: none; resize: vertical; }
+    textarea:focus { border-color: #F59E0B; }
   </style>
 </head>
 <body>
 <div class="wrap">
+
+  <!-- Header -->
   <div class="header">
-    <svg width="120" height="60" viewBox="0 0 120 60" xmlns="http://www.w3.org/2000/svg">
-      <rect width="120" height="60" rx="8" fill="#F59E0B"/>
-      <text x="60" y="16" font-family="serif" font-size="8" fill="#1E3A5F" text-anchor="middle" font-weight="bold">ಸಿರಿ ಮಾನೆ</text>
-      <text x="60" y="32" font-family="Georgia,serif" font-size="15" fill="#1E3A5F" text-anchor="middle" font-weight="bold" font-style="italic">Siri Mane</text>
-      <text x="60" y="44" font-family="serif" font-size="7" fill="#1E3A5F" text-anchor="middle">Ladies Paying Guest</text>
-      <text x="60" y="55" font-family="serif" font-size="7" fill="#1E3A5F" text-anchor="middle">ಸಿರಿ ಮನೆ</text>
+    <svg width="100" height="50" viewBox="0 0 100 50" xmlns="http://www.w3.org/2000/svg">
+      <rect width="100" height="50" rx="8" fill="#F59E0B"/>
+      <text x="50" y="14" font-family="serif" font-size="7" fill="#1E3A5F" text-anchor="middle" font-weight="bold">ಸಿರಿ ಮಾನೆ</text>
+      <text x="50" y="28" font-family="Georgia,serif" font-size="13" fill="#1E3A5F" text-anchor="middle" font-weight="bold" font-style="italic">Siri Mane</text>
+      <text x="50" y="38" font-family="serif" font-size="7" fill="#1E3A5F" text-anchor="middle">Ladies Paying Guest</text>
+      <text x="50" y="47" font-family="serif" font-size="6" fill="#1E3A5F" text-anchor="middle">ಸಿರಿ ಮನೆ</text>
     </svg>
     <h1>Siri Mane</h1>
     <p>Ladies PG Accommodation · Bengaluru</p>
   </div>
 
-  <!-- Tab bar -->
-  <div class="tab-bar" id="tab-bar" style="display:none">
-    <button class="tab active" onclick="showTab('details')">My Details</button>
-    <button class="tab" onclick="showTab('menu')">Daily Menu</button>
-    <button class="tab" onclick="showTab('notices')">Notices</button>
-    <button class="tab" onclick="showTab('message')">Message Us</button>
-  </div>
-
-  <!-- Search -->
-  <div class="card" id="search-card">
-    <div class="card-h">🔍 Check Your Details</div>
-    <div class="card-b">
-      <div style="margin-bottom:12px">
-        <label>Your Phone Number</label>
-        <input type="tel" id="phone-input" placeholder="Enter 10-digit mobile number" maxlength="10"/>
-      </div>
-      <button class="btn btn-amber" id="search-btn" onclick="searchGuest()">Search</button>
-      <div id="search-alert" class="hidden"></div>
-    </div>
-  </div>
-
-  <!-- My Details tab -->
-  <div id="tab-details" class="hidden">
+  <!-- LOGIN FORM -->
+  <div id="login-section">
     <div class="card">
-      <div class="card-h" id="guest-name-h"></div>
+      <div class="card-h">🔐 Guest Login</div>
       <div class="card-b">
-        <div class="info-row"><span class="lbl">Status</span><span class="val" id="gi-status"></span></div>
-        <div class="info-row"><span class="lbl">Room</span><span class="val" id="gi-room"></span></div>
-        <div class="info-row"><span class="lbl">Bed No.</span><span class="val" id="gi-bed"></span></div>
-        <div class="info-row"><span class="lbl">Check-in</span><span class="val" id="gi-join"></span></div>
-        <div class="info-row"><span class="lbl">Monthly Rent</span><span class="val text-amber" id="gi-rent"></span></div>
-        <div class="info-row"><span class="lbl">Deposit</span><span class="val" id="gi-dep"></span></div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-h">💰 Payment History</div>
-      <div class="card-b" id="gi-payments"></div>
-    </div>
-    <button class="btn btn-outline" onclick="resetSearch()">← Search Again</button>
-  </div>
-
-  <!-- Menu tab -->
-  <div id="tab-menu" class="hidden">
-    <div class="card">
-      <div class="card-h">🍽️ Weekly Menu</div>
-      <div style="overflow-x:auto">
-        <table class="menu-table" id="menu-table">
-          <thead><tr><th>Day</th><th>Breakfast</th><th>Lunch</th><th>Dinner</th></tr></thead>
-          <tbody id="menu-tb"></tbody>
-        </table>
+        <div id="login-alert" class="hidden"></div>
+        <div class="form-group">
+          <label>Mobile Number (User ID)</label>
+          <input type="tel" id="login-mobile" placeholder="Enter your 10-digit mobile number" maxlength="10"/>
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" id="login-password" placeholder="Enter your password"/>
+          <p style="font-size:11px;color:#94A3B8;margin-top:4px">Default password is your mobile number</p>
+        </div>
+        <button class="btn btn-amber" id="login-btn" onclick="guestLogin()">🔐 Login</button>
+        <div style="text-align:center;margin-top:14px">
+          <a href="/" style="font-size:12px;color:#64748B;text-decoration:none">← Back to Home</a>
+        </div>
       </div>
     </div>
   </div>
 
-  <!-- Notices tab -->
-  <div id="tab-notices" class="hidden">
-    <div id="notices-container"></div>
-  </div>
+  <!-- LOGGED IN VIEW -->
+  <div id="portal-section" class="hidden">
 
-  <!-- Message tab -->
-  <div id="tab-message" class="hidden">
-    <div class="card">
-      <div class="card-h">💬 Send a Message</div>
-      <div class="card-b">
-        <div id="msg-alert" class="hidden"></div>
-        <div style="margin-bottom:10px">
-          <label>Your Name *</label>
-          <input id="msg-name" placeholder="Your full name"/>
+    <!-- User bar -->
+    <div class="user-bar">
+      <div>
+        <div class="name" id="p-name"></div>
+        <div class="room" id="p-room"></div>
+      </div>
+      <button class="btn btn-outline btn-sm" onclick="guestLogout()">Logout</button>
+    </div>
+
+    <!-- Tab bar -->
+    <div class="tab-bar">
+      <button class="tab active" onclick="showTab('details')">My Details</button>
+      <button class="tab" onclick="showTab('menu')">Daily Menu</button>
+      <button class="tab" onclick="showTab('notices')">Notices</button>
+      <button class="tab" onclick="showTab('message')">Message Us</button>
+      <button class="tab" onclick="showTab('settings')">Settings</button>
+    </div>
+
+    <!-- MY DETAILS TAB -->
+    <div id="tab-details">
+      <div class="card">
+        <div class="card-h">👤 My Details</div>
+        <div class="card-b">
+          <div class="info-row"><span class="lbl">Status</span><span class="val" id="p-status"></span></div>
+          <div class="info-row"><span class="lbl">Room</span><span class="val" id="p-room-detail"></span></div>
+          <div class="info-row"><span class="lbl">Bed No.</span><span class="val" id="p-bed"></span></div>
+          <div class="info-row"><span class="lbl">Check-in Date</span><span class="val" id="p-join"></span></div>
+          <div class="info-row"><span class="lbl">Monthly Rent</span><span class="val text-green" id="p-rent"></span></div>
+          <div class="info-row"><span class="lbl">Deposit Paid</span><span class="val" id="p-dep"></span></div>
+          <div class="info-row"><span class="lbl">Emergency Contact</span><span class="val" id="p-emg"></span></div>
         </div>
-        <div style="margin-bottom:10px">
-          <label>Subject</label>
-          <input id="msg-subject" placeholder="e.g. Water issue, Maintenance request"/>
+      </div>
+      <div class="card">
+        <div class="card-h">💰 Payment History</div>
+        <div class="card-b" id="p-payments">
+          <p style="text-align:center;color:#94A3B8;font-size:13px">No payment records</p>
         </div>
-        <div style="margin-bottom:12px">
-          <label>Message *</label>
-          <textarea id="msg-body" rows="4" placeholder="Write your message here..."></textarea>
-        </div>
-        <button class="btn btn-amber" id="msg-btn" onclick="sendMsg()">Send Message</button>
       </div>
     </div>
-  </div>
 
-  <div style="text-align:center;margin-top:20px">
-    <a href="/" style="font-size:12px;color:#64748B;text-decoration:none">← Back to Home</a>
-  </div>
-</div>
+    <!-- DAILY MENU TAB -->
+    <div id="tab-menu" class="hidden">
+      <div class="card">
+        <div class="card-h">🍽️ Weekly Menu</div>
+        <div style="overflow-x:auto">
+          <table class="menu-table">
+            <thead><tr><th>Day</th><th>Breakfast</th><th>Lunch</th><th>Dinner</th></tr></thead>
+            <tbody id="p-menu-tb">
+              <tr><td colspan="4" style="text-align:center;padding:20px;color:#94A3B8">No menu added yet</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- NOTICES TAB -->
+    <div id="tab-notices" class="hidden">
+      <div id="p-notices">
+        <div class="card">
+          <div class="card-b" style="text-align:center;color:#94A3B8;padding:32px">📢 No notices at the moment</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MESSAGE US TAB -->
+    <div id="tab-message" class="hidden">
+      <div class="card">
+        <div class="card-h">💬 Send a Message</div>
+        <div class="card-b">
+          <div id="msg-alert" class="hidden"></div>
+          <div class="form-group">
+            <label>Subject</label>
+            <input id="msg-subject" placeholder="e.g. Maintenance request, Water issue"/>
+          </div>
+          <div class="form-group">
+            <label>Message *</label>
+            <textarea id="msg-body" rows="4" placeholder="Write your message here..."></textarea>
+          </div>
+          <button class="btn btn-amber" id="msg-btn" onclick="sendMessage()">📤 Send Message</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SETTINGS TAB -->
+    <div id="tab-settings" class="hidden">
+      <div class="card">
+        <div class="card-h">⚙️ Change Password</div>
+        <div class="card-b">
+          <div id="pwd-alert" class="hidden"></div>
+          <div class="form-group">
+            <label>Current Password</label>
+            <input type="password" id="pwd-current" placeholder="Enter current password"/>
+          </div>
+          <div class="form-group">
+            <label>New Password</label>
+            <input type="password" id="pwd-new" placeholder="Enter new password (min 6 chars)"/>
+          </div>
+          <div class="form-group">
+            <label>Confirm New Password</label>
+            <input type="password" id="pwd-confirm" placeholder="Re-enter new password"/>
+          </div>
+          <button class="btn btn-amber" onclick="changePassword()">🔐 Change Password</button>
+          <p style="font-size:11px;color:#94A3B8;margin-top:10px;text-align:center">After changing, use new password to login next time</p>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- end portal-section -->
+</div><!-- end wrap -->
 
 <script>
 let guestData = null;
+let guestToken = null;
 
-async function searchGuest() {
-  const phone = document.getElementById('phone-input').value.trim();
-  const al = document.getElementById('search-alert');
-  if(phone.length < 10) { showAl(al,'Enter a valid 10-digit phone number','danger'); return; }
-  al.className = 'hidden';
-  const btn = document.getElementById('search-btn');
-  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+// ── INIT ──────────────────────────────────────────
+window.onload = () => {
+  const saved = sessionStorage.getItem('guest_token');
+  const savedData = sessionStorage.getItem('guest_data');
+  if (saved && savedData) {
+    guestToken = saved;
+    guestData = JSON.parse(savedData);
+    showPortal();
+    loadGuestData();
+  }
+};
+
+// ── LOGIN ─────────────────────────────────────────
+async function guestLogin() {
+  const mobile = document.getElementById('login-mobile').value.trim();
+  const password = document.getElementById('login-password').value;
+  const al = document.getElementById('login-alert');
+
+  if (!mobile || mobile.length < 10) { showAl(al, 'Enter valid 10-digit mobile number', 'danger'); return; }
+  if (!password) { showAl(al, 'Enter your password', 'danger'); return; }
+
+  const btn = document.getElementById('login-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Logging in...';
+
   try {
-    const res = await fetch('/api/guest-lookup?phone=' + phone);
+    const res = await fetch('/api/guest-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mobile, password })
+    });
     const data = await res.json();
-    if(!res.ok) { showAl(al, 'No account found. Please contact management.', 'danger'); return; }
-    guestData = data;
-    renderGuest(data);
-    document.getElementById('search-card').classList.add('hidden');
-    document.getElementById('tab-bar').style.display = 'flex';
-    showTab('details');
-  } catch(e) { showAl(al,'Something went wrong. Try again.','danger'); }
-  finally { btn.disabled=false; btn.innerHTML='Search'; }
+    if (!res.ok) { showAl(al, data.error || 'Invalid credentials', 'danger'); return; }
+
+    guestToken = data.token;
+    guestData = data.guest;
+    sessionStorage.setItem('guest_token', guestToken);
+    sessionStorage.setItem('guest_data', JSON.stringify(guestData));
+    al.classList.add('hidden');
+    showPortal();
+    loadGuestData();
+  } catch(e) {
+    showAl(al, 'Connection error. Try again.', 'danger');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '🔐 Login';
+  }
 }
 
-function renderGuest(g) {
-  document.getElementById('guest-name-h').textContent = '👤 ' + g.name;
-  document.getElementById('gi-status').innerHTML = g.is_active ? '<span class="badge badge-green">Active Resident</span>' : '<span class="badge badge-red">Checked Out</span>';
-  document.getElementById('gi-room').textContent = g.room_number ? 'Room ' + g.room_number : '—';
-  document.getElementById('gi-bed').textContent = g.bed_number || '—';
-  document.getElementById('gi-join').textContent = fmtDate(g.join_date);
-  document.getElementById('gi-rent').textContent = fmt(g.monthly_rent) + '/month';
-  document.getElementById('gi-dep').textContent = fmt(g.deposit_amount);
-  document.getElementById('msg-name').value = g.name;
-  if(g.room_number) document.getElementById('msg-subject').placeholder = 'Room ' + g.room_number + ' — write subject...';
+document.addEventListener('keypress', e => {
+  if (e.key === 'Enter' && !document.getElementById('login-section').classList.contains('hidden')) guestLogin();
+});
+
+function guestLogout() {
+  sessionStorage.removeItem('guest_token');
+  sessionStorage.removeItem('guest_data');
+  guestToken = null; guestData = null;
+  document.getElementById('portal-section').classList.add('hidden');
+  document.getElementById('login-section').classList.remove('hidden');
+  document.getElementById('login-mobile').value = '';
+  document.getElementById('login-password').value = '';
+}
+
+// ── SHOW PORTAL ───────────────────────────────────
+function showPortal() {
+  document.getElementById('login-section').classList.add('hidden');
+  document.getElementById('portal-section').classList.remove('hidden');
+  document.getElementById('p-name').textContent = '👤 ' + (guestData.name || '');
+  document.getElementById('p-room').textContent = guestData.room_number ? 'Room ' + guestData.room_number : 'Room not assigned';
+}
+
+// ── LOAD FULL DATA ────────────────────────────────
+async function loadGuestData() {
+  try {
+    const res = await fetch('/api/guest-portal', {
+      headers: { 'Authorization': 'Bearer ' + guestToken }
+    });
+    if (res.status === 401) { guestLogout(); return; }
+    const data = await res.json();
+    guestData = data;
+    sessionStorage.setItem('guest_data', JSON.stringify(data));
+    renderDetails(data);
+    renderMenu(data.menu || []);
+    renderNotices(data.announcements || []);
+  } catch(e) { console.error(e); }
+}
+
+// ── RENDER DETAILS ────────────────────────────────
+function renderDetails(g) {
+  document.getElementById('p-status').innerHTML = g.is_active
+    ? '<span class="badge badge-green">Active Resident</span>'
+    : '<span class="badge badge-red">Checked Out</span>';
+  document.getElementById('p-room-detail').textContent = g.room_number ? 'Room ' + g.room_number : '—';
+  document.getElementById('p-bed').textContent = g.bed_number || '—';
+  document.getElementById('p-join').textContent = fmtDate(g.join_date);
+  document.getElementById('p-rent').textContent = fmt(g.monthly_rent) + '/month';
+  document.getElementById('p-dep').textContent = fmt(g.deposit_amount);
+  document.getElementById('p-emg').textContent = g.emergency_contact || '—';
 
   const pays = g.payments || [];
-  const pc = document.getElementById('gi-payments');
-  if(!pays.length) { pc.innerHTML = '<p style="color:#64748B;font-size:13px;text-align:center;padding:16px">No payment records</p>'; return; }
-  pc.innerHTML = pays.map(p => `
-    <div class="pay-item">
-      <div>
-        <div style="font-weight:600;text-transform:capitalize">${p.collection_type}</div>
-        <div style="color:#64748B;font-size:11px">${fmtDate(p.collection_date)} · ${p.payment_mode}</div>
-      </div>
-      <span style="color:#10B981;font-weight:700">${fmt(p.amount)}</span>
-    </div>`).join('');
+  const pc = document.getElementById('p-payments');
+  pc.innerHTML = pays.length === 0
+    ? '<p style="text-align:center;color:#94A3B8;font-size:13px">No payment records</p>'
+    : pays.map(p => `
+      <div class="pay-item">
+        <div>
+          <div style="font-weight:600;text-transform:capitalize">${p.collection_type}</div>
+          <div style="color:#64748B;font-size:11px">${fmtDate(p.collection_date)} · ${p.payment_mode}</div>
+          ${p.collection_month ? `<div style="color:#94A3B8;font-size:11px">${p.collection_month}</div>` : ''}
+        </div>
+        <span class="text-green">${fmt(p.amount)}</span>
+      </div>`).join('');
+}
 
-  // Menu
-  const menu = g.menu || [];
+// ── RENDER MENU ───────────────────────────────────
+function renderMenu(menu) {
   const days = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
   const meals = ['Breakfast','Lunch','Dinner'];
   const byDay = {};
   menu.forEach(m => { if(!byDay[m.day_of_week]) byDay[m.day_of_week]={}; byDay[m.day_of_week][m.meal_type]=m.items; });
-  document.getElementById('menu-tb').innerHTML = days.map(d => `
-    <tr><td><strong>${d.substr(0,3)}</strong></td>
-    ${meals.map(ml => `<td>${byDay[d]&&byDay[d][ml]?byDay[d][ml]:'—'}</td>`).join('')}
+  const tb = document.getElementById('p-menu-tb');
+  if (!menu.length) { tb.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:20px;color:#94A3B8">No menu added yet</td></tr>'; return; }
+  tb.innerHTML = days.map(d => `
+    <tr>
+      <td><strong>${d.substr(0,3)}</strong></td>
+      ${meals.map(ml => `<td>${byDay[d]&&byDay[d][ml]?byDay[d][ml]:'—'}</td>`).join('')}
     </tr>`).join('');
+}
 
-  // Notices
-  const notices = g.announcements || [];
-  document.getElementById('notices-container').innerHTML = notices.length===0
-    ? '<div class="card"><div class="card-b" style="text-align:center;color:#64748B">No notices at the moment</div></div>'
+// ── RENDER NOTICES ────────────────────────────────
+function renderNotices(notices) {
+  const c = document.getElementById('p-notices');
+  c.innerHTML = notices.length === 0
+    ? '<div class="card"><div class="card-b" style="text-align:center;color:#94A3B8;padding:32px">📢 No notices at the moment</div></div>'
     : notices.map(a => `
       <div class="card" style="margin-bottom:12px">
         <div style="padding:12px 16px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #E2E8F0">
@@ -224,50 +389,83 @@ function renderGuest(g) {
       </div>`).join('');
 }
 
-async function sendMsg() {
+// ── SEND MESSAGE ──────────────────────────────────
+async function sendMessage() {
   const al = document.getElementById('msg-alert');
-  const name = document.getElementById('msg-name').value.trim();
   const body = document.getElementById('msg-body').value.trim();
-  if(!name||!body) { showAl(al,'Name and message are required','danger'); return; }
+  const subject = document.getElementById('msg-subject').value.trim();
+  if (!body) { showAl(al, 'Please write a message', 'danger'); return; }
+
   const btn = document.getElementById('msg-btn');
   btn.disabled = true; btn.textContent = 'Sending...';
+
   try {
     await fetch('/api/guest-message', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ guest_name:name, guest_phone:guestData?.phone||'', room_number:guestData?.room_number||'', subject:document.getElementById('msg-subject').value, message:body })
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + guestToken },
+      body: JSON.stringify({
+        guest_name: guestData.name,
+        guest_phone: guestData.phone,
+        room_number: guestData.room_number,
+        subject, message: body
+      })
     });
     document.getElementById('msg-body').value = '';
-    showAl(al,'Message sent to management!','success');
-  } catch { showAl(al,'Failed to send. Try again.','danger'); }
-  finally { btn.disabled=false; btn.textContent='Send Message'; }
+    document.getElementById('msg-subject').value = '';
+    showAl(al, '✅ Message sent to management!', 'success');
+  } catch(e) {
+    showAl(al, 'Failed to send. Try again.', 'danger');
+  } finally {
+    btn.disabled = false; btn.textContent = '📤 Send Message';
+  }
 }
 
+// ── CHANGE PASSWORD ───────────────────────────────
+async function changePassword() {
+  const al = document.getElementById('pwd-alert');
+  const current = document.getElementById('pwd-current').value;
+  const newPwd = document.getElementById('pwd-new').value;
+  const confirm = document.getElementById('pwd-confirm').value;
+
+  if (!current || !newPwd || !confirm) { showAl(al, 'All fields required', 'danger'); return; }
+  if (newPwd.length < 6) { showAl(al, 'Password must be at least 6 characters', 'danger'); return; }
+  if (newPwd !== confirm) { showAl(al, 'New passwords do not match', 'danger'); return; }
+
+  try {
+    const res = await fetch('/api/guest-change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + guestToken },
+      body: JSON.stringify({ currentPassword: current, newPassword: newPwd })
+    });
+    const data = await res.json();
+    if (!res.ok) { showAl(al, data.error, 'danger'); return; }
+    document.getElementById('pwd-current').value = '';
+    document.getElementById('pwd-new').value = '';
+    document.getElementById('pwd-confirm').value = '';
+    showAl(al, '✅ Password changed successfully!', 'success');
+  } catch(e) {
+    showAl(al, 'Failed. Try again.', 'danger');
+  }
+}
+
+// ── TABS ──────────────────────────────────────────
 function showTab(tab) {
-  ['details','menu','notices','message'].forEach(t => {
+  ['details','menu','notices','message','settings'].forEach(t => {
     document.getElementById('tab-'+t).classList.add('hidden');
   });
   document.getElementById('tab-'+tab).classList.remove('hidden');
   document.querySelectorAll('.tab').forEach((b,i) => {
-    b.classList.toggle('active', ['details','menu','notices','message'][i]===tab);
+    b.classList.toggle('active', ['details','menu','notices','message','settings'][i]===tab);
   });
 }
 
-function resetSearch() {
-  guestData = null;
-  document.getElementById('search-card').classList.remove('hidden');
-  document.getElementById('tab-bar').style.display = 'none';
-  ['details','menu','notices','message'].forEach(t => document.getElementById('tab-'+t).classList.add('hidden'));
-  document.getElementById('phone-input').value = '';
-}
-
+// ── HELPERS ───────────────────────────────────────
 function showAl(el, msg, type) {
-  el.className = `alert alert-${type}`;
+  el.className = 'alert alert-' + type;
   el.textContent = msg;
   el.classList.remove('hidden');
-  if(type==='success') setTimeout(()=>el.classList.add('hidden'),3000);
+  if (type === 'success') setTimeout(() => el.classList.add('hidden'), 3000);
 }
-
 function fmt(n) { return '₹' + parseFloat(n||0).toLocaleString('en-IN'); }
 function fmtDate(d) { if(!d) return '—'; return new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}); }
 </script>

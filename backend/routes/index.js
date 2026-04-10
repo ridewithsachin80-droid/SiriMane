@@ -336,3 +336,99 @@ router.post('/guest-message', async (req, res) => {
 });
 
 module.exports = router;
+
+// ── GUEST AUTH ───────────────────────────────────
+router.post('/guest-login', async (req, res) => {
+  const { mobile, password } = req.body;
+  if (!mobile || !password) return res.status(400).json({ error: 'Mobile and password required' });
+  try {
+    const r = await pool.query(
+      `SELECT g.*, ro.room_number FROM guests g 
+       LEFT JOIN rooms ro ON g.room_id = ro.id 
+       WHERE g.phone = $1 AND g.is_active = true LIMIT 1`,
+      [mobile]
+    );
+    const guest = r.rows[0];
+    if (!guest) return res.status(401).json({ error: 'No active account found with this mobile number' });
+
+    // If no password set, default = mobile number
+    let valid = false;
+    if (guest.password_hash) {
+      valid = await bcrypt.compare(password, guest.password_hash);
+    } else {
+      // Default password is mobile number itself
+      valid = (password === mobile);
+      if (valid) {
+        // Auto-set the hash for future logins
+        const hash = await bcrypt.hash(mobile, 10);
+        await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [hash, guest.id]);
+      }
+    }
+
+    if (!valid) return res.status(401).json({ error: 'Incorrect password. Default password is your mobile number.' });
+
+    const token = jwt.sign({ guestId: guest.id, type: 'guest' }, process.env.JWT_SECRET, { expiresIn: '24h' });
+    res.json({
+      token,
+      guest: {
+        id: guest.id, name: guest.name, phone: guest.phone,
+        room_number: guest.room_number, bed_number: guest.bed_number
+      }
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Guest middleware
+const guestAuth = async (req, res, next) => {
+  try {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) return res.status(401).json({ error: 'No token' });
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (decoded.type !== 'guest') return res.status(401).json({ error: 'Invalid token type' });
+    const r = await pool.query('SELECT * FROM guests WHERE id=$1', [decoded.guestId]);
+    if (!r.rows[0]) return res.status(401).json({ error: 'Guest not found' });
+    req.guest = r.rows[0];
+    next();
+  } catch { res.status(401).json({ error: 'Invalid token' }); }
+};
+
+// GET /api/guest-portal - full guest data
+router.get('/guest-portal', guestAuth, async (req, res) => {
+  try {
+    const g = req.guest;
+    const [room, payments, menu, announcements] = await Promise.all([
+      g.room_id ? pool.query('SELECT room_number FROM rooms WHERE id=$1', [g.room_id]) : { rows: [{}] },
+      pool.query('SELECT * FROM collections WHERE guest_id=$1 ORDER BY collection_date DESC LIMIT 24', [g.id]),
+      pool.query('SELECT * FROM daily_menu ORDER BY CASE day_of_week WHEN \'Monday\' THEN 1 WHEN \'Tuesday\' THEN 2 WHEN \'Wednesday\' THEN 3 WHEN \'Thursday\' THEN 4 WHEN \'Friday\' THEN 5 WHEN \'Saturday\' THEN 6 WHEN \'Sunday\' THEN 7 END'),
+      pool.query('SELECT * FROM announcements WHERE is_active=true ORDER BY created_at DESC LIMIT 10')
+    ]);
+    res.json({
+      ...g,
+      password_hash: undefined,
+      room_number: room.rows[0]?.room_number,
+      payments: payments.rows,
+      menu: menu.rows,
+      announcements: announcements.rows
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/guest-change-password
+router.post('/guest-change-password', guestAuth, async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Both fields required' });
+  if (newPassword.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  try {
+    const g = req.guest;
+    let valid = false;
+    if (g.password_hash) {
+      valid = await bcrypt.compare(currentPassword, g.password_hash);
+    } else {
+      valid = (currentPassword === g.phone);
+    }
+    if (!valid) return res.status(401).json({ error: 'Current password is incorrect' });
+    const hash = await bcrypt.hash(newPassword, 10);
+    await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [hash, g.id]);
+    res.json({ message: 'Password changed successfully' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});

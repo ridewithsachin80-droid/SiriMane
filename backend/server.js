@@ -7,7 +7,7 @@ const path = require('path');
 
 const app = express();
 
-// Required for Railway/proxies
+// Required for Railway proxy
 app.set('trust proxy', 1);
 
 app.use(helmet({ contentSecurityPolicy: false }));
