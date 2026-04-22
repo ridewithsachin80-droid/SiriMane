@@ -12,8 +12,14 @@ async function apiFetch(endpoint, options = {}) {
   };
   if (options.body && typeof options.body === 'object') config.body = JSON.stringify(options.body);
   const res = await fetch(`${API_BASE}${endpoint}`, config);
-  if (res.status === 401) { clearAuth(); return; }
   const data = await res.json();
+  if (res.status === 401) {
+    if (endpoint === '/auth/login') {
+      throw new Error(data.error || 'Invalid credentials');
+    }
+    clearAuth();
+    return;
+  }
   if (!res.ok) throw new Error(data.error || 'Request failed');
   return data;
 }
