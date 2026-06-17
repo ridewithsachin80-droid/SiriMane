@@ -4,6 +4,20 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const pool = require('../db');
 const auth = require('../middleware/auth');
+const requireAdmin = auth.requireAdmin;
+
+// Records who did what, for the Audit Log. Never throws — a logging failure
+// should never block the actual request it's describing.
+async function logActivity(req, action, details) {
+  try {
+    await pool.query(
+      'INSERT INTO activity_log(user_id, action, details, ip_address) VALUES($1,$2,$3,$4)',
+      [req.user ? req.user.id : null, action, details || null, req.ip]
+    );
+  } catch (err) {
+    console.error('activity log failed:', err.message);
+  }
+}
 
 // ── AUTH ─────────────────────────────────────────
 router.post('/auth/login', async (req, res) => {
@@ -14,8 +28,8 @@ router.post('/auth/login', async (req, res) => {
     const user = r.rows[0];
     if (!user || !(await bcrypt.compare(password, user.password_hash)))
       return res.status(401).json({ error: 'Invalid credentials' });
-    await pool.query(`INSERT INTO activity_log(user_id,action,ip_address) VALUES($1,'login',$2)`, [user.id, req.ip]);
     const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: '8h' });
+    await pool.query(`INSERT INTO activity_log(user_id,action,ip_address) VALUES($1,'login',$2)`, [user.id, req.ip]);
     res.json({ token, user: { id: user.id, username: user.username, role: user.role } });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -41,10 +55,10 @@ router.get('/dashboard', auth, async (req, res) => {
       pool.query('SELECT COUNT(*) FROM guests WHERE is_active=true'),
       pool.query(`SELECT COUNT(*) as total_rooms, COALESCE(SUM(total_beds),0) as total_beds FROM rooms WHERE is_active=true`),
       pool.query(`SELECT COALESCE(SUM(r.total_beds),0) - COUNT(g.id) as available FROM rooms r LEFT JOIN guests g ON r.id=g.room_id AND g.is_active=true WHERE r.is_active=true`),
-      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE DATE_TRUNC('month',collection_date)=DATE_TRUNC('month',NOW())`),
-      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM purchases WHERE DATE_TRUNC('month',purchase_date)=DATE_TRUNC('month',NOW())`),
+      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND DATE_TRUNC('month',collection_date)=DATE_TRUNC('month',NOW())`),
+      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM purchases WHERE is_deleted=false AND DATE_TRUNC('month',purchase_date)=DATE_TRUNC('month',NOW())`),
       pool.query(`SELECT g.*,r.room_number FROM guests g LEFT JOIN rooms r ON g.room_id=r.id WHERE g.is_active=true ORDER BY g.created_at DESC LIMIT 5`),
-      pool.query(`SELECT c.*,g.name as guest_name FROM collections c LEFT JOIN guests g ON c.guest_id=g.id ORDER BY c.collection_date DESC LIMIT 5`)
+      pool.query(`SELECT c.*,g.name as guest_name FROM collections c LEFT JOIN guests g ON c.guest_id=g.id WHERE c.is_deleted=false ORDER BY c.collection_date DESC LIMIT 5`)
     ]);
     const totalBeds = parseInt(rooms.rows[0].total_beds) || 0;
     const availBeds = parseInt(beds.rows[0].available) || 0;
@@ -98,7 +112,7 @@ router.put('/rooms/:id', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-router.delete('/rooms/:id', auth, async (req, res) => {
+router.delete('/rooms/:id', auth, requireAdmin, async (req, res) => {
   try {
     const g = await pool.query('SELECT COUNT(*) FROM guests WHERE room_id=$1 AND is_active=true', [req.params.id]);
     if (parseInt(g.rows[0].count) > 0) return res.status(400).json({ error: 'Room has active guests' });
@@ -125,7 +139,7 @@ router.get('/guests/:id', auth, async (req, res) => {
   try {
     const g = await pool.query(`SELECT g.*,r.room_number FROM guests g LEFT JOIN rooms r ON g.room_id=r.id WHERE g.id=$1`, [req.params.id]);
     if (!g.rows[0]) return res.status(404).json({ error: 'Not found' });
-    const c = await pool.query('SELECT * FROM collections WHERE guest_id=$1 ORDER BY collection_date DESC', [req.params.id]);
+    const c = await pool.query('SELECT * FROM collections WHERE guest_id=$1 AND is_deleted=false ORDER BY collection_date DESC', [req.params.id]);
     res.json({ ...g.rows[0], payments: c.rows });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -135,8 +149,9 @@ router.post('/guests', auth, async (req, res) => {
   if (!name || !join_date) return res.status(400).json({ error: 'Name and join date required' });
   try {
     const r = await pool.query(
-      `INSERT INTO guests(name,phone,email,emergency_contact,id_proof_type,id_proof_number,room_id,bed_number,join_date,monthly_rent,deposit_amount,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
-      [name,phone,email,emergency_contact,id_proof_type,id_proof_number,room_id||null,bed_number||null,join_date,monthly_rent||0,deposit_amount||0,notes]);
+      `INSERT INTO guests(name,phone,email,emergency_contact,id_proof_type,id_proof_number,room_id,bed_number,join_date,monthly_rent,deposit_amount,notes,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+      [name,phone,email,emergency_contact,id_proof_type,id_proof_number,room_id||null,bed_number||null,join_date,monthly_rent||0,deposit_amount||0,notes,req.user.id]);
+    await logActivity(req, 'guest_add', `${name}${room_id?' (room assigned)':''}`);
     res.status(201).json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -152,10 +167,38 @@ router.put('/guests/:id', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-router.delete('/guests/:id', auth, async (req, res) => {
+router.delete('/guests/:id', auth, requireAdmin, async (req, res) => {
   try {
     await pool.query('UPDATE guests SET is_active=false,leave_date=CURRENT_DATE WHERE id=$1', [req.params.id]);
     res.json({ message: 'Checked out' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Full move-out flow: computes the deposit refund (deposit minus deductions),
+// records it permanently in deposit_refunds, and checks the guest out — all
+// in one step so the two can never get out of sync. Admin only, since it's
+// the final sign-off on a financial transaction.
+router.post('/guests/:id/checkout', auth, requireAdmin, async (req, res) => {
+  const { deductions, deduction_notes, refund_mode } = req.body;
+  try {
+    const g = await pool.query(`SELECT g.*,r.room_number FROM guests g LEFT JOIN rooms r ON g.room_id=r.id WHERE g.id=$1`, [req.params.id]);
+    const guest = g.rows[0];
+    if (!guest) return res.status(404).json({ error: 'Guest not found' });
+    if (!guest.is_active) return res.status(400).json({ error: 'Guest is already checked out' });
+
+    const deductionAmount = parseFloat(deductions) || 0;
+    const depositAmount = parseFloat(guest.deposit_amount) || 0;
+    const refundAmount = depositAmount - deductionAmount;
+
+    const refund = await pool.query(
+      `INSERT INTO deposit_refunds(guest_id,guest_name,room_number,deposit_amount,deductions,deduction_notes,refund_amount,refund_mode,processed_by)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [guest.id, guest.name, guest.room_number, depositAmount, deductionAmount, deduction_notes || null, refundAmount, refund_mode || 'cash', req.user.id]
+    );
+    await pool.query('UPDATE guests SET is_active=false,leave_date=CURRENT_DATE WHERE id=$1', [guest.id]);
+    await logActivity(req, 'guest_checkout', `${guest.name} (room ${guest.room_number || '—'}) — refund ₹${refundAmount}`);
+
+    res.status(201).json(refund.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -163,7 +206,7 @@ router.delete('/guests/:id', auth, async (req, res) => {
 router.get('/collections', auth, async (req, res) => {
   try {
     const { month, year } = req.query;
-    let q = `SELECT c.*,g.name as guest_name,r.room_number FROM collections c LEFT JOIN guests g ON c.guest_id=g.id LEFT JOIN rooms r ON g.room_id=r.id WHERE 1=1`;
+    let q = `SELECT c.*,g.name as guest_name,r.room_number FROM collections c LEFT JOIN guests g ON c.guest_id=g.id LEFT JOIN rooms r ON g.room_id=r.id WHERE c.is_deleted=false`;
     const p = [];
     if (month && year) { p.push(month,year); q += ` AND EXTRACT(MONTH FROM c.collection_date)=$${p.length-1} AND EXTRACT(YEAR FROM c.collection_date)=$${p.length}`; }
     q += ' ORDER BY c.collection_date DESC';
@@ -177,22 +220,27 @@ router.post('/collections', auth, async (req, res) => {
   if (!amount) return res.status(400).json({ error: 'Amount required' });
   try {
     const r = await pool.query(
-      `INSERT INTO collections(guest_id,guest_name,amount,collection_date,collection_month,collection_type,payment_mode,description,receipt_number) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-      [guest_id||null,guest_name,amount,collection_date||new Date(),collection_month,collection_type||'rent',payment_mode||'cash',description,receipt_number]);
+      `INSERT INTO collections(guest_id,guest_name,amount,collection_date,collection_month,collection_type,payment_mode,description,receipt_number,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      [guest_id||null,guest_name,amount,collection_date||new Date(),collection_month,collection_type||'rent',payment_mode||'cash',description,receipt_number,req.user.id]);
+    await logActivity(req, 'collection_add', `₹${amount} ${collection_type||'rent'} from ${guest_name||'guest #'+guest_id}`);
     res.status(201).json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-router.delete('/collections/:id', auth, async (req, res) => {
-  try { await pool.query('DELETE FROM collections WHERE id=$1', [req.params.id]); res.json({ message: 'Deleted' }); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+router.delete('/collections/:id', auth, requireAdmin, async (req, res) => {
+  try {
+    const r = await pool.query('UPDATE collections SET is_deleted=true,deleted_by=$1,deleted_at=NOW() WHERE id=$2 AND is_deleted=false RETURNING *', [req.user.id, req.params.id]);
+    if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
+    await logActivity(req, 'collection_delete', `₹${r.rows[0].amount} ${r.rows[0].collection_type} (id ${req.params.id})`);
+    res.json({ message: 'Deleted' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ── PURCHASES (Expenses) ─────────────────────────
 router.get('/purchases', auth, async (req, res) => {
   try {
     const { month, year } = req.query;
-    let q = 'SELECT * FROM purchases WHERE 1=1';
+    let q = 'SELECT * FROM purchases WHERE is_deleted=false';
     const p = [];
     if (month && year) { p.push(month,year); q += ` AND EXTRACT(MONTH FROM purchase_date)=$${p.length-1} AND EXTRACT(YEAR FROM purchase_date)=$${p.length}`; }
     q += ' ORDER BY purchase_date DESC';
@@ -206,15 +254,20 @@ router.post('/purchases', auth, async (req, res) => {
   if (!amount || !category) return res.status(400).json({ error: 'Amount and category required' });
   try {
     const r = await pool.query(
-      `INSERT INTO purchases(amount,category,description,purchase_date,paid_to,payment_mode,receipt_number) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [amount,category,description,purchase_date||new Date(),paid_to,payment_mode||'cash',receipt_number]);
+      `INSERT INTO purchases(amount,category,description,purchase_date,paid_to,payment_mode,receipt_number,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [amount,category,description,purchase_date||new Date(),paid_to,payment_mode||'cash',receipt_number,req.user.id]);
+    await logActivity(req, 'purchase_add', `₹${amount} ${category}${paid_to ? ' to '+paid_to : ''}`);
     res.status(201).json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-router.delete('/purchases/:id', auth, async (req, res) => {
-  try { await pool.query('DELETE FROM purchases WHERE id=$1', [req.params.id]); res.json({ message: 'Deleted' }); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+router.delete('/purchases/:id', auth, requireAdmin, async (req, res) => {
+  try {
+    const r = await pool.query('UPDATE purchases SET is_deleted=true,deleted_by=$1,deleted_at=NOW() WHERE id=$2 AND is_deleted=false RETURNING *', [req.user.id, req.params.id]);
+    if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
+    await logActivity(req, 'purchase_delete', `₹${r.rows[0].amount} ${r.rows[0].category} (id ${req.params.id})`);
+    res.json({ message: 'Deleted' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ── DAILY MENU ───────────────────────────────────
@@ -249,7 +302,7 @@ router.get('/announcements', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-router.post('/announcements', auth, async (req, res) => {
+router.post('/announcements', auth, requireAdmin, async (req, res) => {
   const { title, message, priority } = req.body;
   if (!title || !message) return res.status(400).json({ error: 'Title and message required' });
   try {
@@ -260,7 +313,7 @@ router.post('/announcements', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-router.delete('/announcements/:id', auth, async (req, res) => {
+router.delete('/announcements/:id', auth, requireAdmin, async (req, res) => {
   try { await pool.query('DELETE FROM announcements WHERE id=$1', [req.params.id]); res.json({ message: 'Deleted' }); }
   catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -300,10 +353,10 @@ router.get('/reports', auth, async (req, res) => {
     const m = month || new Date().getMonth() + 1;
     const y = year || new Date().getFullYear();
     const [income, expenses, incomeBreakdown, expenseBreakdown] = await Promise.all([
-      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE EXTRACT(MONTH FROM collection_date)=$1 AND EXTRACT(YEAR FROM collection_date)=$2`, [m,y]),
-      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM purchases WHERE EXTRACT(MONTH FROM purchase_date)=$1 AND EXTRACT(YEAR FROM purchase_date)=$2`, [m,y]),
-      pool.query(`SELECT collection_type, COALESCE(SUM(amount),0) as total FROM collections WHERE EXTRACT(MONTH FROM collection_date)=$1 AND EXTRACT(YEAR FROM collection_date)=$2 GROUP BY collection_type`, [m,y]),
-      pool.query(`SELECT category, COALESCE(SUM(amount),0) as total FROM purchases WHERE EXTRACT(MONTH FROM purchase_date)=$1 AND EXTRACT(YEAR FROM purchase_date)=$2 GROUP BY category`, [m,y])
+      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND EXTRACT(MONTH FROM collection_date)=$1 AND EXTRACT(YEAR FROM collection_date)=$2`, [m,y]),
+      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM purchases WHERE is_deleted=false AND EXTRACT(MONTH FROM purchase_date)=$1 AND EXTRACT(YEAR FROM purchase_date)=$2`, [m,y]),
+      pool.query(`SELECT collection_type, COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND EXTRACT(MONTH FROM collection_date)=$1 AND EXTRACT(YEAR FROM collection_date)=$2 GROUP BY collection_type`, [m,y]),
+      pool.query(`SELECT category, COALESCE(SUM(amount),0) as total FROM purchases WHERE is_deleted=false AND EXTRACT(MONTH FROM purchase_date)=$1 AND EXTRACT(YEAR FROM purchase_date)=$2 GROUP BY category`, [m,y])
     ]);
     const inc = parseFloat(income.rows[0].total);
     const exp = parseFloat(expenses.rows[0].total);
@@ -318,7 +371,7 @@ router.get('/guest-lookup', async (req, res) => {
   try {
     const g = await pool.query(`SELECT g.*,r.room_number FROM guests g LEFT JOIN rooms r ON g.room_id=r.id WHERE g.phone=$1 LIMIT 1`, [phone]);
     if (!g.rows[0]) return res.status(404).json({ error: 'Not found' });
-    const c = await pool.query('SELECT amount,collection_date,collection_type,payment_mode FROM collections WHERE guest_id=$1 ORDER BY collection_date DESC LIMIT 12', [g.rows[0].id]);
+    const c = await pool.query('SELECT amount,collection_date,collection_type,payment_mode FROM collections WHERE guest_id=$1 AND is_deleted=false ORDER BY collection_date DESC LIMIT 12', [g.rows[0].id]);
     const a = await pool.query('SELECT title,message,priority,created_at FROM announcements WHERE is_active=true ORDER BY created_at DESC LIMIT 5');
     const m = await pool.query('SELECT * FROM daily_menu ORDER BY CASE day_of_week WHEN \'Monday\' THEN 1 WHEN \'Tuesday\' THEN 2 WHEN \'Wednesday\' THEN 3 WHEN \'Thursday\' THEN 4 WHEN \'Friday\' THEN 5 WHEN \'Saturday\' THEN 6 WHEN \'Sunday\' THEN 7 END');
     res.json({ ...g.rows[0], payments: c.rows, announcements: a.rows, menu: m.rows });
@@ -332,6 +385,91 @@ router.post('/guest-message', async (req, res) => {
   try {
     await pool.query(`INSERT INTO inbox_messages(guest_name,guest_phone,room_number,subject,message) VALUES($1,$2,$3,$4,$5)`, [guest_name,guest_phone,room_number,subject,message]);
     res.json({ message: 'Message sent' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── RENT DUE TRACKER ──────────────────────────────
+// Compares each active guest's monthly rent against what they've actually
+// paid (collection_type='rent') so far this calendar month. Visible to both
+// admin and staff — it's an operational view, not a sensitive one.
+// Note: this is a simple same-month comparison, not prorated for guests who
+// joined partway through the month.
+router.get('/rent-due', auth, async (req, res) => {
+  try {
+    const r = await pool.query(`
+      SELECT g.id, g.name, g.phone, g.join_date, g.monthly_rent, r.room_number,
+        COALESCE(SUM(c.amount), 0) AS collected_this_month,
+        g.monthly_rent - COALESCE(SUM(c.amount), 0) AS amount_due
+      FROM guests g
+      LEFT JOIN rooms r ON g.room_id = r.id
+      LEFT JOIN collections c ON c.guest_id = g.id AND c.is_deleted = false AND c.collection_type = 'rent'
+        AND EXTRACT(MONTH FROM c.collection_date) = EXTRACT(MONTH FROM CURRENT_DATE)
+        AND EXTRACT(YEAR FROM c.collection_date) = EXTRACT(YEAR FROM CURRENT_DATE)
+      WHERE g.is_active = true AND g.monthly_rent > 0
+      GROUP BY g.id, g.name, g.phone, g.join_date, g.monthly_rent, r.room_number
+      ORDER BY amount_due DESC, g.name ASC
+    `);
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── STAFF / USERS (admin only) ────────────────────
+router.get('/users', auth, requireAdmin, async (req, res) => {
+  try {
+    const r = await pool.query('SELECT id, username, role, created_at FROM users ORDER BY created_at ASC');
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/users', auth, requireAdmin, async (req, res) => {
+  const { username, password, role } = req.body;
+  if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
+  if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  const finalRole = role === 'admin' ? 'admin' : 'staff';
+  try {
+    const hash = await bcrypt.hash(password, 12);
+    const r = await pool.query(
+      'INSERT INTO users(username,password_hash,role) VALUES($1,$2,$3) RETURNING id,username,role,created_at',
+      [username.trim(), hash, finalRole]
+    );
+    await logActivity(req, 'user_create', `${username} (${finalRole})`);
+    res.status(201).json(r.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(400).json({ error: 'Username already exists' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/users/:id', auth, requireAdmin, async (req, res) => {
+  if (parseInt(req.params.id) === req.user.id) return res.status(400).json({ error: "You can't remove your own account" });
+  try {
+    const r = await pool.query('DELETE FROM users WHERE id=$1 RETURNING username', [req.params.id]);
+    if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
+    await logActivity(req, 'user_delete', r.rows[0].username);
+    res.json({ message: 'Removed' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── AUDIT LOG (admin only) ────────────────────────
+router.get('/activity-log', auth, requireAdmin, async (req, res) => {
+  try {
+    const { limit } = req.query;
+    const cappedLimit = Math.min(parseInt(limit) || 200, 500);
+    const r = await pool.query(
+      `SELECT a.*, u.username FROM activity_log a LEFT JOIN users u ON a.user_id = u.id ORDER BY a.created_at DESC LIMIT $1`,
+      [cappedLimit]
+    );
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── DEPOSIT REFUND HISTORY (admin only) ───────────
+router.get('/deposit-refunds', auth, requireAdmin, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT dr.*, u.username AS processed_by_username FROM deposit_refunds dr LEFT JOIN users u ON dr.processed_by = u.id ORDER BY dr.created_at DESC LIMIT 200`
+    );
+    res.json(r.rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -398,7 +536,7 @@ router.get('/guest-portal', guestAuth, async (req, res) => {
     const g = req.guest;
     const [room, payments, menu, announcements] = await Promise.all([
       g.room_id ? pool.query('SELECT room_number FROM rooms WHERE id=$1', [g.room_id]) : { rows: [{}] },
-      pool.query('SELECT * FROM collections WHERE guest_id=$1 ORDER BY collection_date DESC LIMIT 24', [g.id]),
+      pool.query('SELECT * FROM collections WHERE guest_id=$1 AND is_deleted=false ORDER BY collection_date DESC LIMIT 24', [g.id]),
       pool.query('SELECT * FROM daily_menu ORDER BY CASE day_of_week WHEN \'Monday\' THEN 1 WHEN \'Tuesday\' THEN 2 WHEN \'Wednesday\' THEN 3 WHEN \'Thursday\' THEN 4 WHEN \'Friday\' THEN 5 WHEN \'Saturday\' THEN 6 WHEN \'Sunday\' THEN 7 END'),
       pool.query('SELECT * FROM announcements WHERE is_active=true ORDER BY created_at DESC LIMIT 10')
     ]);
