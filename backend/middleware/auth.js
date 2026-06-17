@@ -13,4 +13,15 @@ const auth = async (req, res, next) => {
     return res.status(401).json({ error: 'Invalid token' });
   }
 };
+
+// Use after `auth` in the middleware chain — relies on req.user already being set.
+// Staff accounts get 403'd; admin accounts pass through unchanged.
+const requireAdmin = (req, res, next) => {
+  if (!req.user || req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  next();
+};
+
+auth.requireAdmin = requireAdmin;
 module.exports = auth;
