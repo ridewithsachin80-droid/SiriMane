@@ -81,7 +81,7 @@ function openModal(html) {
   document.getElementById('modal-container').innerHTML = `<div class="modal-overlay" id="modal-overlay">${html}</div>`;
   document.getElementById('modal-overlay').addEventListener('click', e => { if(e.target.id==='modal-overlay') closeModal(); });
 }
-function closeModal() { document.getElementById('modal-container').innerHTML = ''; }
+function closeModal() { stopPurchaseVoice(); document.getElementById('modal-container').innerHTML = ''; }
 function loading() { setContent('<div class="loading-center"><div class="spinner"></div></div>'); }
 function nowDate() { return new Date().toISOString().split('T')[0]; }
 function monthPicker() {
@@ -644,6 +644,31 @@ async function delInboxMsg(id) {
 }
 
 // ── PURCHASES (Expenses) ──────────────────────────
+const PURCHASE_CATEGORIES = ['Groceries','Maintenance','Electricity','Water','Internet','Cleaning','Salary','Furniture','Repairs','Other'];
+const PURCHASE_PAYMENT_MODES = ['Cash','UPI','Bank Transfer','Cheque'];
+
+// Extra spoken phrases that map to a category/mode beyond its own name.
+// Keep entries lowercase; longer/more specific phrases first so they match before shorter ones.
+const PURCHASE_CATEGORY_SYNONYMS = {
+  Groceries: ['vegetables','vegetable','veggies','ration','provisions','grocery'],
+  Electricity: ['current bill','power bill','bescom','electric bill'],
+  Water: ['water bill'],
+  Internet: ['wifi','wi-fi','broadband'],
+  Cleaning: ['cleaning supplies','housekeeping','sweeper','detergent'],
+  Salary: ['wages','staff pay','payroll'],
+  Furniture: ['sofa','mattress'],
+  Repairs: ['repair','plumber','plumbing','electrician']
+};
+const PURCHASE_MODE_SYNONYMS = {
+  UPI: ['gpay','google pay','phonepe','paytm'],
+  'Bank Transfer': ['neft','imps','rtgs','bank'],
+  Cheque: ['check']
+};
+const PURCHASE_VOICE_FILLER_WORDS = new Set(['rupees','rupee','rs','paid','to','for','the','a','an','of','and','by','via','in','using','bill','amount','is']);
+
+let purchaseRecognition = null;
+let purchaseListening = false;
+
 async function pgPurchases() {
   loading();
   document.getElementById('topbar-actions').innerHTML = `<button class="btn btn-primary btn-sm" onclick="purchaseModal()">+ Add Purchase</button>`;
@@ -701,20 +726,24 @@ function purchaseModal() {
       <div class="modal-header"><h3>🛒 Add Purchase</h3><button class="modal-close" onclick="closeModal()">×</button></div>
       <div class="modal-body">
         <div id="pu-alert" class="alert alert-danger hidden"></div>
+        <div class="voice-row">
+          <button type="button" id="pu-mic-btn" class="mic-btn" onclick="togglePurchaseVoice()" title="Speak to fill this form" aria-label="Fill purchase by voice">🎤</button>
+          <span id="pu-voice-status" class="voice-status">Tap the mic and say something like "500 rupees groceries paid to Ramesh cash"</span>
+        </div>
         <div class="form-row">
           <div class="form-group"><label>Amount (₹) *</label><input id="pu-amt" type="number" placeholder="e.g. 500"/></div>
           <div class="form-group"><label>Date</label><input id="pu-date" type="date" value="${nowDate()}"/></div>
         </div>
         <div class="form-group"><label>Category *</label>
           <select id="pu-cat">
-            ${['Groceries','Maintenance','Electricity','Water','Internet','Cleaning','Salary','Furniture','Repairs','Other'].map(c=>`<option>${c}</option>`).join('')}
+            ${PURCHASE_CATEGORIES.map(c=>`<option>${c}</option>`).join('')}
           </select>
         </div>
         <div class="form-group"><label>Description</label><textarea id="pu-desc" rows="2" placeholder="What was purchased?"></textarea></div>
         <div class="form-row">
           <div class="form-group"><label>Paid To</label><input id="pu-paid" placeholder="Vendor name"/></div>
           <div class="form-group"><label>Payment Mode</label>
-            <select id="pu-mode">${['Cash','UPI','Bank Transfer','Cheque'].map(m=>`<option>${m}</option>`).join('')}</select>
+            <select id="pu-mode">${PURCHASE_PAYMENT_MODES.map(m=>`<option>${m}</option>`).join('')}</select>
           </div>
         </div>
       </div>
@@ -723,6 +752,12 @@ function purchaseModal() {
         <button class="btn btn-danger" onclick="savePurchase()">Add Purchase</button>
       </div>
     </div>`);
+  if (!getSpeechRecognitionCtor()) {
+    const micBtn = document.getElementById('pu-mic-btn');
+    const statusEl = document.getElementById('pu-voice-status');
+    if (micBtn) micBtn.disabled = true;
+    if (statusEl) statusEl.textContent = 'Voice input isn\'t supported in this browser. Try Chrome.';
+  }
 }
 
 async function savePurchase() {
@@ -735,6 +770,167 @@ async function savePurchase() {
 async function delPurchase(id) {
   if(!confirm('Delete?')) return;
   try { await API.deletePurchase(id); pgPurchases(); } catch(e) { alert(e.message); }
+}
+
+// ── VOICE INPUT FOR PURCHASES ──────────────────────
+function getSpeechRecognitionCtor() {
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+function togglePurchaseVoice() {
+  if (purchaseListening) stopPurchaseVoice();
+  else startPurchaseVoice();
+}
+
+function startPurchaseVoice() {
+  const Ctor = getSpeechRecognitionCtor();
+  const micBtn = document.getElementById('pu-mic-btn');
+  const statusEl = document.getElementById('pu-voice-status');
+  if (!Ctor) {
+    if (statusEl) { statusEl.textContent = 'Voice input isn\'t supported in this browser. Try Chrome.'; statusEl.classList.add('voice-error'); }
+    return;
+  }
+  if (!micBtn || !statusEl) return; // modal isn't open
+
+  stopPurchaseVoice(); // make sure no stale instance is still running
+
+  try {
+    const rec = new Ctor();
+    purchaseRecognition = rec;
+    rec.lang = 'en-IN';
+    rec.continuous = false;
+    rec.interimResults = false;
+    rec.maxAlternatives = 1;
+
+    rec.onstart = () => {
+      purchaseListening = true;
+      micBtn.classList.add('listening');
+      micBtn.textContent = '⏹';
+      statusEl.classList.remove('voice-error');
+      statusEl.textContent = 'Listening… speak now';
+    };
+
+    rec.onresult = (e) => {
+      try {
+        const transcript = e.results && e.results[0] && e.results[0][0] ? e.results[0][0].transcript : '';
+        if (!transcript) {
+          statusEl.textContent = 'Didn\'t catch that, tap the mic and try again';
+          statusEl.classList.add('voice-error');
+          return;
+        }
+        statusEl.classList.remove('voice-error');
+        statusEl.textContent = `Heard: "${transcript}"`;
+        parsePurchaseVoiceText(transcript);
+      } catch (err) {
+        statusEl.textContent = 'Couldn\'t process that, please fill the form manually';
+        statusEl.classList.add('voice-error');
+      }
+    };
+
+    rec.onerror = (e) => {
+      const messages = {
+        'no-speech': 'Didn\'t hear anything, tap the mic and try again',
+        'audio-capture': 'No microphone found on this device',
+        'not-allowed': 'Microphone permission denied, allow it in your browser settings',
+        'network': 'Network error, check your connection and try again',
+        'aborted': ''
+      };
+      const msg = e && e.error in messages ? messages[e.error] : 'Voice input failed, please fill the form manually';
+      if (msg) { statusEl.textContent = msg; statusEl.classList.add('voice-error'); }
+    };
+
+    rec.onend = () => {
+      purchaseListening = false;
+      purchaseRecognition = null;
+      micBtn.classList.remove('listening');
+      micBtn.textContent = '🎤';
+    };
+
+    rec.start();
+  } catch (err) {
+    purchaseListening = false;
+    purchaseRecognition = null;
+    statusEl.textContent = 'Could not start voice input on this device';
+    statusEl.classList.add('voice-error');
+  }
+}
+
+function stopPurchaseVoice() {
+  if (purchaseRecognition) {
+    try { purchaseRecognition.stop(); } catch (err) { /* already stopped, ignore */ }
+  }
+  purchaseRecognition = null;
+  purchaseListening = false;
+  const micBtn = document.getElementById('pu-mic-btn');
+  if (micBtn) { micBtn.classList.remove('listening'); micBtn.textContent = '🎤'; }
+}
+
+function setVoicePurchaseField(id, value) {
+  const el = document.getElementById(id);
+  if (!el || value === null || value === undefined || value === '') return;
+  el.value = value;
+  el.classList.add('voice-filled');
+  setTimeout(() => el.classList.remove('voice-filled'), 900);
+}
+
+function parsePurchaseVoiceText(rawText) {
+  try {
+    const text = (rawText || '').trim();
+    if (!text) return;
+    let lower = text.toLowerCase();
+
+    // Amount: first number in the phrase (supports decimals like "499.50")
+    const amtMatch = lower.match(/\d+(\.\d+)?/);
+    if (amtMatch) {
+      setVoicePurchaseField('pu-amt', amtMatch[0]);
+      lower = lower.replace(amtMatch[0], ' ');
+    }
+
+    // Category: check longer synonym phrases before the bare category name
+    let matchedCategory = null;
+    for (const cat of PURCHASE_CATEGORIES) {
+      const candidates = (PURCHASE_CATEGORY_SYNONYMS[cat] || []).concat([cat.toLowerCase()]);
+      const hit = candidates.find(phrase => lower.includes(phrase));
+      if (hit) { matchedCategory = cat; lower = lower.replace(hit, ' '); break; }
+    }
+    if (matchedCategory) setVoicePurchaseField('pu-cat', matchedCategory);
+
+    // Payment mode: check synonyms before the bare mode name
+    let matchedMode = null;
+    for (const mode of PURCHASE_PAYMENT_MODES) {
+      const candidates = (PURCHASE_MODE_SYNONYMS[mode] || []).concat([mode.toLowerCase()]);
+      const hit = candidates.find(phrase => lower.includes(phrase));
+      if (hit) { matchedMode = mode; lower = lower.replace(hit, ' '); break; }
+    }
+    if (matchedMode) setVoicePurchaseField('pu-mode', matchedMode);
+
+    // Vendor: look for "paid to X" or "to X" in the original (non-lowercased) text
+    let vendor = null;
+    const paidToMatch = text.match(/paid\s+to\s+([a-zA-Z][a-zA-Z\s]{0,30}?)(?:\s+(?:by|via|in|using|cash|upi|bank|cheque|check)\b|$)/i);
+    const toMatch = !paidToMatch ? text.match(/\bto\s+([a-zA-Z][a-zA-Z\s]{0,30}?)(?:\s+(?:by|via|in|using|cash|upi|bank|cheque|check)\b|$)/i) : null;
+    const vendorMatch = paidToMatch || toMatch;
+    if (vendorMatch) {
+      vendor = vendorMatch[1].trim().replace(/\s+/g, ' ');
+      if (vendor) {
+        vendor = vendor.charAt(0).toUpperCase() + vendor.slice(1);
+        setVoicePurchaseField('pu-paid', vendor);
+        lower = lower.replace(vendor.toLowerCase(), ' ');
+      }
+    }
+
+    // Description: whatever's left, with filler/connector words stripped out
+    const leftoverWords = lower
+      .replace(/[^a-z\s]/g, ' ')
+      .split(/\s+/)
+      .filter(w => w && !PURCHASE_VOICE_FILLER_WORDS.has(w));
+    const description = leftoverWords.join(' ').trim();
+    if (description) {
+      setVoicePurchaseField('pu-desc', description.charAt(0).toUpperCase() + description.slice(1));
+    }
+  } catch (err) {
+    const statusEl = document.getElementById('pu-voice-status');
+    if (statusEl) { statusEl.textContent = 'Couldn\'t fully parse that, please check the fields'; statusEl.classList.add('voice-error'); }
+  }
 }
 
 // ── COLLECTIONS (Income) ──────────────────────────
