@@ -20,6 +20,7 @@ function showApp() {
   document.getElementById('app').classList.remove('hidden');
   const u = JSON.parse(localStorage.getItem('sm_user') || '{}');
   document.getElementById('topbar-user').textContent = u.username ? `👤 ${u.username}` : '';
+  document.querySelectorAll('.admin-only').forEach(el => el.classList.toggle('hidden', u.role !== 'admin'));
 }
 
 function setupLogin() {
@@ -48,11 +49,11 @@ function setupNav() {
 
 function navigate(page) {
   document.querySelectorAll('.nav-item[data-page]').forEach(b => b.classList.toggle('active', b.dataset.page===page));
-  const titles = { dashboard:'Dashboard', rooms:'Rooms', guests:'Guests', 'daily-menu':'Daily Menu', payments:'Payments', 'guest-messages':'Guest Messages', inbox:'Inbox', purchases:'Purchases', collections:'Collections', reports:'Reports' };
+  const titles = { dashboard:'Dashboard', rooms:'Rooms', guests:'Guests', 'daily-menu':'Daily Menu', payments:'Payments', 'guest-messages':'Guest Messages', inbox:'Inbox', purchases:'Purchases', collections:'Collections', 'rent-due':'Rent Due', reports:'Reports', admin:'Admin' };
   document.getElementById('page-title').textContent = titles[page]||page;
   document.getElementById('topbar-actions').innerHTML = '';
   document.getElementById('sidebar').classList.remove('open');
-  const pages = { dashboard:pgDashboard, rooms:pgRooms, guests:pgGuests, 'daily-menu':pgMenu, payments:pgPayments, 'guest-messages':pgAnnouncements, inbox:pgInbox, purchases:pgPurchases, collections:pgCollections, reports:pgReports };
+  const pages = { dashboard:pgDashboard, rooms:pgRooms, guests:pgGuests, 'daily-menu':pgMenu, payments:pgPayments, 'guest-messages':pgAnnouncements, inbox:pgInbox, purchases:pgPurchases, collections:pgCollections, 'rent-due':pgRentDue, reports:pgReports, admin:pgAdmin };
   if(pages[page]) pages[page]();
 }
 
@@ -68,6 +69,7 @@ async function loadInboxCount() {
 
 // ── HELPERS ───────────────────────────────────────
 function setContent(html) { document.getElementById('page-content').innerHTML = html; }
+function isAdmin() { return (JSON.parse(localStorage.getItem('sm_user') || '{}')).role === 'admin'; }
 function showAlert(el, msg, type='danger') {
   el.className = `alert alert-${type}`;
   el.textContent = msg;
@@ -191,7 +193,7 @@ async function pgRooms() {
                     <td>
                       <div class="flex gap-2">
                         <button class="btn btn-outline btn-sm" onclick="roomModal(${JSON.stringify(r).replace(/"/g,'&quot;')})">Edit</button>
-                        <button class="btn btn-danger btn-sm" onclick="delRoom(${r.id},'${r.room_number}')">Delete</button>
+                        ${isAdmin()?`<button class="btn btn-danger btn-sm" onclick="delRoom(${r.id},'${r.room_number}')">Delete</button>`:''}
                       </div>
                     </td>
                   </tr>`;
@@ -278,7 +280,7 @@ async function pgGuests() {
                     <div class="flex gap-2">
                       <button class="btn btn-outline btn-sm" onclick="viewGuest(${g.id})">View</button>
                       <button class="btn btn-primary btn-sm" onclick="guestModal(null,${g.id})">Edit</button>
-                      ${g.is_active?`<button class="btn btn-danger btn-sm" onclick="checkoutGuest(${g.id},'${g.name}')">Checkout</button>`:''}
+                      ${g.is_active && isAdmin()?`<button class="btn btn-danger btn-sm" onclick="checkoutModal(${g.id})">Checkout</button>`:''}
                     </div>
                   </td>
                 </tr>`).join('')}
@@ -392,9 +394,58 @@ async function viewGuest(id) {
   } catch(e) { alert(e.message); }
 }
 
-async function checkoutGuest(id, name) {
-  if(!confirm(`Checkout ${name}?`)) return;
-  try { await API.checkoutGuest(id); pgGuests(); } catch(e) { alert(e.message); }
+async function checkoutModal(id) {
+  let g;
+  try { g = await API.getGuest(id); } catch(e) { alert(e.message); return; }
+  const deposit = parseFloat(g.deposit_amount) || 0;
+  openModal(`
+    <div class="modal">
+      <div class="modal-header"><h3>🚪 Checkout ${g.name}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+      <div class="modal-body">
+        <div id="co-alert" class="alert alert-danger hidden"></div>
+        <div style="background:#F8FAFC;padding:10px 12px;border-radius:8px;border:1px solid var(--border);margin-bottom:14px">
+          <div style="font-size:11px;color:var(--text-muted);font-weight:600">DEPOSIT PAID</div>
+          <div style="font-size:18px;font-weight:600">${fmt(deposit)}</div>
+        </div>
+        <div class="form-group"><label>Deductions (₹)</label><input id="co-deduct" type="number" placeholder="0" value="0" oninput="updateRefundPreview(${deposit})"/></div>
+        <div class="form-group"><label>Deduction Reason</label><textarea id="co-notes" rows="2" placeholder="e.g. room damage, unpaid dues, cleaning charges"></textarea></div>
+        <div class="form-group"><label>Refund Mode</label>
+          <select id="co-mode">${['Cash','UPI','Bank Transfer','Cheque'].map(m=>`<option>${m}</option>`).join('')}</select>
+        </div>
+        <div style="background:var(--primary-light);padding:10px 12px;border-radius:8px">
+          <div style="font-size:11px;color:var(--text-muted);font-weight:600">REFUND TO PAY</div>
+          <div id="co-refund-preview" style="font-size:18px;font-weight:600;color:var(--primary-dark)">${fmt(deposit)}</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-danger" onclick="submitCheckout(${id})">Confirm Checkout</button>
+      </div>
+    </div>`);
+}
+
+function updateRefundPreview(deposit) {
+  const deduct = parseFloat(document.getElementById('co-deduct').value) || 0;
+  const refund = deposit - deduct;
+  const el = document.getElementById('co-refund-preview');
+  el.textContent = fmt(refund);
+  el.style.color = refund < 0 ? 'var(--red)' : 'var(--primary-dark)';
+  if (refund < 0) el.textContent += ' (guest owes this)';
+}
+
+async function submitCheckout(id) {
+  const al = document.getElementById('co-alert');
+  const d = {
+    deductions: document.getElementById('co-deduct').value || 0,
+    deduction_notes: document.getElementById('co-notes').value,
+    refund_mode: document.getElementById('co-mode').value
+  };
+  if (!confirm('This will check the guest out and finalize the deposit refund. Continue?')) return;
+  try {
+    await API.checkoutGuestWithRefund(id, d);
+    closeModal();
+    pgGuests();
+  } catch(e) { showAlert(al, e.message); }
 }
 
 // ── DAILY MENU ────────────────────────────────────
@@ -499,7 +550,7 @@ async function pgPayments() {
                   <td>${fmtDate(c.collection_date)}</td>
                   <td><span class="badge badge-blue">${c.payment_mode}</span></td>
                   <td><span class="badge badge-green">Received</span></td>
-                  <td><button class="btn btn-danger btn-sm btn-icon" onclick="delCollection(${c.id})">✕</button></td>
+                  <td>${isAdmin()?`<button class="btn btn-danger btn-sm btn-icon" onclick="delCollection(${c.id})">✕</button>`:'—'}</td>
                 </tr>`).join('')}
             </tbody>
           </table>
@@ -511,13 +562,13 @@ async function pgPayments() {
 // ── GUEST MESSAGES (Announcements) ───────────────
 async function pgAnnouncements() {
   loading();
-  document.getElementById('topbar-actions').innerHTML = `<button class="btn btn-primary btn-sm" onclick="announcementModal()">📢 Post Message</button>`;
+  document.getElementById('topbar-actions').innerHTML = isAdmin() ? `<button class="btn btn-primary btn-sm" onclick="announcementModal()">📢 Post Message</button>` : '';
   try {
     const list = await API.getAnnouncements();
     setContent(`
       <div class="page-header"><h1>Guest Messages</h1><p>Post announcements and notices to all guests</p></div>
       <div class="card">
-        <div class="card-header"><h3>Posted Messages</h3><button class="btn btn-primary btn-sm" onclick="announcementModal()">📢 Post Message</button></div>
+        <div class="card-header"><h3>Posted Messages</h3>${isAdmin()?`<button class="btn btn-primary btn-sm" onclick="announcementModal()">📢 Post Message</button>`:''}</div>
         ${list.length===0
           ? '<div style="text-align:center;padding:48px;color:var(--text-muted)">📢<br><br>No messages posted yet. Click Post Message.</div>'
           : `<div>
@@ -530,7 +581,7 @@ async function pgAnnouncements() {
                 </div>
                 <div class="flex items-center gap-2">
                   <span class="text-muted" style="font-size:12px">${fmtDate(a.created_at)}</span>
-                  <button class="btn btn-danger btn-sm btn-icon" onclick="delAnnouncement(${a.id})">✕</button>
+                  ${isAdmin()?`<button class="btn btn-danger btn-sm btn-icon" onclick="delAnnouncement(${a.id})">✕</button>`:''}
                 </div>
               </div>
               <p style="font-size:13px;color:var(--text-muted)">${a.message}</p>
@@ -711,7 +762,7 @@ async function pgPurchases() {
                   <td class="text-red fw-600">${fmt(p.amount)}</td>
                   <td>${p.paid_to||'—'}</td>
                   <td>${p.payment_mode}</td>
-                  <td><button class="btn btn-danger btn-sm btn-icon" onclick="delPurchase(${p.id})">✕</button></td>
+                  <td>${isAdmin()?`<button class="btn btn-danger btn-sm btn-icon" onclick="delPurchase(${p.id})">✕</button>`:'—'}</td>
                 </tr>`).join('')}
             </tbody>
           </table>
@@ -976,7 +1027,7 @@ async function pgCollections() {
                   <td>${c.description||c.collection_month||'—'}</td>
                   <td class="text-green fw-600">${fmt(c.amount)}</td>
                   <td>${c.payment_mode}</td>
-                  <td><button class="btn btn-danger btn-sm btn-icon" onclick="delCollection(${c.id})">✕</button></td>
+                  <td>${isAdmin()?`<button class="btn btn-danger btn-sm btn-icon" onclick="delCollection(${c.id})">✕</button>`:'—'}</td>
                 </tr>`).join('')}
             </tbody>
           </table>
@@ -1042,6 +1093,46 @@ async function delCollection(id) {
   try { await API.deleteCollection(id); pgCollections(); } catch(e) { alert(e.message); }
 }
 
+// ── RENT DUE TRACKER ──────────────────────────────
+async function pgRentDue() {
+  loading();
+  document.getElementById('topbar-actions').innerHTML = '';
+  try {
+    const list = await API.getRentDue();
+    const totalDue = list.reduce((s,g) => s + Math.max(parseFloat(g.amount_due), 0), 0);
+    const fullyPaidCount = list.filter(g => parseFloat(g.amount_due) <= 0).length;
+    setContent(`
+      <div class="page-header"><h1>📅 Rent Due</h1><p>Who's paid this month and who's still pending</p></div>
+      <div class="stat-grid mb-5">
+        <div class="stat-card red"><div class="s-label">Total Pending</div><div class="s-value">${fmt(totalDue)}</div><div class="s-sub">${new Date().toLocaleString('en-IN',{month:'long',year:'numeric'})}</div></div>
+        <div class="stat-card"><div class="s-label">Fully Paid</div><div class="s-value">${fullyPaidCount} / ${list.length}</div><div class="s-sub" style="color:var(--green)">Guests this month</div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h3>All Active Guests</h3></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>NAME</th><th>ROOM</th><th>PHONE</th><th>MONTHLY RENT</th><th>COLLECTED</th><th>DUE</th><th>STATUS</th></tr></thead>
+            <tbody>
+              ${list.length===0
+                ? `<tr class="empty-row"><td colspan="7">No guests with rent configured.</td></tr>`
+                : list.map(g=>{
+                  const due = parseFloat(g.amount_due);
+                  return `<tr>
+                  <td><strong>${g.name}</strong></td>
+                  <td>${g.room_number?'Room '+g.room_number:'—'}</td>
+                  <td>${g.phone||'—'}</td>
+                  <td>${fmt(g.monthly_rent)}</td>
+                  <td class="text-green fw-600">${fmt(g.collected_this_month)}</td>
+                  <td class="${due>0?'text-red fw-600':''}">${fmt(Math.max(due,0))}</td>
+                  <td><span class="badge ${due<=0?'badge-green':'badge-red'}">${due<=0?'Paid':'Pending'}</span></td>
+                </tr>`;}).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>`);
+  } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+}
+
 // ── REPORTS ───────────────────────────────────────
 async function pgReports() {
   loading();
@@ -1101,4 +1192,145 @@ async function pgReports() {
         </div>
       </div>`);
   } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+}
+
+// ── ADMIN (Staff / Audit Log / Deposit Refunds) ───
+let adminActiveTab = 'staff';
+
+async function pgAdmin() {
+  loading();
+  document.getElementById('topbar-actions').innerHTML = '';
+  renderAdminPage();
+}
+
+function renderAdminPage() {
+  setContent(`
+    <div class="page-header"><h1>🔐 Admin</h1><p>Staff accounts, audit trail, and deposit refund history</p></div>
+    <div class="flex gap-2 mb-5">
+      <button class="btn ${adminActiveTab==='staff'?'btn-primary':'btn-outline'} btn-sm" onclick="switchAdminTab('staff')">Staff Users</button>
+      <button class="btn ${adminActiveTab==='audit'?'btn-primary':'btn-outline'} btn-sm" onclick="switchAdminTab('audit')">Audit Log</button>
+      <button class="btn ${adminActiveTab==='refunds'?'btn-primary':'btn-outline'} btn-sm" onclick="switchAdminTab('refunds')">Deposit Refunds</button>
+    </div>
+    <div id="admin-tab-content"><div class="loading-center"><div class="spinner"></div></div></div>`);
+  if (adminActiveTab === 'staff') renderAdminStaffTab();
+  else if (adminActiveTab === 'audit') renderAdminAuditTab();
+  else renderAdminRefundsTab();
+}
+
+function switchAdminTab(tab) {
+  adminActiveTab = tab;
+  renderAdminPage();
+}
+
+async function renderAdminStaffTab() {
+  try {
+    const users = await API.getUsers();
+    document.getElementById('admin-tab-content').innerHTML = `
+      <div class="card">
+        <div class="card-header"><h3>Staff &amp; Admin Accounts</h3><button class="btn btn-primary btn-sm" onclick="staffModal()">+ Add Staff</button></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>USERNAME</th><th>ROLE</th><th>CREATED</th><th>ACTIONS</th></tr></thead>
+            <tbody>
+              ${users.map(u=>`<tr>
+                <td><strong>${u.username}</strong></td>
+                <td><span class="badge ${u.role==='admin'?'badge-purple':'badge-blue'}">${u.role}</span></td>
+                <td>${fmtDate(u.created_at)}</td>
+                <td>${u.username!==JSON.parse(localStorage.getItem('sm_user')||'{}').username?`<button class="btn btn-danger btn-sm btn-icon" onclick="delStaffUser(${u.id},'${u.username}')">✕</button>`:'<span class="text-muted">You</span>'}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+  } catch(e) { document.getElementById('admin-tab-content').innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
+}
+
+function staffModal() {
+  openModal(`
+    <div class="modal">
+      <div class="modal-header"><h3>+ Add Staff Account</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+      <div class="modal-body">
+        <div id="st-alert" class="alert alert-danger hidden"></div>
+        <div class="form-group"><label>Username *</label><input id="st-username" placeholder="e.g. warden1"/></div>
+        <div class="form-group"><label>Password *</label><input id="st-password" type="password" placeholder="At least 6 characters"/></div>
+        <div class="form-group"><label>Role</label>
+          <select id="st-role"><option value="staff">Staff (can't delete records or manage users)</option><option value="admin">Admin (full access)</option></select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveStaffUser()">Add Account</button>
+      </div>
+    </div>`);
+}
+
+async function saveStaffUser() {
+  const al = document.getElementById('st-alert');
+  const d = {
+    username: document.getElementById('st-username').value.trim(),
+    password: document.getElementById('st-password').value,
+    role: document.getElementById('st-role').value
+  };
+  if (!d.username || !d.password) { showAlert(al, 'Username and password required'); return; }
+  try { await API.createUser(d); closeModal(); renderAdminPage(); }
+  catch(e) { showAlert(al, e.message); }
+}
+
+async function delStaffUser(id, username) {
+  if (!confirm(`Remove staff account "${username}"? They will no longer be able to log in.`)) return;
+  try { await API.deleteUser(id); renderAdminPage(); } catch(e) { alert(e.message); }
+}
+
+async function renderAdminAuditTab() {
+  try {
+    const log = await API.getActivityLog();
+    document.getElementById('admin-tab-content').innerHTML = `
+      <div class="card">
+        <div class="card-header"><h3>Recent Activity</h3></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>WHEN</th><th>USER</th><th>ACTION</th><th>DETAILS</th></tr></thead>
+            <tbody>
+              ${log.length===0
+                ? `<tr class="empty-row"><td colspan="4">No activity recorded yet.</td></tr>`
+                : log.map(a=>`<tr>
+                  <td style="white-space:nowrap">${new Date(a.created_at).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}</td>
+                  <td>${a.username||'—'}</td>
+                  <td><span class="badge badge-gray">${a.action}</span></td>
+                  <td>${a.details||'—'}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+  } catch(e) { document.getElementById('admin-tab-content').innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
+}
+
+async function renderAdminRefundsTab() {
+  try {
+    const refunds = await API.getDepositRefunds();
+    document.getElementById('admin-tab-content').innerHTML = `
+      <div class="card">
+        <div class="card-header"><h3>Deposit Refund History</h3></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>DATE</th><th>GUEST</th><th>ROOM</th><th>DEPOSIT</th><th>DEDUCTIONS</th><th>REFUNDED</th><th>MODE</th><th>BY</th></tr></thead>
+            <tbody>
+              ${refunds.length===0
+                ? `<tr class="empty-row"><td colspan="8">No checkouts processed yet.</td></tr>`
+                : refunds.map(r=>`<tr>
+                  <td>${fmtDate(r.created_at)}</td>
+                  <td><strong>${r.guest_name}</strong></td>
+                  <td>${r.room_number||'—'}</td>
+                  <td>${fmt(r.deposit_amount)}</td>
+                  <td class="text-red">${fmt(r.deductions)}${r.deduction_notes?` <span class="text-muted" style="font-size:11px">(${r.deduction_notes})</span>`:''}</td>
+                  <td class="${parseFloat(r.refund_amount)<0?'text-red':'text-green'} fw-600">${fmt(r.refund_amount)}</td>
+                  <td>${r.refund_mode}</td>
+                  <td>${r.processed_by_username||'—'}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+  } catch(e) { document.getElementById('admin-tab-content').innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
 }
