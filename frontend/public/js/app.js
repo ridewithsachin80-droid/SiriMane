@@ -366,7 +366,10 @@ async function saveGuest(id) {
 
 async function viewGuest(id) {
   try {
-    const g = await API.getGuest(id);
+    const [g, ledgerData] = await Promise.all([API.getGuest(id), API.getGuestLedger(id).catch(()=>null)]);
+    const balance = ledgerData ? parseFloat(ledgerData.current_balance) : null;
+    const balanceLabel = balance===null ? '' : balance < -0.5 ? `${fmt(Math.abs(balance))} due` : balance > 0.5 ? `${fmt(balance)} credit` : 'Settled';
+    const balanceClass = balance===null ? '' : balance < -0.5 ? 'text-red' : balance > 0.5 ? 'text-green' : 'text-muted';
     openModal(`
       <div class="modal modal-lg">
         <div class="modal-header"><h3>👤 ${g.name}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
@@ -378,7 +381,26 @@ async function viewGuest(id) {
               <div style="font-size:14px;font-weight:500;margin-top:2px">${v||'—'}</div>
             </div>`).join('')}
           </div>
-          <h4 style="margin-bottom:10px;font-size:14px">Payment History</h4>
+
+          <div class="flex justify-between items-center mb-4">
+            <h4 style="font-size:14px;margin:0">Rent Ledger</h4>
+            ${balanceLabel?`<span class="fw-600 ${balanceClass}">Current balance: ${balanceLabel}</span>`:''}
+          </div>
+          ${!ledgerData
+            ? '<p class="text-muted">Could not load ledger.</p>'
+            : ledgerData.ledger.length===0
+              ? '<p class="text-muted">No rent ledger yet — needs a join date and a monthly rent set.</p>'
+              : `<div class="table-wrap mb-5"><table><thead><tr><th>MONTH</th><th>RENT DUE</th><th>RENT PAID</th><th>BALANCE</th></tr></thead><tbody>
+                ${ledgerData.ledger.map(m=>`<tr>
+                  <td>${m.label}</td>
+                  <td>${fmt(m.rent_due)}</td>
+                  <td class="text-green">${fmt(m.rent_paid)}</td>
+                  <td class="${m.running_balance<-0.5?'text-red fw-600':m.running_balance>0.5?'text-green fw-600':''}">${m.running_balance<-0.5?fmt(Math.abs(m.running_balance))+' due':m.running_balance>0.5?fmt(m.running_balance)+' credit':'Settled'}</td>
+                </tr>`).join('')}
+                </tbody></table></div>
+                <p class="text-muted" style="font-size:11px;margin-top:-12px;margin-bottom:18px">Based on payment dates, not the "For Month" text field — so an early or late payment is counted toward the month it was actually paid in.</p>`}
+
+          <h4 style="margin-bottom:10px;font-size:14px">All Transactions</h4>
           ${g.payments.length===0
             ? '<p class="text-muted">No payments recorded</p>'
             : `<table><thead><tr><th>Date</th><th>Amount</th><th>Type</th><th>Mode</th></tr></thead><tbody>
@@ -1099,32 +1121,32 @@ async function pgRentDue() {
   document.getElementById('topbar-actions').innerHTML = '';
   try {
     const list = await API.getRentDue();
-    const totalDue = list.reduce((s,g) => s + Math.max(parseFloat(g.amount_due), 0), 0);
+    const totalDue = list.reduce((s,g) => s + parseFloat(g.amount_due), 0);
     const fullyPaidCount = list.filter(g => parseFloat(g.amount_due) <= 0).length;
     setContent(`
-      <div class="page-header"><h1>📅 Rent Due</h1><p>Who's paid this month and who's still pending</p></div>
+      <div class="page-header"><h1>📅 Rent Due</h1><p>Running balance for each guest, carried forward across months — not just this month's snapshot</p></div>
       <div class="stat-grid mb-5">
-        <div class="stat-card red"><div class="s-label">Total Pending</div><div class="s-value">${fmt(totalDue)}</div><div class="s-sub">${new Date().toLocaleString('en-IN',{month:'long',year:'numeric'})}</div></div>
-        <div class="stat-card"><div class="s-label">Fully Paid</div><div class="s-value">${fullyPaidCount} / ${list.length}</div><div class="s-sub" style="color:var(--green)">Guests this month</div></div>
+        <div class="stat-card red"><div class="s-label">Total Outstanding</div><div class="s-value">${fmt(totalDue)}</div><div class="s-sub">Across all guests</div></div>
+        <div class="stat-card"><div class="s-label">Settled or Ahead</div><div class="s-value">${fullyPaidCount} / ${list.length}</div><div class="s-sub" style="color:var(--green)">Guests</div></div>
       </div>
       <div class="card">
         <div class="card-header"><h3>All Active Guests</h3></div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>NAME</th><th>ROOM</th><th>PHONE</th><th>MONTHLY RENT</th><th>COLLECTED</th><th>DUE</th><th>STATUS</th></tr></thead>
+            <thead><tr><th>NAME</th><th>ROOM</th><th>PHONE</th><th>MONTHLY RENT</th><th>BALANCE</th><th>STATUS</th></tr></thead>
             <tbody>
               ${list.length===0
-                ? `<tr class="empty-row"><td colspan="7">No guests with rent configured.</td></tr>`
+                ? `<tr class="empty-row"><td colspan="6">No guests with rent configured.</td></tr>`
                 : list.map(g=>{
                   const due = parseFloat(g.amount_due);
+                  const credit = parseFloat(g.credit);
                   return `<tr>
                   <td><strong>${g.name}</strong></td>
                   <td>${g.room_number?'Room '+g.room_number:'—'}</td>
                   <td>${g.phone||'—'}</td>
                   <td>${fmt(g.monthly_rent)}</td>
-                  <td class="text-green fw-600">${fmt(g.collected_this_month)}</td>
-                  <td class="${due>0?'text-red fw-600':''}">${fmt(Math.max(due,0))}</td>
-                  <td><span class="badge ${due<=0?'badge-green':'badge-red'}">${due<=0?'Paid':'Pending'}</span></td>
+                  <td class="${due>0?'text-red fw-600':credit>0?'text-green fw-600':''}">${due>0?fmt(due)+' due':credit>0?fmt(credit)+' credit':'Settled'}</td>
+                  <td><span class="badge ${due>0?'badge-red':'badge-green'}">${due>0?'Pending':credit>0?'Ahead':'Settled'}</span></td>
                 </tr>`;}).join('')}
             </tbody>
           </table>
