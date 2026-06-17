@@ -8,16 +8,63 @@ const requireAdmin = auth.requireAdmin;
 
 // Records who did what, for the Audit Log. Never throws — a logging failure
 // should never block the actual request it's describing.
-async function logActivity(req, action, details) {
-  try {
-    await pool.query(
-      'INSERT INTO activity_log(user_id, action, details, ip_address) VALUES($1,$2,$3,$4)',
-      [req.user ? req.user.id : null, action, details || null, req.ip]
-    );
-  } catch (err) {
-    console.error('activity log failed:', err.message);
+// Computes a month-by-month rent ledger for one guest, with a running balance
+// carried forward across months (positive = guest is in credit, negative =
+// guest still owes that much). Deliberately uses the actual collection_date
+// to attribute a payment to a month, NOT the free-text "collection_month"
+// field on the form — that field is manually typed by whoever logs the
+// payment and isn't reliable enough to do balance math on.
+// Known limitation: this assumes the guest's CURRENT monthly_rent applied to
+// every past month too. If a guest's rent was ever changed mid-stay, past
+// months in this ledger will be calculated against the new rate, not what
+// was actually owed at the time.
+async function computeGuestLedger(guest) {
+  const monthlyRent = parseFloat(guest.monthly_rent) || 0;
+  if (!guest.join_date) return { ledger: [], currentBalance: 0 };
+
+  const rentRows = await pool.query(
+    `SELECT amount, collection_date FROM collections WHERE guest_id=$1 AND collection_type='rent' AND is_deleted=false ORDER BY collection_date ASC`,
+    [guest.id]
+  );
+
+  const paidByMonth = {};
+  for (const row of rentRows.rows) {
+    const d = new Date(row.collection_date);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    paidByMonth[key] = (paidByMonth[key] || 0) + parseFloat(row.amount);
   }
+
+  const joinDate = new Date(guest.join_date);
+  const endDate = guest.leave_date ? new Date(guest.leave_date) : new Date();
+  if (isNaN(joinDate.getTime())) return { ledger: [], currentBalance: 0 };
+
+  let cursor = new Date(joinDate.getFullYear(), joinDate.getMonth(), 1);
+  const endCursor = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
+
+  const ledger = [];
+  let balance = 0;
+  let safety = 0; // hard cap so a bad join_date can never hang the request
+  while (cursor <= endCursor && safety < 240) {
+    const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`;
+    const due = monthlyRent;
+    const paid = paidByMonth[key] || 0;
+    balance += (paid - due);
+    ledger.push({
+      month: key,
+      label: cursor.toLocaleString('en-IN', { month: 'long', year: 'numeric' }),
+      rent_due: due,
+      rent_paid: paid,
+      month_balance: paid - due,
+      running_balance: balance
+    });
+    cursor.setMonth(cursor.getMonth() + 1);
+    safety++;
+  }
+
+  return { ledger, currentBalance: balance };
 }
+
+
 
 // ── AUTH ─────────────────────────────────────────
 router.post('/auth/login', async (req, res) => {
@@ -389,27 +436,48 @@ router.post('/guest-message', async (req, res) => {
 });
 
 // ── RENT DUE TRACKER ──────────────────────────────
-// Compares each active guest's monthly rent against what they've actually
-// paid (collection_type='rent') so far this calendar month. Visible to both
-// admin and staff — it's an operational view, not a sensitive one.
-// Note: this is a simple same-month comparison, not prorated for guests who
-// joined partway through the month.
+// Now backed by the same ledger math as the per-guest ledger below, so a
+// guest who overpaid last month correctly shows reduced (or zero) amount
+// due this month, instead of resetting to a fresh month-only snapshot.
 router.get('/rent-due', auth, async (req, res) => {
   try {
-    const r = await pool.query(`
-      SELECT g.id, g.name, g.phone, g.join_date, g.monthly_rent, r.room_number,
-        COALESCE(SUM(c.amount), 0) AS collected_this_month,
-        g.monthly_rent - COALESCE(SUM(c.amount), 0) AS amount_due
-      FROM guests g
-      LEFT JOIN rooms r ON g.room_id = r.id
-      LEFT JOIN collections c ON c.guest_id = g.id AND c.is_deleted = false AND c.collection_type = 'rent'
-        AND EXTRACT(MONTH FROM c.collection_date) = EXTRACT(MONTH FROM CURRENT_DATE)
-        AND EXTRACT(YEAR FROM c.collection_date) = EXTRACT(YEAR FROM CURRENT_DATE)
+    const guests = await pool.query(`
+      SELECT g.id, g.name, g.phone, g.join_date, g.leave_date, g.monthly_rent, r.room_number
+      FROM guests g LEFT JOIN rooms r ON g.room_id = r.id
       WHERE g.is_active = true AND g.monthly_rent > 0
-      GROUP BY g.id, g.name, g.phone, g.join_date, g.monthly_rent, r.room_number
-      ORDER BY amount_due DESC, g.name ASC
+      ORDER BY g.name ASC
     `);
-    res.json(r.rows);
+    const results = [];
+    for (const guest of guests.rows) {
+      const { currentBalance } = await computeGuestLedger(guest);
+      results.push({
+        id: guest.id,
+        name: guest.name,
+        phone: guest.phone,
+        room_number: guest.room_number,
+        monthly_rent: guest.monthly_rent,
+        current_balance: currentBalance,
+        amount_due: currentBalance < 0 ? Math.abs(currentBalance) : 0,
+        credit: currentBalance > 0 ? currentBalance : 0
+      });
+    }
+    results.sort((a, b) => b.amount_due - a.amount_due);
+    res.json(results);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── PER-GUEST LEDGER ───────────────────────────────
+router.get('/guests/:id/ledger', auth, async (req, res) => {
+  try {
+    const g = await pool.query('SELECT * FROM guests WHERE id=$1', [req.params.id]);
+    const guest = g.rows[0];
+    if (!guest) return res.status(404).json({ error: 'Guest not found' });
+    const { ledger, currentBalance } = await computeGuestLedger(guest);
+    res.json({
+      guest: { id: guest.id, name: guest.name, monthly_rent: guest.monthly_rent, join_date: guest.join_date, is_active: guest.is_active },
+      ledger,
+      current_balance: currentBalance
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
