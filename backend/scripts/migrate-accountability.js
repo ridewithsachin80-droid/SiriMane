@@ -51,6 +51,35 @@ async function migrate() {
     `);
     console.log('✅ deposit_refunds table ready');
 
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS guest_rent_history (
+        id SERIAL PRIMARY KEY,
+        guest_id INTEGER REFERENCES guests(id) ON DELETE CASCADE,
+        monthly_rent DECIMAL(10,2) NOT NULL,
+        effective_from DATE NOT NULL,
+        changed_by INTEGER REFERENCES users(id),
+        note TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_rent_history_guest ON guest_rent_history(guest_id, effective_from);`);
+    console.log('✅ guest_rent_history table ready');
+
+    // Backfill: every existing guest gets one history row using their CURRENT
+    // rate, dated from their join date. This is a best-effort assumption —
+    // if a guest's rent was actually changed at some point before this
+    // migration ran, that past change has no record and can't be recovered.
+    // Going forward, real changes will be tracked properly.
+    const backfillResult = await client.query(`
+      INSERT INTO guest_rent_history (guest_id, monthly_rent, effective_from, note)
+      SELECT id, monthly_rent, join_date, 'Backfilled at migration time — assumes this rate applied since join date'
+      FROM guests
+      WHERE monthly_rent > 0
+      AND id NOT IN (SELECT guest_id FROM guest_rent_history WHERE guest_id IS NOT NULL)
+      RETURNING id;
+    `);
+    console.log(`✅ guest_rent_history backfilled for ${backfillResult.rowCount} existing guest(s)`);
+
     console.log('\n🎉 Accountability migration completed successfully!');
   } catch (err) {
     console.error('❌ Migration failed:', err.message);
