@@ -326,8 +326,13 @@ async function guestModal(gData=null, id=null) {
         </div>
         <div class="form-row">
           <div class="form-group"><label>Check-in Date *</label><input id="gf-join" type="date" value="${g.join_date?g.join_date.split('T')[0]:nowDate()}"/></div>
-          <div class="form-group"><label>Monthly Rent (₹)</label><input id="gf-rent" type="number" value="${g.monthly_rent||''}" placeholder="e.g. 5000"/></div>
+          <div class="form-group"><label>Monthly Rent (₹)</label><input id="gf-rent" type="number" value="${g.monthly_rent||''}" data-original="${g.monthly_rent||0}" placeholder="e.g. 5000" oninput="toggleRentEffectiveField()"/></div>
         </div>
+        ${g.id ? `<div class="form-group" id="gf-rent-effective-wrap" style="display:none">
+          <label>New rate effective from</label>
+          <input id="gf-rent-effective" type="date" value="${nowDate()}"/>
+          <p class="text-muted" style="font-size:11px;margin-top:4px">Only matters since you changed the rent above. Past months in their ledger keep using the old rate; only this date onward uses the new one.</p>
+        </div>` : ''}
         <div class="form-row">
           <div class="form-group"><label>Deposit (₹)</label><input id="gf-dep" type="number" value="${g.deposit_amount||''}" placeholder="e.g. 5000"/></div>
           <div class="form-group"><label>ID Proof</label>
@@ -343,8 +348,18 @@ async function guestModal(gData=null, id=null) {
     </div>`);
 }
 
+function toggleRentEffectiveField() {
+  const wrap = document.getElementById('gf-rent-effective-wrap');
+  if (!wrap) return;
+  const input = document.getElementById('gf-rent');
+  const newVal = parseFloat(input.value) || 0;
+  const orig = parseFloat(input.dataset.original) || 0;
+  wrap.style.display = (newVal !== orig) ? 'block' : 'none';
+}
+
 async function saveGuest(id) {
   const al = document.getElementById('gf-alert');
+  const rentEffectiveEl = document.getElementById('gf-rent-effective');
   const d = {
     name:document.getElementById('gf-name').value.trim(),
     phone:document.getElementById('gf-phone').value.trim(),
@@ -356,7 +371,8 @@ async function saveGuest(id) {
     monthly_rent:document.getElementById('gf-rent').value||0,
     deposit_amount:document.getElementById('gf-dep').value||0,
     id_proof_type:document.getElementById('gf-idtype').value,
-    notes:document.getElementById('gf-notes').value
+    notes:document.getElementById('gf-notes').value,
+    rent_effective_from: rentEffectiveEl ? rentEffectiveEl.value : null
   };
   if(!d.name) { showAlert(al,'Name is required'); return; }
   if(!d.join_date) { showAlert(al,'Check-in date required'); return; }
@@ -366,7 +382,11 @@ async function saveGuest(id) {
 
 async function viewGuest(id) {
   try {
-    const [g, ledgerData] = await Promise.all([API.getGuest(id), API.getGuestLedger(id).catch(()=>null)]);
+    const [g, ledgerData, history] = await Promise.all([
+      API.getGuest(id),
+      API.getGuestLedger(id).catch(()=>null),
+      API.getRentHistory(id).catch(()=>[])
+    ]);
     const balance = ledgerData ? parseFloat(ledgerData.current_balance) : null;
     const balanceLabel = balance===null ? '' : balance < -0.5 ? `${fmt(Math.abs(balance))} due` : balance > 0.5 ? `${fmt(balance)} credit` : 'Settled';
     const balanceClass = balance===null ? '' : balance < -0.5 ? 'text-red' : balance > 0.5 ? 'text-green' : 'text-muted';
@@ -400,6 +420,16 @@ async function viewGuest(id) {
                 </tbody></table></div>
                 <p class="text-muted" style="font-size:11px;margin-top:-12px;margin-bottom:18px">Based on payment dates, not the "For Month" text field — so an early or late payment is counted toward the month it was actually paid in.</p>`}
 
+          <div class="flex justify-between items-center mb-4">
+            <h4 style="font-size:14px;margin:0">Rent Rate History</h4>
+            ${isAdmin()?`<button class="btn btn-outline btn-sm" onclick="rentHistoryModal(${g.id},'${g.name.replace(/'/g,"\\'")}')">+ Backfill a past change</button>`:''}
+          </div>
+          ${history.length===0
+            ? '<p class="text-muted mb-5">No rate history recorded.</p>'
+            : `<table class="mb-5"><thead><tr><th>EFFECTIVE FROM</th><th>RATE</th><th>SET BY</th><th>NOTE</th></tr></thead><tbody>
+              ${history.map(h=>`<tr><td>${fmtDate(h.effective_from)}</td><td class="fw-600">${fmt(h.monthly_rent)}</td><td>${h.username||'—'}</td><td class="text-muted">${h.note||'—'}</td></tr>`).join('')}
+              </tbody></table>`}
+
           <h4 style="margin-bottom:10px;font-size:14px">All Transactions</h4>
           ${g.payments.length===0
             ? '<p class="text-muted">No payments recorded</p>'
@@ -414,6 +444,36 @@ async function viewGuest(id) {
         </div>
       </div>`);
   } catch(e) { alert(e.message); }
+}
+
+function rentHistoryModal(guestId, guestName) {
+  openModal(`
+    <div class="modal">
+      <div class="modal-header"><h3>Backfill Past Rate — ${guestName}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+      <div class="modal-body">
+        <div id="rh-alert" class="alert alert-danger hidden"></div>
+        <p class="text-muted" style="font-size:12px;margin-bottom:14px">Use this only for a rent change that actually happened in the past, before this history feature existed. This will recalculate this guest's ledger for all months from the effective date onward.</p>
+        <div class="form-group"><label>Rent Amount (₹) *</label><input id="rh-amt" type="number" placeholder="e.g. 6000"/></div>
+        <div class="form-group"><label>Effective From *</label><input id="rh-date" type="date"/></div>
+        <div class="form-group"><label>Note</label><input id="rh-note" placeholder="e.g. Increased after AC installed"/></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveRentHistory(${guestId})">Save</button>
+      </div>
+    </div>`);
+}
+
+async function saveRentHistory(guestId) {
+  const al = document.getElementById('rh-alert');
+  const d = {
+    monthly_rent: document.getElementById('rh-amt').value,
+    effective_from: document.getElementById('rh-date').value,
+    note: document.getElementById('rh-note').value
+  };
+  if (!d.monthly_rent || !d.effective_from) { showAlert(al, 'Rent amount and effective date are both required'); return; }
+  try { await API.addRentHistory(guestId, d); closeModal(); viewGuest(guestId); }
+  catch(e) { showAlert(al, e.message); }
 }
 
 async function checkoutModal(id) {

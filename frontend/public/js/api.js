@@ -44,6 +44,8 @@ const API = {
   deleteUser: id => apiFetch(`/users/${id}`, { method:'DELETE' }),
   getRentDue: () => apiFetch('/rent-due'),
   getGuestLedger: id => apiFetch(`/guests/${id}/ledger`),
+  getRentHistory: id => apiFetch(`/guests/${id}/rent-history`),
+  addRentHistory: (id,d) => apiFetch(`/guests/${id}/rent-history`, { method:'POST', body:d }),
   getActivityLog: (limit) => apiFetch(`/activity-log${limit?`?limit=${limit}`:''}`),
   getDepositRefunds: () => apiFetch('/deposit-refunds'),
   getCollections: (p='') => apiFetch(`/collections${p}`),
