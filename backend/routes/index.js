@@ -22,7 +22,7 @@ async function computeGuestLedger(guest) {
 
   const [rentRows, historyRows] = await Promise.all([
     pool.query(
-      `SELECT amount, collection_date FROM collections WHERE guest_id=$1 AND collection_type='rent' AND is_deleted=false ORDER BY collection_date ASC`,
+      `SELECT amount, collection_date FROM collections WHERE guest_id=$1 AND collection_type='rent' AND is_deleted=false AND status='confirmed' ORDER BY collection_date ASC`,
       [guest.id]
     ),
     pool.query(
@@ -126,10 +126,10 @@ router.get('/dashboard', auth, async (req, res) => {
       pool.query('SELECT COUNT(*) FROM guests WHERE is_active=true'),
       pool.query(`SELECT COUNT(*) as total_rooms, COALESCE(SUM(total_beds),0) as total_beds FROM rooms WHERE is_active=true`),
       pool.query(`SELECT COALESCE(SUM(r.total_beds),0) - COUNT(g.id) as available FROM rooms r LEFT JOIN guests g ON r.id=g.room_id AND g.is_active=true WHERE r.is_active=true`),
-      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND DATE_TRUNC('month',collection_date)=DATE_TRUNC('month',NOW())`),
+      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND status='confirmed' AND DATE_TRUNC('month',collection_date)=DATE_TRUNC('month',NOW())`),
       pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM purchases WHERE is_deleted=false AND DATE_TRUNC('month',purchase_date)=DATE_TRUNC('month',NOW())`),
       pool.query(`SELECT g.*,r.room_number FROM guests g LEFT JOIN rooms r ON g.room_id=r.id WHERE g.is_active=true ORDER BY g.created_at DESC LIMIT 5`),
-      pool.query(`SELECT c.*,g.name as guest_name FROM collections c LEFT JOIN guests g ON c.guest_id=g.id WHERE c.is_deleted=false ORDER BY c.collection_date DESC LIMIT 5`)
+      pool.query(`SELECT c.*,g.name as guest_name FROM collections c LEFT JOIN guests g ON c.guest_id=g.id WHERE c.is_deleted=false AND c.status='confirmed' ORDER BY c.collection_date DESC LIMIT 5`)
     ]);
     const totalBeds = parseInt(rooms.rows[0].total_beds) || 0;
     const availBeds = parseInt(beds.rows[0].available) || 0;
@@ -328,6 +328,18 @@ router.delete('/collections/:id', auth, requireAdmin, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Confirms a guest's self-reported UPI payment claim after the admin has
+// checked it actually landed in their bank/UPI app. Rejecting one (it never
+// arrived, or was a mistake) reuses the delete route above — same end state.
+router.put('/collections/:id/confirm', auth, requireAdmin, async (req, res) => {
+  try {
+    const r = await pool.query(`UPDATE collections SET status='confirmed' WHERE id=$1 AND is_deleted=false RETURNING *`, [req.params.id]);
+    if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
+    await logActivity(req, 'upi_claim_confirmed', `₹${r.rows[0].amount} from ${r.rows[0].guest_name||'guest #'+r.rows[0].guest_id}`);
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── PURCHASES (Expenses) ─────────────────────────
 router.get('/purchases', auth, async (req, res) => {
   try {
@@ -445,9 +457,9 @@ router.get('/reports', auth, async (req, res) => {
     const m = month || new Date().getMonth() + 1;
     const y = year || new Date().getFullYear();
     const [income, expenses, incomeBreakdown, expenseBreakdown] = await Promise.all([
-      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND EXTRACT(MONTH FROM collection_date)=$1 AND EXTRACT(YEAR FROM collection_date)=$2`, [m,y]),
+      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND status='confirmed' AND EXTRACT(MONTH FROM collection_date)=$1 AND EXTRACT(YEAR FROM collection_date)=$2`, [m,y]),
       pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM purchases WHERE is_deleted=false AND EXTRACT(MONTH FROM purchase_date)=$1 AND EXTRACT(YEAR FROM purchase_date)=$2`, [m,y]),
-      pool.query(`SELECT collection_type, COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND EXTRACT(MONTH FROM collection_date)=$1 AND EXTRACT(YEAR FROM collection_date)=$2 GROUP BY collection_type`, [m,y]),
+      pool.query(`SELECT collection_type, COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND status='confirmed' AND EXTRACT(MONTH FROM collection_date)=$1 AND EXTRACT(YEAR FROM collection_date)=$2 GROUP BY collection_type`, [m,y]),
       pool.query(`SELECT category, COALESCE(SUM(amount),0) as total FROM purchases WHERE is_deleted=false AND EXTRACT(MONTH FROM purchase_date)=$1 AND EXTRACT(YEAR FROM purchase_date)=$2 GROUP BY category`, [m,y])
     ]);
     const inc = parseFloat(income.rows[0].total);
@@ -463,7 +475,7 @@ router.get('/guest-lookup', async (req, res) => {
   try {
     const g = await pool.query(`SELECT g.*,r.room_number FROM guests g LEFT JOIN rooms r ON g.room_id=r.id WHERE g.phone=$1 LIMIT 1`, [phone]);
     if (!g.rows[0]) return res.status(404).json({ error: 'Not found' });
-    const c = await pool.query('SELECT amount,collection_date,collection_type,payment_mode FROM collections WHERE guest_id=$1 AND is_deleted=false ORDER BY collection_date DESC LIMIT 12', [g.rows[0].id]);
+    const c = await pool.query('SELECT amount,collection_date,collection_type,payment_mode FROM collections WHERE guest_id=$1 AND is_deleted=false AND status=\'confirmed\' ORDER BY collection_date DESC LIMIT 12', [g.rows[0].id]);
     const a = await pool.query('SELECT title,message,priority,created_at FROM announcements WHERE is_active=true ORDER BY created_at DESC LIMIT 5');
     const m = await pool.query('SELECT * FROM daily_menu ORDER BY CASE day_of_week WHEN \'Monday\' THEN 1 WHEN \'Tuesday\' THEN 2 WHEN \'Wednesday\' THEN 3 WHEN \'Thursday\' THEN 4 WHEN \'Friday\' THEN 5 WHEN \'Saturday\' THEN 6 WHEN \'Sunday\' THEN 7 END');
     res.json({ ...g.rows[0], payments: c.rows, announcements: a.rows, menu: m.rows });
@@ -551,6 +563,32 @@ router.post('/guests/:id/rent-history', auth, requireAdmin, async (req, res) => 
     );
     await logActivity(req, 'rent_history_backfill', `${g.rows[0].name}: ₹${monthly_rent} effective ${effective_from}`);
     res.status(201).json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── APP SETTINGS (admin only) ─────────────────────
+router.get('/settings', auth, requireAdmin, async (req, res) => {
+  try {
+    const r = await pool.query('SELECT key, value FROM app_settings');
+    const settings = {};
+    r.rows.forEach(row => { settings[row.key] = row.value; });
+    res.json(settings);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.put('/settings', auth, requireAdmin, async (req, res) => {
+  try {
+    const entries = Object.entries(req.body || {});
+    if (entries.length === 0) return res.status(400).json({ error: 'No settings provided' });
+    for (const [key, value] of entries) {
+      await pool.query(
+        `INSERT INTO app_settings(key, value, updated_by, updated_at) VALUES($1,$2,$3,NOW())
+         ON CONFLICT (key) DO UPDATE SET value=$2, updated_by=$3, updated_at=NOW()`,
+        [key, value, req.user.id]
+      );
+    }
+    await logActivity(req, 'settings_update', entries.map(([k]) => k).join(', '));
+    res.json({ message: 'Settings saved' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -675,19 +713,26 @@ const guestAuth = async (req, res, next) => {
 router.get('/guest-portal', guestAuth, async (req, res) => {
   try {
     const g = req.guest;
-    const [room, payments, menu, announcements] = await Promise.all([
+    const [room, payments, menu, announcements, settingsRows, ledgerResult] = await Promise.all([
       g.room_id ? pool.query('SELECT room_number FROM rooms WHERE id=$1', [g.room_id]) : { rows: [{}] },
       pool.query('SELECT * FROM collections WHERE guest_id=$1 AND is_deleted=false ORDER BY collection_date DESC LIMIT 24', [g.id]),
       pool.query('SELECT * FROM daily_menu ORDER BY CASE day_of_week WHEN \'Monday\' THEN 1 WHEN \'Tuesday\' THEN 2 WHEN \'Wednesday\' THEN 3 WHEN \'Thursday\' THEN 4 WHEN \'Friday\' THEN 5 WHEN \'Saturday\' THEN 6 WHEN \'Sunday\' THEN 7 END'),
-      pool.query('SELECT * FROM announcements WHERE is_active=true ORDER BY created_at DESC LIMIT 10')
+      pool.query('SELECT * FROM announcements WHERE is_active=true ORDER BY created_at DESC LIMIT 10'),
+      pool.query(`SELECT key, value FROM app_settings WHERE key IN ('upi_vpa','upi_name')`),
+      computeGuestLedger(g)
     ]);
+    const settings = {};
+    settingsRows.rows.forEach(row => { settings[row.key] = row.value; });
     res.json({
       ...g,
       password_hash: undefined,
       room_number: room.rows[0]?.room_number,
       payments: payments.rows,
       menu: menu.rows,
-      announcements: announcements.rows
+      announcements: announcements.rows,
+      upi_vpa: settings.upi_vpa || null,
+      upi_name: settings.upi_name || null,
+      current_balance: ledgerResult.currentBalance
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -709,5 +754,23 @@ router.post('/guest-change-password', guestAuth, async (req, res) => {
     const hash = await bcrypt.hash(newPassword, 10);
     await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [hash, g.id]);
     res.json({ message: 'Password changed successfully' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/guest-upi-claim — resident reports "I've paid" after using the
+// UPI link. This does NOT count as confirmed income anywhere (dashboard,
+// ledger, reports) until an admin confirms it actually arrived.
+router.post('/guest-upi-claim', guestAuth, async (req, res) => {
+  const { amount } = req.body;
+  const amt = parseFloat(amount);
+  if (!amt || amt <= 0) return res.status(400).json({ error: 'A valid amount is required' });
+  try {
+    const g = req.guest;
+    const r = await pool.query(
+      `INSERT INTO collections(guest_id, guest_name, amount, collection_date, collection_type, payment_mode, status, reported_by_guest, description)
+       VALUES($1,$2,$3,NOW(),'rent','UPI','pending_verification',true,'Self-reported by resident via UPI link') RETURNING *`,
+      [g.id, g.name, amt]
+    );
+    res.status(201).json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
