@@ -8,6 +8,17 @@ const requireAdmin = auth.requireAdmin;
 
 // Records who did what, for the Audit Log. Never throws — a logging failure
 // should never block the actual request it's describing.
+async function logActivity(req, action, details) {
+  try {
+    await pool.query(
+      'INSERT INTO activity_log(user_id, action, details, ip_address) VALUES($1,$2,$3,$4)',
+      [req.user ? req.user.id : null, action, details || null, req.ip]
+    );
+  } catch (err) {
+    console.error('activity log failed:', err.message);
+  }
+}
+
 // Computes a month-by-month rent ledger for one guest, with a running balance
 // carried forward across months (positive = guest is in credit, negative =
 // guest still owes that much). Deliberately uses the actual collection_date
