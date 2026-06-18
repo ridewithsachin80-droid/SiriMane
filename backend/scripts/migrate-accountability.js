@@ -80,6 +80,20 @@ async function migrate() {
     `);
     console.log(`✅ guest_rent_history backfilled for ${backfillResult.rowCount} existing guest(s)`);
 
+    await client.query(`ALTER TABLE collections ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'confirmed';`);
+    await client.query(`ALTER TABLE collections ADD COLUMN IF NOT EXISTS reported_by_guest BOOLEAN DEFAULT FALSE;`);
+    console.log('✅ collections: status & reported_by_guest columns ready (free UPI payment claims)');
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS app_settings (
+        key VARCHAR(100) PRIMARY KEY,
+        value TEXT,
+        updated_by INTEGER REFERENCES users(id),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    console.log('✅ app_settings table ready');
+
     console.log('\n🎉 Accountability migration completed successfully!');
   } catch (err) {
     console.error('❌ Migration failed:', err.message);
