@@ -14,18 +14,42 @@ const requireAdmin = auth.requireAdmin;
 // to attribute a payment to a month, NOT the free-text "collection_month"
 // field on the form — that field is manually typed by whoever logs the
 // payment and isn't reliable enough to do balance math on.
-// Known limitation: this assumes the guest's CURRENT monthly_rent applied to
-// every past month too. If a guest's rent was ever changed mid-stay, past
-// months in this ledger will be calculated against the new rate, not what
-// was actually owed at the time.
+// Rent rate for each month is looked up from guest_rent_history rather than
+// assuming the guest's current rate applied retroactively — see that table
+// for how changes get recorded (and backfilled for pre-existing guests).
 async function computeGuestLedger(guest) {
-  const monthlyRent = parseFloat(guest.monthly_rent) || 0;
   if (!guest.join_date) return { ledger: [], currentBalance: 0 };
 
-  const rentRows = await pool.query(
-    `SELECT amount, collection_date FROM collections WHERE guest_id=$1 AND collection_type='rent' AND is_deleted=false ORDER BY collection_date ASC`,
-    [guest.id]
-  );
+  const [rentRows, historyRows] = await Promise.all([
+    pool.query(
+      `SELECT amount, collection_date FROM collections WHERE guest_id=$1 AND collection_type='rent' AND is_deleted=false ORDER BY collection_date ASC`,
+      [guest.id]
+    ),
+    pool.query(
+      `SELECT monthly_rent, effective_from FROM guest_rent_history WHERE guest_id=$1 ORDER BY effective_from ASC`,
+      [guest.id]
+    )
+  ]);
+
+  const history = historyRows.rows.map(r => ({
+    rent: parseFloat(r.monthly_rent) || 0,
+    from: new Date(r.effective_from)
+  }));
+  const fallbackRent = parseFloat(guest.monthly_rent) || 0;
+
+  // Finds the rate that was actually in effect for a given month, based on
+  // the most recent history entry on or before that month's start. Falls
+  // back to the guest's current rate if there's no history at all yet
+  // (shouldn't normally happen post-migration, but kept as a safety net).
+  function rateForMonth(monthStart) {
+    if (history.length === 0) return fallbackRent;
+    let applicable = history[0].rent;
+    for (const h of history) {
+      if (h.from <= monthStart) applicable = h.rent;
+      else break;
+    }
+    return applicable;
+  }
 
   const paidByMonth = {};
   for (const row of rentRows.rows) {
@@ -46,7 +70,7 @@ async function computeGuestLedger(guest) {
   let safety = 0; // hard cap so a bad join_date can never hang the request
   while (cursor <= endCursor && safety < 240) {
     const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`;
-    const due = monthlyRent;
+    const due = rateForMonth(cursor);
     const paid = paidByMonth[key] || 0;
     balance += (paid - due);
     ledger.push({
@@ -198,18 +222,39 @@ router.post('/guests', auth, async (req, res) => {
     const r = await pool.query(
       `INSERT INTO guests(name,phone,email,emergency_contact,id_proof_type,id_proof_number,room_id,bed_number,join_date,monthly_rent,deposit_amount,notes,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
       [name,phone,email,emergency_contact,id_proof_type,id_proof_number,room_id||null,bed_number||null,join_date,monthly_rent||0,deposit_amount||0,notes,req.user.id]);
+    if (parseFloat(monthly_rent) > 0) {
+      await pool.query(
+        `INSERT INTO guest_rent_history(guest_id, monthly_rent, effective_from, changed_by, note) VALUES($1,$2,$3,$4,$5)`,
+        [r.rows[0].id, monthly_rent, join_date, req.user.id, 'Initial rate at check-in']
+      );
+    }
     await logActivity(req, 'guest_add', `${name}${room_id?' (room assigned)':''}`);
     res.status(201).json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 router.put('/guests/:id', auth, async (req, res) => {
-  const { name,phone,email,emergency_contact,room_id,bed_number,monthly_rent,deposit_amount,notes,leave_date,is_active } = req.body;
+  const { name,phone,email,emergency_contact,room_id,bed_number,monthly_rent,deposit_amount,notes,leave_date,is_active,rent_effective_from } = req.body;
   try {
+    const existing = await pool.query('SELECT monthly_rent FROM guests WHERE id=$1', [req.params.id]);
+    if (!existing.rows[0]) return res.status(404).json({ error: 'Not found' });
+    const oldRent = parseFloat(existing.rows[0].monthly_rent) || 0;
+    const newRent = monthly_rent !== undefined && monthly_rent !== null ? parseFloat(monthly_rent) : oldRent;
+
     const r = await pool.query(
       `UPDATE guests SET name=COALESCE($1,name),phone=COALESCE($2,phone),email=COALESCE($3,email),emergency_contact=COALESCE($4,emergency_contact),room_id=$5,bed_number=$6,monthly_rent=COALESCE($7,monthly_rent),deposit_amount=COALESCE($8,deposit_amount),notes=COALESCE($9,notes),leave_date=$10,is_active=COALESCE($11,is_active) WHERE id=$12 RETURNING *`,
       [name,phone,email,emergency_contact,room_id||null,bed_number||null,monthly_rent,deposit_amount,notes,leave_date||null,is_active,req.params.id]);
     if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
+
+    if (newRent !== oldRent && newRent > 0) {
+      const effectiveFrom = rent_effective_from || new Date().toISOString().split('T')[0];
+      await pool.query(
+        `INSERT INTO guest_rent_history(guest_id, monthly_rent, effective_from, changed_by) VALUES($1,$2,$3,$4)`,
+        [req.params.id, newRent, effectiveFrom, req.user.id]
+      );
+      await logActivity(req, 'rent_change', `${r.rows[0].name}: ₹${oldRent} → ₹${newRent}, effective ${effectiveFrom}`);
+    }
+
     res.json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -478,6 +523,34 @@ router.get('/guests/:id/ledger', auth, async (req, res) => {
       ledger,
       current_balance: currentBalance
     });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.get('/guests/:id/rent-history', auth, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT h.*, u.username FROM guest_rent_history h LEFT JOIN users u ON h.changed_by=u.id WHERE h.guest_id=$1 ORDER BY h.effective_from ASC`,
+      [req.params.id]
+    );
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Manually record a rate change that happened before this feature existed
+// (so there's no automatic record of it). Admin only, since it directly
+// changes historical financial calculations for that guest.
+router.post('/guests/:id/rent-history', auth, requireAdmin, async (req, res) => {
+  const { monthly_rent, effective_from, note } = req.body;
+  if (!monthly_rent || !effective_from) return res.status(400).json({ error: 'Monthly rent and effective date are required' });
+  try {
+    const g = await pool.query('SELECT name FROM guests WHERE id=$1', [req.params.id]);
+    if (!g.rows[0]) return res.status(404).json({ error: 'Guest not found' });
+    const r = await pool.query(
+      `INSERT INTO guest_rent_history(guest_id, monthly_rent, effective_from, changed_by, note) VALUES($1,$2,$3,$4,$5) RETURNING *`,
+      [req.params.id, monthly_rent, effective_from, req.user.id, note || 'Manually backfilled']
+    );
+    await logActivity(req, 'rent_history_backfill', `${g.rows[0].name}: ₹${monthly_rent} effective ${effective_from}`);
+    res.status(201).json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
