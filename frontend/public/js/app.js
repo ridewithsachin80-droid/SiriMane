@@ -1073,13 +1073,16 @@ async function pgCollections() {
   try {
     const now = new Date();
     const list = await API.getCollections(`?month=${now.getMonth()+1}&year=${now.getFullYear()}`);
-    const total = list.reduce((s,c)=>s+parseFloat(c.amount),0);
+    const confirmedList = list.filter(c => c.status !== 'pending_verification');
+    const total = confirmedList.reduce((s,c)=>s+parseFloat(c.amount),0);
     const byType = {};
-    list.forEach(c => { byType[c.collection_type]=(byType[c.collection_type]||0)+parseFloat(c.amount); });
+    confirmedList.forEach(c => { byType[c.collection_type]=(byType[c.collection_type]||0)+parseFloat(c.amount); });
+    const pendingCount = list.filter(c => c.status === 'pending_verification').length;
     setContent(`
       <div class="page-header"><h1>💵 Collections</h1><p>Track all income — rent, deposits, and extra charges</p></div>
+      ${pendingCount>0?`<div class="alert" style="background:var(--amber-light,#FFFBEB);border:1px solid var(--amber,#F59E0B);color:#92400E;margin-bottom:16px">⏳ ${pendingCount} resident-reported UPI payment${pendingCount>1?'s':''} awaiting your confirmation below — check your bank/UPI app, then confirm or reject.</div>`:''}
       <div class="stat-grid mb-5">
-        <div class="stat-card green"><div class="s-label">This Month</div><div class="s-value">${fmt(total)}</div><div class="s-sub">${now.toLocaleString('en-IN',{month:'long',year:'numeric'})}</div></div>
+        <div class="stat-card green"><div class="s-label">This Month (Confirmed)</div><div class="s-value">${fmt(total)}</div><div class="s-sub">${now.toLocaleString('en-IN',{month:'long',year:'numeric'})}</div></div>
         <div class="stat-card"><div class="s-label">Rent</div><div class="s-value">${fmt(byType['rent']||0)}</div><div class="s-sub" style="color:var(--green)">Monthly rent</div></div>
         <div class="stat-card"><div class="s-label">Deposits</div><div class="s-value">${fmt(byType['deposit']||0)}</div><div class="s-sub" style="color:var(--blue)">Security deposits</div></div>
         <div class="stat-card"><div class="s-label">Extra Charges</div><div class="s-value">${fmt(byType['extra']||byType['other']||0)}</div><div class="s-sub" style="color:var(--amber)">Laundry, food, etc.</div></div>
@@ -1102,15 +1105,19 @@ async function pgCollections() {
             <tbody>
               ${list.length===0
                 ? `<tr class="empty-row"><td colspan="7">No collections found for this filter.</td></tr>`
-                : list.map(c=>`<tr>
+                : list.map(c=>{
+                  const pending = c.status === 'pending_verification';
+                  return `<tr ${pending?'style="background:#FFFBEB"':''}>
                   <td>${fmtDate(c.collection_date)}</td>
-                  <td><span class="badge badge-green" style="text-transform:capitalize">${c.collection_type}</span></td>
+                  <td><span class="badge badge-green" style="text-transform:capitalize">${c.collection_type}</span> ${pending?'<span class="badge badge-amber">Pending</span>':''}</td>
                   <td>${c.guest_name||'—'}</td>
                   <td>${c.description||c.collection_month||'—'}</td>
                   <td class="text-green fw-600">${fmt(c.amount)}</td>
                   <td>${c.payment_mode}</td>
-                  <td>${isAdmin()?`<button class="btn btn-danger btn-sm btn-icon" onclick="delCollection(${c.id})">✕</button>`:'—'}</td>
-                </tr>`).join('')}
+                  <td>${pending && isAdmin()
+                    ? `<div class="flex gap-2"><button class="btn btn-primary btn-sm" onclick="confirmPendingCollection(${c.id})">Confirm</button><button class="btn btn-danger btn-sm btn-icon" onclick="delCollection(${c.id})">✕</button></div>`
+                    : isAdmin() ? `<button class="btn btn-danger btn-sm btn-icon" onclick="delCollection(${c.id})">✕</button>` : '—'}</td>
+                </tr>`;}).join('')}
             </tbody>
           </table>
         </div>
@@ -1173,6 +1180,11 @@ async function saveCollection() {
 async function delCollection(id) {
   if(!confirm('Delete this record?')) return;
   try { await API.deleteCollection(id); pgCollections(); } catch(e) { alert(e.message); }
+}
+
+async function confirmPendingCollection(id) {
+  if(!confirm('Confirm this payment actually arrived in your bank/UPI app?')) return;
+  try { await API.confirmCollection(id); pgCollections(); } catch(e) { alert(e.message); }
 }
 
 // ── RENT DUE TRACKER ──────────────────────────────
@@ -1287,21 +1299,50 @@ async function pgAdmin() {
 
 function renderAdminPage() {
   setContent(`
-    <div class="page-header"><h1>🔐 Admin</h1><p>Staff accounts, audit trail, and deposit refund history</p></div>
+    <div class="page-header"><h1>🔐 Admin</h1><p>Staff accounts, audit trail, deposit refunds, and app settings</p></div>
     <div class="flex gap-2 mb-5">
       <button class="btn ${adminActiveTab==='staff'?'btn-primary':'btn-outline'} btn-sm" onclick="switchAdminTab('staff')">Staff Users</button>
       <button class="btn ${adminActiveTab==='audit'?'btn-primary':'btn-outline'} btn-sm" onclick="switchAdminTab('audit')">Audit Log</button>
       <button class="btn ${adminActiveTab==='refunds'?'btn-primary':'btn-outline'} btn-sm" onclick="switchAdminTab('refunds')">Deposit Refunds</button>
+      <button class="btn ${adminActiveTab==='settings'?'btn-primary':'btn-outline'} btn-sm" onclick="switchAdminTab('settings')">Settings</button>
     </div>
     <div id="admin-tab-content"><div class="loading-center"><div class="spinner"></div></div></div>`);
   if (adminActiveTab === 'staff') renderAdminStaffTab();
   else if (adminActiveTab === 'audit') renderAdminAuditTab();
-  else renderAdminRefundsTab();
+  else if (adminActiveTab === 'refunds') renderAdminRefundsTab();
+  else renderAdminSettingsTab();
 }
 
 function switchAdminTab(tab) {
   adminActiveTab = tab;
   renderAdminPage();
+}
+
+async function renderAdminSettingsTab() {
+  try {
+    const settings = await API.getSettings();
+    document.getElementById('admin-tab-content').innerHTML = `
+      <div class="card">
+        <div class="card-header"><h3>UPI Payment Settings</h3></div>
+        <div style="padding:20px;max-width:480px">
+          <div id="settings-alert" class="alert alert-danger hidden"></div>
+          <p class="text-muted" style="font-size:12px;margin-bottom:16px">This is the UPI ID residents will pay rent to from their portal. It can be your existing personal or business UPI ID — no separate gateway or sign-up needed, and there's no fee since payments go directly to your bank.</p>
+          <div class="form-group"><label>UPI ID (VPA)</label><input id="set-upi-vpa" placeholder="e.g. yourname@upi" value="${settings.upi_vpa||''}"/></div>
+          <div class="form-group"><label>Display Name</label><input id="set-upi-name" placeholder="e.g. Siri Mane PG" value="${settings.upi_name||''}"/></div>
+          <button class="btn btn-primary" onclick="saveAdminSettings()">Save Settings</button>
+        </div>
+      </div>`;
+  } catch(e) { document.getElementById('admin-tab-content').innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
+}
+
+async function saveAdminSettings() {
+  const al = document.getElementById('settings-alert');
+  const d = {
+    upi_vpa: document.getElementById('set-upi-vpa').value.trim(),
+    upi_name: document.getElementById('set-upi-name').value.trim()
+  };
+  try { await API.updateSettings(d); renderAdminSettingsTab(); }
+  catch(e) { showAlert(al, e.message); }
 }
 
 async function renderAdminStaffTab() {
