@@ -152,15 +152,26 @@
 
     <!-- Tab bar -->
     <div class="tab-bar">
-      <button class="tab active" onclick="showTab('details')">My Details</button>
+      <button class="tab active" onclick="showTab('pay')">Pay Rent</button>
+      <button class="tab" onclick="showTab('details')">My Details</button>
       <button class="tab" onclick="showTab('menu')">Daily Menu</button>
       <button class="tab" onclick="showTab('notices')">Notices</button>
       <button class="tab" onclick="showTab('message')">Message Us</button>
       <button class="tab" onclick="showTab('settings')">Settings</button>
     </div>
 
+    <!-- PAY RENT TAB -->
+    <div id="tab-pay">
+      <div class="card">
+        <div class="card-h">💳 Pay Rent</div>
+        <div class="card-b" id="p-pay-content">
+          <p style="text-align:center;color:#94A3B8;font-size:13px">Loading...</p>
+        </div>
+      </div>
+    </div>
+
     <!-- MY DETAILS TAB -->
-    <div id="tab-details">
+    <div id="tab-details" class="hidden">
       <div class="card">
         <div class="card-h">👤 My Details</div>
         <div class="card-b">
@@ -336,10 +347,76 @@ async function loadGuestData() {
     const data = await res.json();
     guestData = data;
     sessionStorage.setItem('guest_data', JSON.stringify(data));
+    renderPayTab(data);
     renderDetails(data);
     renderMenu(data.menu || []);
     renderNotices(data.announcements || []);
   } catch(e) { console.error(e); }
+}
+
+// ── RENDER PAY TAB ────────────────────────────────
+function renderPayTab(g) {
+  const el = document.getElementById('p-pay-content');
+  const balance = parseFloat(g.current_balance || 0);
+  const due = balance < -0.5 ? Math.abs(balance) : 0;
+  const credit = balance > 0.5 ? balance : 0;
+
+  if (!g.upi_vpa) {
+    el.innerHTML = `
+      <div style="text-align:center;padding:12px 0">
+        ${due>0?`<p style="font-size:13px;color:#64748B;margin-bottom:6px">Amount Due</p><p style="font-size:28px;font-weight:700;color:#EF4444">${fmt(due)}</p>`:credit>0?`<p style="font-size:13px;color:#64748B;margin-bottom:6px">You're ahead by</p><p style="font-size:24px;font-weight:700;color:#10B981">${fmt(credit)}</p>`:`<p style="font-size:15px;color:#10B981;font-weight:600">✅ All settled up</p>`}
+      </div>
+      <p style="font-size:12px;color:#94A3B8;text-align:center;background:#F8FAFC;padding:10px;border-radius:8px">Online payment isn't set up yet — please pay via cash or bank transfer and let management know.</p>`;
+    return;
+  }
+
+  if (due <= 0) {
+    el.innerHTML = `
+      <div style="text-align:center;padding:20px 0">
+        <p style="font-size:32px;margin-bottom:8px">🎉</p>
+        ${credit>0?`<p style="font-size:14px;color:#64748B">You're ahead by</p><p style="font-size:24px;font-weight:700;color:#10B981;margin-bottom:6px">${fmt(credit)}</p><p style="font-size:12px;color:#94A3B8">No payment needed right now</p>`:`<p style="font-size:15px;color:#10B981;font-weight:600">All settled up — nothing due!</p>`}
+      </div>`;
+    return;
+  }
+
+  el.innerHTML = `
+    <div style="text-align:center;margin-bottom:16px">
+      <p style="font-size:13px;color:#64748B;margin-bottom:6px">Amount Due</p>
+      <p style="font-size:32px;font-weight:700;color:#EF4444">${fmt(due)}</p>
+    </div>
+    <button class="btn btn-amber" onclick="payViaUpi(${due})">📱 Pay via UPI</button>
+    <p style="font-size:11px;color:#94A3B8;text-align:center;margin-top:8px">Opens your UPI app (Google Pay, PhonePe, Paytm, etc.) with the amount already filled in</p>
+    <div id="p-pay-confirm" class="hidden" style="margin-top:16px;padding-top:16px;border-top:1px solid #F1F5F9">
+      <p style="font-size:12px;color:#475569;text-align:center;margin-bottom:10px">Completed the payment?</p>
+      <button class="btn btn-outline" style="border-color:#10B981;color:#10B981" onclick="claimUpiPayment(${due})">✅ Yes, I've Paid ${fmt(due)}</button>
+    </div>
+    <div id="p-pay-claimed" class="hidden" style="text-align:center;margin-top:14px;padding:12px;background:#ECFDF5;border-radius:10px">
+      <p style="font-size:13px;color:#065F46;font-weight:600">Thanks! We'll confirm once it's verified.</p>
+    </div>`;
+}
+
+function payViaUpi(amount) {
+  const vpa = guestData.upi_vpa;
+  const name = guestData.upi_name || 'Siri Mane PG';
+  const note = 'Rent payment - ' + (guestData.name || '');
+  const link = `upi://pay?pa=${encodeURIComponent(vpa)}&pn=${encodeURIComponent(name)}&am=${amount}&cu=INR&tn=${encodeURIComponent(note)}`;
+  window.location.href = link;
+  const confirmBox = document.getElementById('p-pay-confirm');
+  if (confirmBox) confirmBox.classList.remove('hidden');
+}
+
+async function claimUpiPayment(amount) {
+  try {
+    await fetch('/api/guest-upi-claim', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + guestToken },
+      body: JSON.stringify({ amount })
+    });
+    document.getElementById('p-pay-confirm').classList.add('hidden');
+    document.getElementById('p-pay-claimed').classList.remove('hidden');
+  } catch(e) {
+    alert('Could not submit — check your connection and try again.');
+  }
 }
 
 // ── RENDER DETAILS ────────────────────────────────
@@ -463,12 +540,12 @@ async function changePassword() {
 
 // ── TABS ──────────────────────────────────────────
 function showTab(tab) {
-  ['details','menu','notices','message','settings'].forEach(t => {
+  ['pay','details','menu','notices','message','settings'].forEach(t => {
     document.getElementById('tab-'+t).classList.add('hidden');
   });
   document.getElementById('tab-'+tab).classList.remove('hidden');
   document.querySelectorAll('.tab').forEach((b,i) => {
-    b.classList.toggle('active', ['details','menu','notices','message','settings'][i]===tab);
+    b.classList.toggle('active', ['pay','details','menu','notices','message','settings'][i]===tab);
   });
 }
 
