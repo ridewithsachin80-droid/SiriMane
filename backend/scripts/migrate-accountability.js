@@ -94,6 +94,9 @@ async function migrate() {
     `);
     console.log('✅ app_settings table ready');
 
+    await client.query(`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'confirmed';`);
+    console.log('✅ purchases: status column ready (staff approval workflow)');
+
     console.log('\n🎉 Accountability migration completed successfully!');
   } catch (err) {
     console.error('❌ Migration failed:', err.message);
