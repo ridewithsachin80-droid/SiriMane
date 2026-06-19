@@ -978,6 +978,18 @@ router.get('/deposit-refunds', auth, requireAdmin, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// For removing test or erroneous refund records — a real, intentional
+// checkout shouldn't normally be deleted, but mistakes during testing or
+// data entry need a way to be cleaned up. Logged either way.
+router.delete('/deposit-refunds/:id', auth, requireAdmin, async (req, res) => {
+  try {
+    const r = await pool.query('DELETE FROM deposit_refunds WHERE id=$1 RETURNING *', [req.params.id]);
+    if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
+    await logActivity(req, 'deposit_refund_delete', `${r.rows[0].guest_name} — ₹${r.rows[0].refund_amount} (id ${req.params.id})`);
+    res.json({ message: 'Deleted' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 module.exports = router;
 
 // ── GUEST AUTH ───────────────────────────────────
