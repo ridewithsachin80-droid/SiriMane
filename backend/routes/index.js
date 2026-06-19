@@ -2,6 +2,7 @@
 const router = require('express').Router();
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const PDFDocument = require('pdfkit');
 const pool = require('../db');
 const auth = require('../middleware/auth');
 const requireAdmin = auth.requireAdmin;
@@ -138,7 +139,7 @@ router.get('/dashboard', auth, async (req, res) => {
       pool.query(`SELECT COUNT(*) as total_rooms, COALESCE(SUM(total_beds),0) as total_beds FROM rooms WHERE is_active=true`),
       pool.query(`SELECT COALESCE(SUM(r.total_beds),0) - COUNT(g.id) as available FROM rooms r LEFT JOIN guests g ON r.id=g.room_id AND g.is_active=true WHERE r.is_active=true`),
       pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND status='confirmed' AND DATE_TRUNC('month',collection_date)=DATE_TRUNC('month',NOW())`),
-      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM purchases WHERE is_deleted=false AND DATE_TRUNC('month',purchase_date)=DATE_TRUNC('month',NOW())`),
+      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM purchases WHERE is_deleted=false AND status='confirmed' AND DATE_TRUNC('month',purchase_date)=DATE_TRUNC('month',NOW())`),
       pool.query(`SELECT g.*,r.room_number FROM guests g LEFT JOIN rooms r ON g.room_id=r.id WHERE g.is_active=true ORDER BY g.created_at DESC LIMIT 5`),
       pool.query(`SELECT c.*,g.name as guest_name FROM collections c LEFT JOIN guests g ON c.guest_id=g.id WHERE c.is_deleted=false AND c.status='confirmed' ORDER BY c.collection_date DESC LIMIT 5`)
     ]);
@@ -322,10 +323,14 @@ router.post('/collections', auth, async (req, res) => {
   const { guest_id,guest_name,amount,collection_date,collection_month,collection_type,payment_mode,description,receipt_number } = req.body;
   if (!amount) return res.status(400).json({ error: 'Amount required' });
   try {
+    // Staff entries need an admin's sign-off before they count as confirmed
+    // income; admin's own entries are trusted immediately. This is separate
+    // from the guest UPI self-reporting flow, which uses 'pending_verification'.
+    const status = req.user.role === 'admin' ? 'confirmed' : 'pending_approval';
     const r = await pool.query(
-      `INSERT INTO collections(guest_id,guest_name,amount,collection_date,collection_month,collection_type,payment_mode,description,receipt_number,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-      [guest_id||null,guest_name,amount,collection_date||new Date(),collection_month,collection_type||'rent',payment_mode||'cash',description,receipt_number,req.user.id]);
-    await logActivity(req, 'collection_add', `₹${amount} ${collection_type||'rent'} from ${guest_name||'guest #'+guest_id}`);
+      `INSERT INTO collections(guest_id,guest_name,amount,collection_date,collection_month,collection_type,payment_mode,description,receipt_number,created_by,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [guest_id||null,guest_name,amount,collection_date||new Date(),collection_month,collection_type||'rent',payment_mode||'cash',description,receipt_number,req.user.id,status]);
+    await logActivity(req, 'collection_add', `₹${amount} ${collection_type||'rent'} from ${guest_name||'guest #'+guest_id}${status==='pending_approval'?' (pending approval)':''}`);
     res.status(201).json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -368,10 +373,13 @@ router.post('/purchases', auth, async (req, res) => {
   const { amount,category,description,purchase_date,paid_to,payment_mode,receipt_number } = req.body;
   if (!amount || !category) return res.status(400).json({ error: 'Amount and category required' });
   try {
+    // Staff entries need an admin's sign-off before they count as confirmed
+    // spend; admin's own entries are trusted immediately.
+    const status = req.user.role === 'admin' ? 'confirmed' : 'pending_approval';
     const r = await pool.query(
-      `INSERT INTO purchases(amount,category,description,purchase_date,paid_to,payment_mode,receipt_number,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [amount,category,description,purchase_date||new Date(),paid_to,payment_mode||'cash',receipt_number,req.user.id]);
-    await logActivity(req, 'purchase_add', `₹${amount} ${category}${paid_to ? ' to '+paid_to : ''}`);
+      `INSERT INTO purchases(amount,category,description,purchase_date,paid_to,payment_mode,receipt_number,created_by,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [amount,category,description,purchase_date||new Date(),paid_to,payment_mode||'cash',receipt_number,req.user.id,status]);
+    await logActivity(req, 'purchase_add', `₹${amount} ${category}${paid_to ? ' to '+paid_to : ''}${status==='pending_approval'?' (pending approval)':''}`);
     res.status(201).json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -382,6 +390,17 @@ router.delete('/purchases/:id', auth, requireAdmin, async (req, res) => {
     if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
     await logActivity(req, 'purchase_delete', `₹${r.rows[0].amount} ${r.rows[0].category} (id ${req.params.id})`);
     res.json({ message: 'Deleted' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Approves a staff-entered purchase after admin review. Rejecting one reuses
+// the delete route above — same end state, already logged there.
+router.put('/purchases/:id/confirm', auth, requireAdmin, async (req, res) => {
+  try {
+    const r = await pool.query(`UPDATE purchases SET status='confirmed' WHERE id=$1 AND is_deleted=false RETURNING *`, [req.params.id]);
+    if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
+    await logActivity(req, 'purchase_approved', `₹${r.rows[0].amount} ${r.rows[0].category}`);
+    res.json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -464,19 +483,187 @@ router.delete('/inbox/:id', auth, async (req, res) => {
 // ── REPORTS ──────────────────────────────────────
 router.get('/reports', auth, async (req, res) => {
   try {
-    const { month, year } = req.query;
-    const m = month || new Date().getMonth() + 1;
-    const y = year || new Date().getFullYear();
+    const { month, year, from, to } = req.query;
+    let dateFrom, dateTo;
+    if (from && to) {
+      dateFrom = from;
+      dateTo = to;
+    } else {
+      const m = month || new Date().getMonth() + 1;
+      const y = year || new Date().getFullYear();
+      dateFrom = `${y}-${String(m).padStart(2,'0')}-01`;
+      dateTo = new Date(y, m, 0).toISOString().split('T')[0]; // last day of that month
+    }
     const [income, expenses, incomeBreakdown, expenseBreakdown] = await Promise.all([
-      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND status='confirmed' AND EXTRACT(MONTH FROM collection_date)=$1 AND EXTRACT(YEAR FROM collection_date)=$2`, [m,y]),
-      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM purchases WHERE is_deleted=false AND EXTRACT(MONTH FROM purchase_date)=$1 AND EXTRACT(YEAR FROM purchase_date)=$2`, [m,y]),
-      pool.query(`SELECT collection_type, COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND status='confirmed' AND EXTRACT(MONTH FROM collection_date)=$1 AND EXTRACT(YEAR FROM collection_date)=$2 GROUP BY collection_type`, [m,y]),
-      pool.query(`SELECT category, COALESCE(SUM(amount),0) as total FROM purchases WHERE is_deleted=false AND EXTRACT(MONTH FROM purchase_date)=$1 AND EXTRACT(YEAR FROM purchase_date)=$2 GROUP BY category`, [m,y])
+      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND status='confirmed' AND collection_date BETWEEN $1 AND $2`, [dateFrom, dateTo]),
+      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM purchases WHERE is_deleted=false AND status='confirmed' AND purchase_date BETWEEN $1 AND $2`, [dateFrom, dateTo]),
+      pool.query(`SELECT collection_type, COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND status='confirmed' AND collection_date BETWEEN $1 AND $2 GROUP BY collection_type`, [dateFrom, dateTo]),
+      pool.query(`SELECT category, COALESCE(SUM(amount),0) as total FROM purchases WHERE is_deleted=false AND status='confirmed' AND purchase_date BETWEEN $1 AND $2 GROUP BY category`, [dateFrom, dateTo])
     ]);
     const inc = parseFloat(income.rows[0].total);
     const exp = parseFloat(expenses.rows[0].total);
-    res.json({ totalIncome: inc, totalExpenses: exp, netProfit: inc - exp, incomeBreakdown: incomeBreakdown.rows, expenseBreakdown: expenseBreakdown.rows });
+    res.json({ totalIncome: inc, totalExpenses: exp, netProfit: inc - exp, incomeBreakdown: incomeBreakdown.rows, expenseBreakdown: expenseBreakdown.rows, dateFrom, dateTo });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Month-by-month income/expense for charting trends. Sequential per-month
+// queries rather than one fancy GROUP BY — simpler to read and verify
+// correct, and the guest-house scale here means performance is a non-issue.
+router.get('/reports/trend', auth, async (req, res) => {
+  try {
+    const months = Math.min(parseInt(req.query.months) || 6, 24);
+    const now = new Date();
+    const result = [];
+    for (let i = months - 1; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const m = d.getMonth() + 1;
+      const y = d.getFullYear();
+      const [inc, exp] = await Promise.all([
+        pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND status='confirmed' AND EXTRACT(MONTH FROM collection_date)=$1 AND EXTRACT(YEAR FROM collection_date)=$2`, [m, y]),
+        pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM purchases WHERE is_deleted=false AND status='confirmed' AND EXTRACT(MONTH FROM purchase_date)=$1 AND EXTRACT(YEAR FROM purchase_date)=$2`, [m, y])
+      ]);
+      const income = parseFloat(inc.rows[0].total);
+      const expenses = parseFloat(exp.rows[0].total);
+      result.push({ month: `${y}-${String(m).padStart(2,'0')}`, label: d.toLocaleString('en-IN', { month: 'short', year: 'numeric' }), income, expenses, net: income - expenses });
+    }
+    res.json(result);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Combined income+expense transaction export, sorted chronologically — for
+// handing to an accountant. Admin only since it's a full financial export.
+router.get('/reports/export/csv', auth, requireAdmin, async (req, res) => {
+  const { from, to } = req.query;
+  if (!from || !to) return res.status(400).json({ error: 'from and to dates are required' });
+  try {
+    const [collections, purchases] = await Promise.all([
+      pool.query(`SELECT collection_date as date, collection_type as category, description, guest_name as party, amount, payment_mode FROM collections WHERE is_deleted=false AND status='confirmed' AND collection_date BETWEEN $1 AND $2 ORDER BY collection_date`, [from, to]),
+      pool.query(`SELECT purchase_date as date, category, description, paid_to as party, amount, payment_mode FROM purchases WHERE is_deleted=false AND status='confirmed' AND purchase_date BETWEEN $1 AND $2 ORDER BY purchase_date`, [from, to])
+    ]);
+    const rows = [
+      ...collections.rows.map(r => ({ ...r, type: 'Income' })),
+      ...purchases.rows.map(r => ({ ...r, type: 'Expense' }))
+    ].sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    const escapeCsv = (val) => {
+      if (val === null || val === undefined) return '';
+      const str = String(val);
+      return (str.includes(',') || str.includes('"') || str.includes('\n'))
+        ? '"' + str.replace(/"/g, '""') + '"'
+        : str;
+    };
+
+    const lines = [['Date','Type','Category','Description','Guest / Paid To','Amount','Mode'].join(',')];
+    for (const r of rows) {
+      lines.push([
+        new Date(r.date).toLocaleDateString('en-IN'),
+        r.type,
+        r.category,
+        r.description || '',
+        r.party || '',
+        r.amount,
+        r.payment_mode
+      ].map(escapeCsv).join(','));
+    }
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="sirimane-transactions-${from}-to-${to}.csv"`);
+    res.send(lines.join('\n'));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Formatted P&L PDF for handing to an accountant. Admin only.
+router.get('/reports/export/pdf', auth, requireAdmin, async (req, res) => {
+  const { from, to } = req.query;
+  if (!from || !to) return res.status(400).json({ error: 'from and to dates are required' });
+  try {
+    const [income, expenses, incomeBreakdown, expenseBreakdown, collections, purchases] = await Promise.all([
+      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND status='confirmed' AND collection_date BETWEEN $1 AND $2`, [from, to]),
+      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM purchases WHERE is_deleted=false AND status='confirmed' AND purchase_date BETWEEN $1 AND $2`, [from, to]),
+      pool.query(`SELECT collection_type, COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND status='confirmed' AND collection_date BETWEEN $1 AND $2 GROUP BY collection_type`, [from, to]),
+      pool.query(`SELECT category, COALESCE(SUM(amount),0) as total FROM purchases WHERE is_deleted=false AND status='confirmed' AND purchase_date BETWEEN $1 AND $2 GROUP BY category`, [from, to]),
+      pool.query(`SELECT collection_date as date, collection_type as category, description, guest_name as party, amount FROM collections WHERE is_deleted=false AND status='confirmed' AND collection_date BETWEEN $1 AND $2 ORDER BY collection_date`, [from, to]),
+      pool.query(`SELECT purchase_date as date, category, description, paid_to as party, amount FROM purchases WHERE is_deleted=false AND status='confirmed' AND purchase_date BETWEEN $1 AND $2 ORDER BY purchase_date`, [from, to])
+    ]);
+    const inc = parseFloat(income.rows[0].total);
+    const exp = parseFloat(expenses.rows[0].total);
+    const transactions = [
+      ...collections.rows.map(r => ({ ...r, type: 'Income' })),
+      ...purchases.rows.map(r => ({ ...r, type: 'Expense' }))
+    ].sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    const fmtMoney = (n) => 'Rs ' + parseFloat(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const fmtD = (d) => new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="sirimane-report-${from}-to-${to}.pdf"`);
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4' });
+    doc.pipe(res);
+
+    doc.fontSize(18).font('Helvetica-Bold').text('Siri Mane PG', { align: 'center' });
+    doc.fontSize(11).font('Helvetica').text('Profit & Loss Report', { align: 'center' });
+    doc.fontSize(9).fillColor('#666').text(`${fmtD(from)} to ${fmtD(to)}`, { align: 'center' });
+    doc.fillColor('#000');
+    doc.moveDown(1.5);
+
+    doc.fontSize(12).font('Helvetica-Bold').text('Summary');
+    doc.fontSize(10).font('Helvetica');
+    doc.text(`Total Income: ${fmtMoney(inc)}`);
+    doc.text(`Total Expenses: ${fmtMoney(exp)}`);
+    doc.font('Helvetica-Bold').text(`Net Profit / Loss: ${fmtMoney(inc - exp)}`);
+    doc.font('Helvetica');
+    doc.moveDown(1);
+
+    doc.fontSize(12).font('Helvetica-Bold').text('Income Breakdown');
+    doc.fontSize(10).font('Helvetica');
+    if (incomeBreakdown.rows.length === 0) doc.fillColor('#666').text('No income in this period').fillColor('#000');
+    incomeBreakdown.rows.forEach(r => doc.text(`${r.collection_type}: ${fmtMoney(r.total)}`));
+    doc.moveDown(1);
+
+    doc.fontSize(12).font('Helvetica-Bold').text('Expense Breakdown');
+    doc.fontSize(10).font('Helvetica');
+    if (expenseBreakdown.rows.length === 0) doc.fillColor('#666').text('No expenses in this period').fillColor('#000');
+    expenseBreakdown.rows.forEach(r => doc.text(`${r.category}: ${fmtMoney(r.total)}`));
+    doc.moveDown(1.5);
+
+    doc.fontSize(12).font('Helvetica-Bold').text('Transactions');
+    doc.moveDown(0.3);
+    doc.fontSize(8).font('Helvetica-Bold');
+    const colX = { date: 40, type: 105, cat: 160, desc: 250, party: 380, amt: 480 };
+    const pageBottom = doc.page.height - doc.page.margins.bottom;
+    function drawHeader() {
+      const y = doc.y;
+      doc.text('Date', colX.date, y).text('Type', colX.type, y).text('Category', colX.cat, y)
+        .text('Description', colX.desc, y).text('Party', colX.party, y).text('Amount', colX.amt, y);
+      doc.moveDown(0.5);
+      doc.font('Helvetica');
+    }
+    drawHeader();
+    doc.fontSize(8);
+    for (const t of transactions) {
+      if (doc.y > pageBottom - 20) {
+        doc.addPage();
+        doc.fontSize(8).font('Helvetica-Bold');
+        drawHeader();
+      }
+      const y = doc.y;
+      doc.fillColor(t.type === 'Income' ? '#0a7a3e' : '#b91c1c');
+      doc.text(fmtD(t.date), colX.date, y, { width: 60 })
+        .text(t.type, colX.type, y, { width: 50 })
+        .text(String(t.category||''), colX.cat, y, { width: 85 })
+        .text(String(t.description||'—'), colX.desc, y, { width: 125 })
+        .text(String(t.party||'—'), colX.party, y, { width: 95 })
+        .text(fmtMoney(t.amount), colX.amt, y);
+      doc.fillColor('#000');
+      doc.moveDown(0.4);
+    }
+    if (transactions.length === 0) doc.fillColor('#666').text('No transactions in this period').fillColor('#000');
+
+    doc.end();
+  } catch (err) {
+    if (!res.headersSent) res.status(500).json({ error: err.message });
+  }
 });
 
 // ── PUBLIC GUEST LOOKUP ──────────────────────────
