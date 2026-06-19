@@ -52,11 +52,11 @@ let currentPage = null;
 function navigate(page) {
   currentPage = page;
   document.querySelectorAll('.nav-item[data-page]').forEach(b => b.classList.toggle('active', b.dataset.page===page));
-  const titles = { dashboard:'Dashboard', rooms:'Rooms', guests:'Guests', 'daily-menu':'Daily Menu', payments:'Payments', 'guest-messages':'Guest Messages', inbox:'Inbox', purchases:'Purchases', collections:'Collections', 'rent-due':'Rent Due', reports:'Reports', admin:'Admin' };
+  const titles = { dashboard:'Dashboard', rooms:'Rooms', guests:'Guests', 'daily-menu':'Daily Menu', payments:'Payments', 'guest-messages':'Guest Messages', inbox:'Inbox', purchases:'Purchases', collections:'Collections', 'rent-due':'Rent Due', reports:'Reports', 'balance-sheet':'Balance Sheet', admin:'Admin' };
   document.getElementById('page-title').textContent = titles[page]||page;
   document.getElementById('topbar-actions').innerHTML = '';
   document.getElementById('sidebar').classList.remove('open');
-  const pages = { dashboard:pgDashboard, rooms:pgRooms, guests:pgGuests, 'daily-menu':pgMenu, payments:pgPayments, 'guest-messages':pgAnnouncements, inbox:pgInbox, purchases:pgPurchases, collections:pgCollections, 'rent-due':pgRentDue, reports:pgReports, admin:pgAdmin };
+  const pages = { dashboard:pgDashboard, rooms:pgRooms, guests:pgGuests, 'daily-menu':pgMenu, payments:pgPayments, 'guest-messages':pgAnnouncements, inbox:pgInbox, purchases:pgPurchases, collections:pgCollections, 'rent-due':pgRentDue, reports:pgReports, 'balance-sheet':pgBalanceSheet, admin:pgAdmin };
   if(pages[page]) pages[page]();
 }
 
@@ -1505,6 +1505,193 @@ function renderTrendChart(trend) {
       <span><span style="display:inline-block;width:10px;height:10px;background:var(--green);border-radius:2px;margin-right:5px"></span>Income</span>
       <span><span style="display:inline-block;width:10px;height:10px;background:var(--red);border-radius:2px;margin-right:5px"></span>Expenses</span>
     </div>`;
+}
+
+// ── BALANCE SHEET ──────────────────────────────────
+let balanceSheetAsOf = null;
+
+async function pgBalanceSheet(asOf) {
+  loading();
+  document.getElementById('topbar-actions').innerHTML = '';
+  const date = asOf || balanceSheetAsOf || nowDate();
+  balanceSheetAsOf = date;
+  try {
+    const [bs, assets, capital] = await Promise.all([
+      API.getBalanceSheet(date),
+      API.getFixedAssets(),
+      API.getCapitalTransactions()
+    ]);
+    const hasGap = Math.abs(bs.reconciliationDiff) > 0.5;
+    setContent(`
+      <div class="page-header flex justify-between items-center">
+        <div><h1>⚖️ Balance Sheet</h1><p>What the business owns vs. owes, as of a point in time</p></div>
+        <div class="flex items-center gap-2">
+          <span style="font-size:13px;color:var(--text-muted)">As of</span>
+          <input type="date" value="${date}" onchange="pgBalanceSheet(this.value)" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit"/>
+        </div>
+      </div>
+
+      ${hasGap?`<div class="alert" style="background:#FFFBEB;border:1px solid var(--amber);color:#92400E;margin-bottom:16px">
+        ⚠️ Reconciliation gap of ${fmt(Math.abs(bs.reconciliationDiff))}: deposits collected-minus-refunded don't match what's currently held per guest records. This usually means a deposit was collected but never logged as a Collection (or vice versa) — worth checking guest deposit amounts against the Collections history. This isn't a bug in the calculation; it's flagging a real data gap.
+      </div>`:''}
+
+      <div class="stat-grid mb-6" style="grid-template-columns:repeat(3,1fr)">
+        <div class="stat-card" style="border-left:4px solid var(--blue)">
+          <div class="s-label">Total Assets</div>
+          <div class="s-value" style="color:var(--blue)">${fmt(bs.assets.total)}</div>
+          <div class="s-sub">Cash + Fixed Assets</div>
+        </div>
+        <div class="stat-card" style="border-left:4px solid var(--red)">
+          <div class="s-label">Total Liabilities</div>
+          <div class="s-value text-red">${fmt(bs.liabilities.total)}</div>
+          <div class="s-sub">Deposits held</div>
+        </div>
+        <div class="stat-card" style="border-left:4px solid var(--green)">
+          <div class="s-label">Total Equity</div>
+          <div class="s-value text-green">${fmt(bs.equity.total)}</div>
+          <div class="s-sub">Capital + Retained Earnings</div>
+        </div>
+      </div>
+
+      <div class="two-col mb-6">
+        <div class="card">
+          <div class="card-header"><h3>Assets</h3></div>
+          <div class="card-body">
+            <div class="flex justify-between" style="padding:10px 0;border-bottom:1px solid var(--border)"><span>Cash Position</span><strong>${fmt(bs.assets.cashPosition)}</strong></div>
+            <div class="flex justify-between" style="padding:10px 0;border-bottom:1px solid var(--border)"><span>Fixed Assets (at cost)</span><strong>${fmt(bs.assets.fixedAssets)}</strong></div>
+            <div class="flex justify-between" style="padding:10px 0;font-weight:600"><span>Total Assets</span><span>${fmt(bs.assets.total)}</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3>Liabilities &amp; Equity</h3></div>
+          <div class="card-body">
+            <div class="flex justify-between" style="padding:10px 0;border-bottom:1px solid var(--border)"><span>Security Deposits Held</span><strong>${fmt(bs.liabilities.depositsHeld)}</strong></div>
+            <div class="flex justify-between" style="padding:10px 0;border-bottom:1px solid var(--border)"><span>Capital (net)</span><strong>${fmt(bs.equity.capitalNet)}</strong></div>
+            <div class="flex justify-between" style="padding:10px 0;border-bottom:1px solid var(--border)"><span>Retained Earnings</span><strong>${fmt(bs.equity.retainedEarnings)}</strong></div>
+            <div class="flex justify-between" style="padding:10px 0;font-weight:600"><span>Total</span><span>${fmt(bs.liabilities.total + bs.equity.total)}</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card mb-6">
+        <div class="card-header"><h3>🏠 Fixed Assets</h3><button class="btn btn-primary btn-sm" onclick="fixedAssetModal()">+ Add Asset</button></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>DATE</th><th>NAME</th><th>CATEGORY</th><th>VALUE</th><th>NOTES</th><th>ACTIONS</th></tr></thead>
+            <tbody>
+              ${assets.length===0
+                ? `<tr class="empty-row"><td colspan="6">No fixed assets added yet.</td></tr>`
+                : assets.map(a=>`<tr>
+                  <td>${fmtDate(a.purchase_date)}</td>
+                  <td><strong>${a.name}</strong></td>
+                  <td><span class="badge badge-blue">${a.category}</span></td>
+                  <td class="fw-600">${fmt(a.value)}</td>
+                  <td class="text-muted">${a.notes||'—'}</td>
+                  <td><button class="btn btn-danger btn-sm btn-icon" onclick="delFixedAsset(${a.id})">✕</button></td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><h3>💰 Capital Transactions</h3><button class="btn btn-primary btn-sm" onclick="capitalModal()">+ Add Entry</button></div>
+        <p class="text-muted" style="font-size:12px;padding:0 20px 12px">Money you've put into the business (positive) or taken out (negative) — separate from day-to-day rent and purchases.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>DATE</th><th>AMOUNT</th><th>NOTE</th><th>BY</th><th>ACTIONS</th></tr></thead>
+            <tbody>
+              ${capital.length===0
+                ? `<tr class="empty-row"><td colspan="5">No capital transactions yet.</td></tr>`
+                : capital.map(c=>`<tr>
+                  <td>${fmtDate(c.transaction_date)}</td>
+                  <td class="fw-600 ${parseFloat(c.amount)<0?'text-red':'text-green'}">${fmt(c.amount)}</td>
+                  <td class="text-muted">${c.note||'—'}</td>
+                  <td>${c.username||'—'}</td>
+                  <td><button class="btn btn-danger btn-sm btn-icon" onclick="delCapitalTransaction(${c.id})">✕</button></td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>`);
+  } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+}
+
+function fixedAssetModal() {
+  openModal(`
+    <div class="modal">
+      <div class="modal-header"><h3>🏠 Add Fixed Asset</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+      <div class="modal-body">
+        <div id="fa-alert" class="alert alert-danger hidden"></div>
+        <p class="text-muted" style="font-size:12px;margin-bottom:14px">If this purchase was already logged in Purchases as an expense, adding it here too will double-count it on the balance sheet. Use this only for assets you haven't separately expensed.</p>
+        <div class="form-group"><label>Asset Name *</label><input id="fa-name" placeholder="e.g. Refrigerator"/></div>
+        <div class="form-row">
+          <div class="form-group"><label>Value (₹) *</label><input id="fa-value" type="number" placeholder="e.g. 15000"/></div>
+          <div class="form-group"><label>Purchase Date *</label><input id="fa-date" type="date" value="${nowDate()}"/></div>
+        </div>
+        <div class="form-group"><label>Category</label>
+          <select id="fa-cat"><option>Furniture</option><option>Appliances</option><option>Electronics</option><option>Vehicle</option><option>Other</option></select>
+        </div>
+        <div class="form-group"><label>Notes</label><textarea id="fa-notes" rows="2" placeholder="Optional"></textarea></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveFixedAsset()">Add Asset</button>
+      </div>
+    </div>`);
+}
+
+async function saveFixedAsset() {
+  const al = document.getElementById('fa-alert');
+  const d = {
+    name: document.getElementById('fa-name').value.trim(),
+    value: document.getElementById('fa-value').value,
+    purchase_date: document.getElementById('fa-date').value,
+    category: document.getElementById('fa-cat').value,
+    notes: document.getElementById('fa-notes').value
+  };
+  if (!d.name || !d.value || !d.purchase_date) { showAlert(al, 'Name, value, and date are required'); return; }
+  try { await API.createFixedAsset(d); closeModal(); pgBalanceSheet(balanceSheetAsOf); }
+  catch(e) { showAlert(al, e.message); }
+}
+
+async function delFixedAsset(id) {
+  if (!confirm('Remove this fixed asset?')) return;
+  try { await API.deleteFixedAsset(id); pgBalanceSheet(balanceSheetAsOf); } catch(e) { alert(e.message); }
+}
+
+function capitalModal() {
+  openModal(`
+    <div class="modal">
+      <div class="modal-header"><h3>💰 Add Capital Transaction</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+      <div class="modal-body">
+        <div id="cap-alert" class="alert alert-danger hidden"></div>
+        <div class="form-group"><label>Amount (₹) *</label><input id="cap-amt" type="number" placeholder="Positive = put in, negative = took out"/></div>
+        <div class="form-group"><label>Date *</label><input id="cap-date" type="date" value="${nowDate()}"/></div>
+        <div class="form-group"><label>Note</label><input id="cap-note" placeholder="e.g. Initial investment"/></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveCapitalTransaction()">Add Entry</button>
+      </div>
+    </div>`);
+}
+
+async function saveCapitalTransaction() {
+  const al = document.getElementById('cap-alert');
+  const d = {
+    amount: document.getElementById('cap-amt').value,
+    transaction_date: document.getElementById('cap-date').value,
+    note: document.getElementById('cap-note').value
+  };
+  if (!d.amount || !d.transaction_date) { showAlert(al, 'Amount and date are required'); return; }
+  try { await API.createCapitalTransaction(d); closeModal(); pgBalanceSheet(balanceSheetAsOf); }
+  catch(e) { showAlert(al, e.message); }
+}
+
+async function delCapitalTransaction(id) {
+  if (!confirm('Remove this capital transaction?')) return;
+  try { await API.deleteCapitalTransaction(id); pgBalanceSheet(balanceSheetAsOf); } catch(e) { alert(e.message); }
 }
 
 // ── ADMIN (Staff / Audit Log / Deposit Refunds) ───

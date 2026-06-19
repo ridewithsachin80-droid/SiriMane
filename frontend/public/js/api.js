@@ -70,7 +70,14 @@ const API = {
   getReports: (m,y) => apiFetch(`/reports?month=${m}&year=${y}`),
   getReportsRange: (from,to) => apiFetch(`/reports?from=${from}&to=${to}`),
   getReportsTrend: (months) => apiFetch(`/reports/trend?months=${months}`),
-  confirmPurchase: id => apiFetch(`/purchases/${id}/confirm`, { method:'PUT' })
+  confirmPurchase: id => apiFetch(`/purchases/${id}/confirm`, { method:'PUT' }),
+  getFixedAssets: () => apiFetch('/fixed-assets'),
+  createFixedAsset: d => apiFetch('/fixed-assets', { method:'POST', body:d }),
+  deleteFixedAsset: id => apiFetch(`/fixed-assets/${id}`, { method:'DELETE' }),
+  getCapitalTransactions: () => apiFetch('/capital-transactions'),
+  createCapitalTransaction: d => apiFetch('/capital-transactions', { method:'POST', body:d }),
+  deleteCapitalTransaction: id => apiFetch(`/capital-transactions/${id}`, { method:'DELETE' }),
+  getBalanceSheet: (asOf) => apiFetch(`/balance-sheet${asOf?`?asOf=${asOf}`:''}`)
 };
 
 // Export downloads need the auth header, so a plain <a href> won't work —
