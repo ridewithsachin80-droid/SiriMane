@@ -208,7 +208,7 @@ router.delete('/rooms/:id', auth, requireAdmin, async (req, res) => {
 router.get('/guests', auth, async (req, res) => {
   try {
     const { search, active } = req.query;
-    let q = `SELECT g.*,r.room_number FROM guests g LEFT JOIN rooms r ON g.room_id=r.id WHERE 1=1`;
+    let q = `SELECT g.*,r.room_number,r.monthly_rent as room_rent FROM guests g LEFT JOIN rooms r ON g.room_id=r.id WHERE 1=1`;
     const p = [];
     if (active !== 'all') { p.push(active !== 'false'); q += ` AND g.is_active=$${p.length}`; }
     if (search) { p.push(`%${search}%`); q += ` AND (g.name ILIKE $${p.length} OR g.phone ILIKE $${p.length})`; }
@@ -220,7 +220,7 @@ router.get('/guests', auth, async (req, res) => {
 
 router.get('/guests/:id', auth, async (req, res) => {
   try {
-    const g = await pool.query(`SELECT g.*,r.room_number FROM guests g LEFT JOIN rooms r ON g.room_id=r.id WHERE g.id=$1`, [req.params.id]);
+    const g = await pool.query(`SELECT g.*,r.room_number,r.monthly_rent as room_rent FROM guests g LEFT JOIN rooms r ON g.room_id=r.id WHERE g.id=$1`, [req.params.id]);
     if (!g.rows[0]) return res.status(404).json({ error: 'Not found' });
     const c = await pool.query('SELECT * FROM collections WHERE guest_id=$1 AND is_deleted=false ORDER BY collection_date DESC', [req.params.id]);
     res.json({ ...g.rows[0], payments: c.rows });
@@ -231,16 +231,27 @@ router.post('/guests', auth, async (req, res) => {
   const { name,phone,email,emergency_contact,id_proof_type,id_proof_number,room_id,bed_number,join_date,monthly_rent,deposit_amount,notes } = req.body;
   if (!name || !join_date) return res.status(400).json({ error: 'Name and join date required' });
   try {
+    // If this guest's rent doesn't match their room's standard per-bed rate,
+    // flag it. Admin setting a custom rate is self-authorizing; staff doing
+    // the same needs admin to sign off before it's considered approved.
+    let rentVarianceApproved = true;
+    if (room_id) {
+      const room = await pool.query('SELECT monthly_rent FROM rooms WHERE id=$1', [room_id]);
+      if (room.rows[0] && parseFloat(room.rows[0].monthly_rent) !== parseFloat(monthly_rent || 0)) {
+        rentVarianceApproved = req.user.role === 'admin';
+      }
+    }
+
     const r = await pool.query(
-      `INSERT INTO guests(name,phone,email,emergency_contact,id_proof_type,id_proof_number,room_id,bed_number,join_date,monthly_rent,deposit_amount,notes,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
-      [name,phone,email,emergency_contact,id_proof_type,id_proof_number,room_id||null,bed_number||null,join_date,monthly_rent||0,deposit_amount||0,notes,req.user.id]);
+      `INSERT INTO guests(name,phone,email,emergency_contact,id_proof_type,id_proof_number,room_id,bed_number,join_date,monthly_rent,deposit_amount,notes,created_by,rent_variance_approved) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+      [name,phone,email,emergency_contact,id_proof_type,id_proof_number,room_id||null,bed_number||null,join_date,monthly_rent||0,deposit_amount||0,notes,req.user.id,rentVarianceApproved]);
     if (parseFloat(monthly_rent) > 0) {
       await pool.query(
         `INSERT INTO guest_rent_history(guest_id, monthly_rent, effective_from, changed_by, note) VALUES($1,$2,$3,$4,$5)`,
         [r.rows[0].id, monthly_rent, join_date, req.user.id, 'Initial rate at check-in']
       );
     }
-    await logActivity(req, 'guest_add', `${name}${room_id?' (room assigned)':''}`);
+    await logActivity(req, 'guest_add', `${name}${room_id?' (room assigned)':''}${!rentVarianceApproved?' — rent differs from room rate, pending approval':''}`);
     res.status(201).json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -253,9 +264,20 @@ router.put('/guests/:id', auth, async (req, res) => {
     const oldRent = parseFloat(existing.rows[0].monthly_rent) || 0;
     const newRent = monthly_rent !== undefined && monthly_rent !== null ? parseFloat(monthly_rent) : oldRent;
 
+    // Recompute the rent-variance flag against whichever room is being set,
+    // same rule as guest creation: admin's own edit self-authorizes, staff's
+    // edit needs admin sign-off if it creates a mismatch.
+    let rentVarianceApproved = true;
+    if (room_id) {
+      const room = await pool.query('SELECT monthly_rent FROM rooms WHERE id=$1', [room_id]);
+      if (room.rows[0] && parseFloat(room.rows[0].monthly_rent) !== newRent) {
+        rentVarianceApproved = req.user.role === 'admin';
+      }
+    }
+
     const r = await pool.query(
-      `UPDATE guests SET name=COALESCE($1,name),phone=COALESCE($2,phone),email=COALESCE($3,email),emergency_contact=COALESCE($4,emergency_contact),room_id=$5,bed_number=$6,monthly_rent=COALESCE($7,monthly_rent),deposit_amount=COALESCE($8,deposit_amount),notes=COALESCE($9,notes),leave_date=$10,is_active=COALESCE($11,is_active) WHERE id=$12 RETURNING *`,
-      [name,phone,email,emergency_contact,room_id||null,bed_number||null,monthly_rent,deposit_amount,notes,leave_date||null,is_active,req.params.id]);
+      `UPDATE guests SET name=COALESCE($1,name),phone=COALESCE($2,phone),email=COALESCE($3,email),emergency_contact=COALESCE($4,emergency_contact),room_id=$5,bed_number=$6,monthly_rent=COALESCE($7,monthly_rent),deposit_amount=COALESCE($8,deposit_amount),notes=COALESCE($9,notes),leave_date=$10,is_active=COALESCE($11,is_active),rent_variance_approved=$12 WHERE id=$13 RETURNING *`,
+      [name,phone,email,emergency_contact,room_id||null,bed_number||null,monthly_rent,deposit_amount,notes,leave_date||null,is_active,rentVarianceApproved,req.params.id]);
     if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
 
     if (newRent !== oldRent && newRent > 0) {
@@ -264,9 +286,19 @@ router.put('/guests/:id', auth, async (req, res) => {
         `INSERT INTO guest_rent_history(guest_id, monthly_rent, effective_from, changed_by) VALUES($1,$2,$3,$4)`,
         [req.params.id, newRent, effectiveFrom, req.user.id]
       );
-      await logActivity(req, 'rent_change', `${r.rows[0].name}: ₹${oldRent} → ₹${newRent}, effective ${effectiveFrom}`);
+      await logActivity(req, 'rent_change', `${r.rows[0].name}: ₹${oldRent} → ₹${newRent}, effective ${effectiveFrom}${!rentVarianceApproved?' — differs from room rate, pending approval':''}`);
     }
 
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Admin sign-off on a rent that differs from the room's standard rate.
+router.put('/guests/:id/approve-rent', auth, requireAdmin, async (req, res) => {
+  try {
+    const r = await pool.query('UPDATE guests SET rent_variance_approved=true WHERE id=$1 RETURNING *', [req.params.id]);
+    if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
+    await logActivity(req, 'rent_variance_approved', `${r.rows[0].name}: ₹${r.rows[0].monthly_rent}/mo approved`);
     res.json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
