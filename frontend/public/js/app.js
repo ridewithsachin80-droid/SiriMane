@@ -663,7 +663,7 @@ async function pgPayments(month, year) {
                   <td class="text-green fw-600">${fmt(c.amount)}</td>
                   <td>${fmtDate(c.collection_date)}</td>
                   <td><span class="badge badge-blue">${c.payment_mode}</span></td>
-                  <td><span class="badge ${c.status==='pending_verification'?'badge-amber':'badge-green'}">${c.status==='pending_verification'?'Pending':'Received'}</span></td>
+                  <td><span class="badge ${c.status&&c.status.startsWith('pending')?'badge-amber':'badge-green'}">${c.status==='pending_verification'?'Pending Verification':c.status==='pending_approval'?'Pending Approval':'Received'}</span></td>
                   <td>${isAdmin()?`<button class="btn btn-danger btn-sm btn-icon" onclick="delCollectionFromPayments(${c.id})">✕</button>`:'—'}</td>
                 </tr>`).join('')}
             </tbody>
@@ -859,13 +859,16 @@ async function pgPurchases(month, year) {
     purchasesCurrentYear = y;
     const list = await API.getPurchases(`?month=${m}&year=${y}`);
     purchasesListCache = list;
-    const total = list.reduce((s,p)=>s+parseFloat(p.amount),0);
+    const confirmedList = list.filter(p => p.status !== 'pending_approval');
+    const total = confirmedList.reduce((s,p)=>s+parseFloat(p.amount),0);
     const byCat = {};
-    list.forEach(p => { byCat[p.category]=(byCat[p.category]||0)+parseFloat(p.amount); });
+    confirmedList.forEach(p => { byCat[p.category]=(byCat[p.category]||0)+parseFloat(p.amount); });
+    const pendingCount = list.filter(p => p.status === 'pending_approval').length;
     setContent(`
       <div class="page-header"><h1>🛒 Purchases</h1><p>Track all PG expenses and purchases</p></div>
+      ${pendingCount>0?`<div class="alert" style="background:#FFFBEB;border:1px solid var(--amber);color:#92400E;margin-bottom:16px">⏳ ${pendingCount} staff-entered purchase${pendingCount>1?'s':''} awaiting your approval below.</div>`:''}
       <div class="stat-grid mb-5">
-        <div class="stat-card red"><div class="s-label">This Month</div><div class="s-value">${fmt(total)}</div><div class="s-sub">${new Date(y,m-1,1).toLocaleString('en-IN',{month:'long',year:'numeric'})}</div></div>
+        <div class="stat-card red"><div class="s-label">This Month (Confirmed)</div><div class="s-value">${fmt(total)}</div><div class="s-sub">${new Date(y,m-1,1).toLocaleString('en-IN',{month:'long',year:'numeric'})}</div></div>
         <div class="stat-card"><div class="s-label">Groceries</div><div class="s-value">${fmt(byCat['Groceries']||0)}</div><div class="s-sub" style="color:var(--green)">Food &amp; vegetables</div></div>
         <div class="stat-card"><div class="s-label">Maintenance</div><div class="s-value">${fmt(byCat['Maintenance']||0)}</div><div class="s-sub" style="color:var(--amber)">Repairs &amp; upkeep</div></div>
         <div class="stat-card"><div class="s-label">Utilities</div><div class="s-value">${fmt((byCat['Electricity']||0)+(byCat['Water']||0)+(byCat['Internet']||0))}</div><div class="s-sub" style="color:var(--blue)">Bills &amp; services</div></div>
@@ -935,21 +938,30 @@ function purchaseModal() {
 function renderPurchaseRows(list) {
   return list.length===0
     ? `<tr class="empty-row"><td colspan="7">No purchases found for this filter.</td></tr>`
-    : list.map(p=>`<tr>
+    : list.map(p=>{
+      const pending = p.status === 'pending_approval';
+      return `<tr ${pending?'style="background:#FFFBEB"':''}>
       <td>${fmtDate(p.purchase_date)}</td>
-      <td><span class="badge badge-amber">${p.category}</span></td>
+      <td><span class="badge badge-amber">${p.category}</span> ${pending?'<span class="badge badge-amber">Pending</span>':''}</td>
       <td>${p.description||'—'}</td>
       <td class="text-red fw-600">${fmt(p.amount)}</td>
       <td>${p.paid_to||'—'}</td>
       <td>${p.payment_mode}</td>
-      <td>${isAdmin()?`<button class="btn btn-danger btn-sm btn-icon" onclick="delPurchase(${p.id})">✕</button>`:'—'}</td>
-    </tr>`).join('');
+      <td>${pending && isAdmin()
+        ? `<div class="flex gap-2"><button class="btn btn-primary btn-sm" onclick="confirmPendingPurchase(${p.id})">Approve</button><button class="btn btn-danger btn-sm btn-icon" onclick="delPurchase(${p.id})">✕</button></div>`
+        : isAdmin() ? `<button class="btn btn-danger btn-sm btn-icon" onclick="delPurchase(${p.id})">✕</button>` : '—'}</td>
+    </tr>`;}).join('');
 }
 
 function filterPurchases() {
   const cat = document.getElementById('cat-filter').value;
   const filtered = cat ? purchasesListCache.filter(p => p.category === cat) : purchasesListCache;
   document.getElementById('purchases-tb').innerHTML = renderPurchaseRows(filtered);
+}
+
+async function confirmPendingPurchase(id) {
+  if(!confirm('Approve this purchase as confirmed spend?')) return;
+  try { await API.confirmPurchase(id); pgPurchases(purchasesCurrentMonth, purchasesCurrentYear); } catch(e) { alert(e.message); }
 }
 
 async function savePurchase() {
@@ -1148,14 +1160,16 @@ async function pgCollections(month, year) {
     collectionsCurrentYear = y;
     const list = await API.getCollections(`?month=${m}&year=${y}`);
     collectionsListCache = list;
-    const confirmedList = list.filter(c => c.status !== 'pending_verification');
+    const confirmedList = list.filter(c => c.status === 'confirmed' || !c.status);
     const total = confirmedList.reduce((s,c)=>s+parseFloat(c.amount),0);
     const byType = {};
     confirmedList.forEach(c => { byType[c.collection_type]=(byType[c.collection_type]||0)+parseFloat(c.amount); });
-    const pendingCount = list.filter(c => c.status === 'pending_verification').length;
+    const pendingVerificationCount = list.filter(c => c.status === 'pending_verification').length;
+    const pendingApprovalCount = list.filter(c => c.status === 'pending_approval').length;
     setContent(`
       <div class="page-header"><h1>💵 Collections</h1><p>Track all income — rent, deposits, and extra charges</p></div>
-      ${pendingCount>0?`<div class="alert" style="background:var(--amber-light,#FFFBEB);border:1px solid var(--amber,#F59E0B);color:#92400E;margin-bottom:16px">⏳ ${pendingCount} resident-reported UPI payment${pendingCount>1?'s':''} awaiting your confirmation below — check your bank/UPI app, then confirm or reject.</div>`:''}
+      ${pendingVerificationCount>0?`<div class="alert" style="background:var(--amber-light,#FFFBEB);border:1px solid var(--amber,#F59E0B);color:#92400E;margin-bottom:10px">⏳ ${pendingVerificationCount} resident-reported UPI payment${pendingVerificationCount>1?'s':''} awaiting your confirmation below — check your bank/UPI app, then confirm or reject.</div>`:''}
+      ${pendingApprovalCount>0?`<div class="alert" style="background:var(--amber-light,#FFFBEB);border:1px solid var(--amber,#F59E0B);color:#92400E;margin-bottom:16px">⏳ ${pendingApprovalCount} staff-entered collection${pendingApprovalCount>1?'s':''} awaiting your approval below.</div>`:''}
       <div class="stat-grid mb-5">
         <div class="stat-card green"><div class="s-label">This Month (Confirmed)</div><div class="s-value">${fmt(total)}</div><div class="s-sub">${new Date(y,m-1,1).toLocaleString('en-IN',{month:'long',year:'numeric'})}</div></div>
         <div class="stat-card"><div class="s-label">Rent</div><div class="s-value">${fmt(byType['rent']||0)}</div><div class="s-sub" style="color:var(--green)">Monthly rent</div></div>
@@ -1188,16 +1202,18 @@ function renderCollectionRows(list) {
   return list.length===0
     ? `<tr class="empty-row"><td colspan="7">No collections found for this filter.</td></tr>`
     : list.map(c=>{
-      const pending = c.status === 'pending_verification';
+      const pendingVerification = c.status === 'pending_verification';
+      const pendingApproval = c.status === 'pending_approval';
+      const pending = pendingVerification || pendingApproval;
       return `<tr ${pending?'style="background:#FFFBEB"':''}>
       <td>${fmtDate(c.collection_date)}</td>
-      <td><span class="badge badge-green" style="text-transform:capitalize">${c.collection_type}</span> ${pending?'<span class="badge badge-amber">Pending</span>':''}</td>
+      <td><span class="badge badge-green" style="text-transform:capitalize">${c.collection_type}</span> ${pendingVerification?'<span class="badge badge-amber">Pending Verification</span>':pendingApproval?'<span class="badge badge-amber">Pending Approval</span>':''}</td>
       <td>${c.guest_name||'—'}</td>
       <td>${c.description||c.collection_month||'—'}</td>
       <td class="text-green fw-600">${fmt(c.amount)}</td>
       <td>${c.payment_mode}</td>
       <td>${pending && isAdmin()
-        ? `<div class="flex gap-2"><button class="btn btn-primary btn-sm" onclick="confirmPendingCollection(${c.id})">Confirm</button><button class="btn btn-danger btn-sm btn-icon" onclick="delCollection(${c.id})">✕</button></div>`
+        ? `<div class="flex gap-2"><button class="btn btn-primary btn-sm" onclick="confirmPendingCollection(${c.id})">${pendingApproval?'Approve':'Confirm'}</button><button class="btn btn-danger btn-sm btn-icon" onclick="delCollection(${c.id})">✕</button></div>`
         : isAdmin() ? `<button class="btn btn-danger btn-sm btn-icon" onclick="delCollection(${c.id})">✕</button>` : '—'}</td>
     </tr>`;}).join('');
 }
@@ -1324,21 +1340,74 @@ async function pgRentDue() {
 }
 
 // ── REPORTS ───────────────────────────────────────
+let reportsMode = 'month';
+let reportsRangeFrom = null;
+let reportsRangeTo = null;
+
 async function pgReports(month, year) {
+  reportsMode = 'month';
   loading();
   const now = new Date();
   const m = month || (now.getMonth()+1); const y = year || now.getFullYear();
   try {
     const r = await API.getReports(m,y);
-    setContent(`
+    const controls = `
+      <span style="font-size:13px;color:var(--text-muted)">Select Month</span>
+      ${monthPicker(m, y, 'onReportsMonthChange')}
+      <button class="btn btn-outline btn-sm" onclick="switchReportsToRange()">Custom Range</button>`;
+    setContent(renderReportsPage(r, controls));
+    loadTrendChart();
+  } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+}
+
+async function pgReportsRange(from, to) {
+  reportsMode = 'range';
+  reportsRangeFrom = from;
+  reportsRangeTo = to;
+  loading();
+  try {
+    const r = await API.getReportsRange(from, to);
+    const controls = `
+      <input type="date" id="rep-from" value="${from}" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit"/>
+      <span style="font-size:13px;color:var(--text-muted)">to</span>
+      <input type="date" id="rep-to" value="${to}" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit"/>
+      <button class="btn btn-primary btn-sm" onclick="applyReportsRange()">Apply</button>
+      <button class="btn btn-outline btn-sm" onclick="switchReportsToMonth()">By Month</button>`;
+    setContent(renderReportsPage(r, controls));
+    loadTrendChart();
+  } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+}
+
+function switchReportsToRange() {
+  const now = new Date();
+  const defaultFrom = reportsRangeFrom || new Date(now.getFullYear(), 0, 1).toISOString().split('T')[0];
+  const defaultTo = reportsRangeTo || now.toISOString().split('T')[0];
+  pgReportsRange(defaultFrom, defaultTo);
+}
+
+function switchReportsToMonth() {
+  pgReports();
+}
+
+function applyReportsRange() {
+  const from = document.getElementById('rep-from').value;
+  const to = document.getElementById('rep-to').value;
+  if (!from || !to) { alert('Pick both a from and to date'); return; }
+  if (from > to) { alert('The "from" date has to be before the "to" date'); return; }
+  pgReportsRange(from, to);
+}
+
+function renderReportsPage(r, controlsHtml) {
+  return `
       <div class="page-header flex justify-between items-center">
-        <div><h1>📋 Reports</h1><p>Monthly Profit &amp; Loss summary</p></div>
-        <div class="flex items-center gap-2">
-          <span style="font-size:13px;color:var(--text-muted)">Select Month</span>
-          ${monthPicker(m, y, 'onReportsMonthChange')}
-        </div>
+        <div><h1>📋 Reports</h1><p>Profit &amp; Loss summary</p></div>
+        <div class="flex items-center gap-2">${controlsHtml}</div>
       </div>
-      <div class="stat-grid mb-6 mt-4">
+      ${isAdmin()?`<div class="flex gap-2 mb-5">
+        <button class="btn btn-outline btn-sm" onclick="exportReport('csv','${r.dateFrom}','${r.dateTo}')">⬇ Export CSV</button>
+        <button class="btn btn-outline btn-sm" onclick="exportReport('pdf','${r.dateFrom}','${r.dateTo}')">⬇ Export PDF</button>
+      </div>`:''}
+      <div class="stat-grid mb-6">
         <div class="stat-card" style="border-left:4px solid var(--green)">
           <div class="s-label">Total Income</div>
           <div class="s-value text-green">${fmt(r.totalIncome)}</div>
@@ -1355,12 +1424,12 @@ async function pgReports(month, year) {
           <div class="s-sub ${r.netProfit>=0?'':'text-red'}">✅ ${r.netProfit>=0?'Profit':'Loss'}</div>
         </div>
       </div>
-      <div class="two-col">
+      <div class="two-col mb-6">
         <div class="card">
           <div class="card-header"><h3>💵 Income Breakdown</h3></div>
           <div class="card-body">
             ${r.incomeBreakdown.length===0
-              ? '<div style="text-align:center;padding:32px;color:var(--text-muted)">💵<br><br>No collections this month</div>'
+              ? '<div style="text-align:center;padding:32px;color:var(--text-muted)">💵<br><br>No collections in this period</div>'
               : r.incomeBreakdown.map(i=>`
               <div class="flex justify-between items-center" style="padding:10px 0;border-bottom:1px solid var(--border)">
                 <span style="text-transform:capitalize;font-size:14px">${i.collection_type}</span>
@@ -1372,7 +1441,7 @@ async function pgReports(month, year) {
           <div class="card-header"><h3>🛒 Expense Breakdown</h3></div>
           <div class="card-body">
             ${r.expenseBreakdown.length===0
-              ? '<div style="text-align:center;padding:32px;color:var(--text-muted)">🛒<br><br>No purchases this month</div>'
+              ? '<div style="text-align:center;padding:32px;color:var(--text-muted)">🛒<br><br>No purchases in this period</div>'
               : r.expenseBreakdown.map(e=>`
               <div class="flex justify-between items-center" style="padding:10px 0;border-bottom:1px solid var(--border)">
                 <span style="font-size:14px">${e.category}</span>
@@ -1380,8 +1449,62 @@ async function pgReports(month, year) {
               </div>`).join('')}
           </div>
         </div>
-      </div>`);
-  } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+      </div>
+      <div class="card">
+        <div class="card-header"><h3>📈 Trend (Last 6 Months)</h3></div>
+        <div class="card-body" id="trend-chart-wrap"><div class="loading-center"><div class="spinner"></div></div></div>
+      </div>`;
+}
+
+async function exportReport(type, from, to) {
+  try {
+    if (type === 'csv') await API.downloadExport(`/reports/export/csv?from=${from}&to=${to}`, `sirimane-transactions-${from}-to-${to}.csv`);
+    else await API.downloadExport(`/reports/export/pdf?from=${from}&to=${to}`, `sirimane-report-${from}-to-${to}.pdf`);
+  } catch(e) { alert('Export failed: ' + e.message); }
+}
+
+async function loadTrendChart() {
+  const wrap = document.getElementById('trend-chart-wrap');
+  if (!wrap) return;
+  try {
+    const trend = await API.getReportsTrend(6);
+    wrap.innerHTML = renderTrendChart(trend);
+  } catch(e) {
+    wrap.innerHTML = `<div class="alert alert-danger">${e.message}</div>`;
+  }
+}
+
+function renderTrendChart(trend) {
+  if (!trend.length) return '<div style="text-align:center;padding:32px;color:var(--text-muted)">No data yet</div>';
+  const maxVal = Math.max(1, ...trend.map(t => Math.max(t.income, t.expenses)));
+  const groupWidth = 90;
+  const chartHeight = 180;
+  const barMaxHeight = 130;
+  const width = trend.length * groupWidth;
+
+  const bars = trend.map((t, i) => {
+    const x = i * groupWidth;
+    const incH = (t.income / maxVal) * barMaxHeight;
+    const expH = (t.expenses / maxVal) * barMaxHeight;
+    const baseY = barMaxHeight + 10;
+    return `
+      <g>
+        <rect x="${x+15}" y="${baseY-incH}" width="22" height="${incH}" fill="var(--green)" rx="2"><title>${t.label} Income: ${fmt(t.income)}</title></rect>
+        <rect x="${x+45}" y="${baseY-expH}" width="22" height="${expH}" fill="var(--red)" rx="2"><title>${t.label} Expenses: ${fmt(t.expenses)}</title></rect>
+        <text x="${x+45}" y="${baseY+18}" text-anchor="middle" font-size="11" fill="var(--text-muted)">${t.label.split(' ')[0]}</text>
+      </g>`;
+  }).join('');
+
+  return `
+    <div style="overflow-x:auto">
+      <svg viewBox="0 0 ${width} ${chartHeight}" width="${width}" height="${chartHeight}" style="min-width:${width}px">
+        ${bars}
+      </svg>
+    </div>
+    <div class="flex gap-4 mt-3" style="font-size:12px">
+      <span><span style="display:inline-block;width:10px;height:10px;background:var(--green);border-radius:2px;margin-right:5px"></span>Income</span>
+      <span><span style="display:inline-block;width:10px;height:10px;background:var(--red);border-radius:2px;margin-right:5px"></span>Expenses</span>
+    </div>`;
 }
 
 // ── ADMIN (Staff / Audit Log / Deposit Refunds) ───

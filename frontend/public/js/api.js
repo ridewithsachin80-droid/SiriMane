@@ -67,5 +67,27 @@ const API = {
   markRead: id => apiFetch(`/inbox/${id}/read`, { method:'PUT' }),
   replyInbox: (id,r) => apiFetch(`/inbox/${id}/reply`, { method:'PUT', body:{reply:r} }),
   deleteInbox: id => apiFetch(`/inbox/${id}`, { method:'DELETE' }),
-  getReports: (m,y) => apiFetch(`/reports?month=${m}&year=${y}`)
+  getReports: (m,y) => apiFetch(`/reports?month=${m}&year=${y}`),
+  getReportsRange: (from,to) => apiFetch(`/reports?from=${from}&to=${to}`),
+  getReportsTrend: (months) => apiFetch(`/reports/trend?months=${months}`),
+  confirmPurchase: id => apiFetch(`/purchases/${id}/confirm`, { method:'PUT' })
+};
+
+// Export downloads need the auth header, so a plain <a href> won't work —
+// fetch as a blob and trigger the download manually instead.
+API.downloadExport = async function(path, filename) {
+  const res = await fetch('/api' + path, { headers: { 'Authorization': 'Bearer ' + getToken() } });
+  if (!res.ok) {
+    const err = await res.json().catch(()=>({error:'Export failed'}));
+    throw new Error(err.error || 'Export failed');
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 };
