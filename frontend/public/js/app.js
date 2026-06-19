@@ -88,6 +88,32 @@ function openModal(html) {
 }
 function closeModal() { stopPurchaseVoice(); document.getElementById('modal-container').innerHTML = ''; }
 function loading() { setContent('<div class="loading-center"><div class="spinner"></div></div>'); }
+
+// Generic CSV export for any already-loaded array of objects — columns is
+// [{ label, get: (row) => value }]. Builds the file entirely client-side,
+// no backend round trip needed since the data's already on screen.
+function exportArrayToCsv(filename, columns, rows) {
+  const escapeCsv = (val) => {
+    if (val === null || val === undefined) return '';
+    const str = String(val);
+    return (str.includes(',') || str.includes('"') || str.includes('\n'))
+      ? '"' + str.replace(/"/g, '""') + '"'
+      : str;
+  };
+  const lines = [columns.map(c => escapeCsv(c.label)).join(',')];
+  for (const row of rows) {
+    lines.push(columns.map(c => escapeCsv(c.get(row))).join(','));
+  }
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
 function nowDate() { return new Date().toISOString().split('T')[0]; }
 function monthPicker(month, year, onChangeFn) {
   const n = new Date();
@@ -897,6 +923,10 @@ async function pgPurchases(month, year) {
     setContent(`
       <div class="page-header"><h1>🛒 Purchases</h1><p>Track all PG expenses and purchases</p></div>
       ${pendingCount>0?`<div class="alert" style="background:#FFFBEB;border:1px solid var(--amber);color:#92400E;margin-bottom:16px">⏳ ${pendingCount} staff-entered purchase${pendingCount>1?'s':''} awaiting your approval below.</div>`:''}
+      ${isAdmin()?`<div class="flex gap-2 mb-5">
+        <button class="btn btn-outline btn-sm" onclick="exportPurchasesCsv()">⬇ Export CSV</button>
+        <button class="btn btn-outline btn-sm" onclick="exportPurchasesPdf()">⬇ Export PDF</button>
+      </div>`:''}
       <div class="stat-grid mb-5">
         <div class="stat-card red"><div class="s-label">This Month (Confirmed)</div><div class="s-value">${fmt(total)}</div><div class="s-sub">${new Date(y,m-1,1).toLocaleString('en-IN',{month:'long',year:'numeric'})}</div></div>
         <div class="stat-card"><div class="s-label">Groceries</div><div class="s-value">${fmt(byCat['Groceries']||0)}</div><div class="s-sub" style="color:var(--green)">Food &amp; vegetables</div></div>
@@ -987,6 +1017,27 @@ function filterPurchases() {
   const cat = document.getElementById('cat-filter').value;
   const filtered = cat ? purchasesListCache.filter(p => p.category === cat) : purchasesListCache;
   document.getElementById('purchases-tb').innerHTML = renderPurchaseRows(filtered);
+}
+
+function exportPurchasesCsv() {
+  exportArrayToCsv(
+    `sirimane-purchases-${purchasesCurrentMonth}-${purchasesCurrentYear}.csv`,
+    [
+      { label: 'Date', get: p => fmtDate(p.purchase_date) },
+      { label: 'Category', get: p => p.category },
+      { label: 'Description', get: p => p.description },
+      { label: 'Amount', get: p => p.amount },
+      { label: 'Paid To', get: p => p.paid_to },
+      { label: 'Mode', get: p => p.payment_mode },
+      { label: 'Status', get: p => p.status }
+    ],
+    purchasesListCache
+  );
+}
+
+async function exportPurchasesPdf() {
+  try { await API.downloadExport(`/purchases/export/pdf?month=${purchasesCurrentMonth}&year=${purchasesCurrentYear}`, `sirimane-purchases-${purchasesCurrentMonth}-${purchasesCurrentYear}.pdf`); }
+  catch(e) { alert('Export failed: ' + e.message); }
 }
 
 async function confirmPendingPurchase(id) {
@@ -1200,6 +1251,10 @@ async function pgCollections(month, year) {
       <div class="page-header"><h1>💵 Collections</h1><p>Track all income — rent, deposits, and extra charges</p></div>
       ${pendingVerificationCount>0?`<div class="alert" style="background:var(--amber-light,#FFFBEB);border:1px solid var(--amber,#F59E0B);color:#92400E;margin-bottom:10px">⏳ ${pendingVerificationCount} resident-reported UPI payment${pendingVerificationCount>1?'s':''} awaiting your confirmation below — check your bank/UPI app, then confirm or reject.</div>`:''}
       ${pendingApprovalCount>0?`<div class="alert" style="background:var(--amber-light,#FFFBEB);border:1px solid var(--amber,#F59E0B);color:#92400E;margin-bottom:16px">⏳ ${pendingApprovalCount} staff-entered collection${pendingApprovalCount>1?'s':''} awaiting your approval below.</div>`:''}
+      ${isAdmin()?`<div class="flex gap-2 mb-5">
+        <button class="btn btn-outline btn-sm" onclick="exportCollectionsCsv()">⬇ Export CSV</button>
+        <button class="btn btn-outline btn-sm" onclick="exportCollectionsPdf()">⬇ Export PDF</button>
+      </div>`:''}
       <div class="stat-grid mb-5">
         <div class="stat-card green"><div class="s-label">This Month (Confirmed)</div><div class="s-value">${fmt(total)}</div><div class="s-sub">${new Date(y,m-1,1).toLocaleString('en-IN',{month:'long',year:'numeric'})}</div></div>
         <div class="stat-card"><div class="s-label">Rent</div><div class="s-value">${fmt(byType['rent']||0)}</div><div class="s-sub" style="color:var(--green)">Monthly rent</div></div>
@@ -1252,6 +1307,27 @@ function filterCollections() {
   const type = document.getElementById('coll-type-filter').value;
   const filtered = type ? collectionsListCache.filter(c => c.collection_type === type) : collectionsListCache;
   document.getElementById('collections-tb').innerHTML = renderCollectionRows(filtered);
+}
+
+function exportCollectionsCsv() {
+  exportArrayToCsv(
+    `sirimane-collections-${collectionsCurrentMonth}-${collectionsCurrentYear}.csv`,
+    [
+      { label: 'Date', get: c => fmtDate(c.collection_date) },
+      { label: 'Type', get: c => c.collection_type },
+      { label: 'Guest / From', get: c => c.guest_name },
+      { label: 'Description', get: c => c.description || c.collection_month },
+      { label: 'Amount', get: c => c.amount },
+      { label: 'Mode', get: c => c.payment_mode },
+      { label: 'Status', get: c => c.status }
+    ],
+    collectionsListCache
+  );
+}
+
+async function exportCollectionsPdf() {
+  try { await API.downloadExport(`/collections/export/pdf?month=${collectionsCurrentMonth}&year=${collectionsCurrentYear}`, `sirimane-collections-${collectionsCurrentMonth}-${collectionsCurrentYear}.pdf`); }
+  catch(e) { alert('Export failed: ' + e.message); }
 }
 
 let collectionModalGuestId = null;
@@ -1330,15 +1406,22 @@ async function confirmPendingCollection(id) {
 }
 
 // ── RENT DUE TRACKER ──────────────────────────────
+let rentDueListCache = [];
+
 async function pgRentDue() {
   loading();
   document.getElementById('topbar-actions').innerHTML = '';
   try {
     const list = await API.getRentDue();
+    rentDueListCache = list;
     const totalDue = list.reduce((s,g) => s + parseFloat(g.amount_due), 0);
     const fullyPaidCount = list.filter(g => parseFloat(g.amount_due) <= 0).length;
     setContent(`
       <div class="page-header"><h1>📅 Rent Due</h1><p>Running balance for each guest, carried forward across months — not just this month's snapshot</p></div>
+      ${isAdmin()?`<div class="flex gap-2 mb-5">
+        <button class="btn btn-outline btn-sm" onclick="exportRentDueCsv()">⬇ Export CSV</button>
+        <button class="btn btn-outline btn-sm" onclick="exportRentDuePdf()">⬇ Export PDF</button>
+      </div>`:''}
       <div class="stat-grid mb-5">
         <div class="stat-card red"><div class="s-label">Total Outstanding</div><div class="s-value">${fmt(totalDue)}</div><div class="s-sub">Across all guests</div></div>
         <div class="stat-card"><div class="s-label">Settled or Ahead</div><div class="s-value">${fullyPaidCount} / ${list.length}</div><div class="s-sub" style="color:var(--green)">Guests</div></div>
@@ -1367,6 +1450,26 @@ async function pgRentDue() {
         </div>
       </div>`);
   } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+}
+
+function exportRentDueCsv() {
+  exportArrayToCsv(
+    `sirimane-rent-due-${nowDate()}.csv`,
+    [
+      { label: 'Name', get: g => g.name },
+      { label: 'Room', get: g => g.room_number },
+      { label: 'Phone', get: g => g.phone },
+      { label: 'Monthly Rent', get: g => g.monthly_rent },
+      { label: 'Amount Due', get: g => g.amount_due },
+      { label: 'Credit', get: g => g.credit }
+    ],
+    rentDueListCache
+  );
+}
+
+async function exportRentDuePdf() {
+  try { await API.downloadExport('/rent-due/export/pdf', `sirimane-rent-due-${nowDate()}.pdf`); }
+  catch(e) { alert('Export failed: ' + e.message); }
 }
 
 // ── REPORTS ───────────────────────────────────────
@@ -1540,6 +1643,8 @@ function renderTrendChart(trend) {
 // ── BALANCE SHEET ──────────────────────────────────
 let balanceSheetAsOf = null;
 
+let balanceSheetAssetsCache = [];
+
 async function pgBalanceSheet(asOf) {
   loading();
   document.getElementById('topbar-actions').innerHTML = '';
@@ -1551,6 +1656,7 @@ async function pgBalanceSheet(asOf) {
       API.getFixedAssets(),
       API.getCapitalTransactions()
     ]);
+    balanceSheetAssetsCache = assets;
     const hasGap = Math.abs(bs.reconciliationDiff) > 0.5;
     setContent(`
       <div class="page-header flex justify-between items-center">
@@ -1560,6 +1666,11 @@ async function pgBalanceSheet(asOf) {
           <input type="date" value="${date}" onchange="pgBalanceSheet(this.value)" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit"/>
         </div>
       </div>
+
+      ${isAdmin()?`<div class="flex gap-2 mb-5">
+        <button class="btn btn-outline btn-sm" onclick="exportBalanceSheetPdf()">⬇ Export PDF</button>
+        <button class="btn btn-outline btn-sm" onclick="exportFixedAssetsCsv()">⬇ Export Fixed Assets CSV</button>
+      </div>`:''}
 
       ${hasGap?`<div class="alert" style="background:#FFFBEB;border:1px solid var(--amber);color:#92400E;margin-bottom:16px">
         ⚠️ Reconciliation gap of ${fmt(Math.abs(bs.reconciliationDiff))}: deposits collected-minus-refunded don't match what's currently held per guest records. This usually means a deposit was collected but never logged as a Collection (or vice versa) — worth checking guest deposit amounts against the Collections history. This isn't a bug in the calculation; it's flagging a real data gap.
@@ -1645,6 +1756,25 @@ async function pgBalanceSheet(asOf) {
         </div>
       </div>`);
   } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+}
+
+async function exportBalanceSheetPdf() {
+  try { await API.downloadExport(`/balance-sheet/export/pdf?asOf=${balanceSheetAsOf}`, `sirimane-balance-sheet-${balanceSheetAsOf}.pdf`); }
+  catch(e) { alert('Export failed: ' + e.message); }
+}
+
+function exportFixedAssetsCsv() {
+  exportArrayToCsv(
+    `sirimane-fixed-assets-${balanceSheetAsOf}.csv`,
+    [
+      { label: 'Date', get: a => fmtDate(a.purchase_date) },
+      { label: 'Name', get: a => a.name },
+      { label: 'Category', get: a => a.category },
+      { label: 'Value', get: a => a.value },
+      { label: 'Notes', get: a => a.notes }
+    ],
+    balanceSheetAssetsCache
+  );
 }
 
 function fixedAssetModal() {
