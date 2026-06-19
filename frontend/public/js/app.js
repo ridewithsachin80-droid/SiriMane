@@ -270,8 +270,11 @@ async function pgGuests() {
   document.getElementById('topbar-actions').innerHTML = `<button class="btn btn-primary btn-sm" onclick="guestModal()">+ Add Guest</button>`;
   try {
     const list = await API.getGuests();
+    const hasVariance = (g) => g.room_id && g.room_rent !== null && g.room_rent !== undefined && parseFloat(g.monthly_rent) !== parseFloat(g.room_rent);
+    const pendingCount = list.filter(g => hasVariance(g) && !g.rent_variance_approved).length;
     setContent(`
       <div class="page-header"><h1>Guests</h1><p>Register and manage PG residents</p></div>
+      ${pendingCount>0?`<div class="alert" style="background:#FFFBEB;border:1px solid var(--amber);color:#92400E;margin-bottom:16px">⏳ ${pendingCount} guest${pendingCount>1?'s have':' has'} a rent that differs from their room's standard rate and ${pendingCount>1?'need':'needs'} your approval — look for the amber "Variance" badge below.</div>`:''}
       <div class="card">
         <div class="card-header">
           <h3>All Guests</h3>
@@ -286,28 +289,37 @@ async function pgGuests() {
             <tbody id="guests-tb">
               ${list.length===0
                 ? `<tr class="empty-row"><td colspan="8">No guests yet. Click Add Guest to register.</td></tr>`
-                : list.map(g=>`
+                : list.map(g=>{
+                  const variance = hasVariance(g);
+                  const needsApproval = variance && !g.rent_variance_approved;
+                  return `
                 <tr data-search="${g.name.toLowerCase()} ${g.phone||''}">
                   <td><strong>${g.name}</strong><br><span class="text-muted">${g.email||''}</span></td>
                   <td>${g.phone||'—'}</td>
                   <td>${g.room_number?'Room '+g.room_number+(g.bed_number?' / Bed '+g.bed_number:''):'-'}</td>
                   <td>${fmtDate(g.join_date)}</td>
-                  <td>${fmt(g.monthly_rent)}/mo</td>
+                  <td>${fmt(g.monthly_rent)}/mo ${variance?`<span class="badge ${needsApproval?'badge-amber':'badge-blue'}" title="Room rate is ${fmt(g.room_rent)}">${needsApproval?'Pending Approval':'Variance'}</span>`:''}</td>
                   <td><span class="badge ${g.is_active?'badge-green':'badge-red'}">${g.is_active?'Active':'Left'}</span></td>
                   <td><span class="badge badge-gray">${g.id_proof_type||'—'}</span></td>
                   <td>
                     <div class="flex gap-2">
                       <button class="btn btn-outline btn-sm" onclick="viewGuest(${g.id})">View</button>
                       <button class="btn btn-primary btn-sm" onclick="guestModal(null,${g.id})">Edit</button>
+                      ${needsApproval && isAdmin()?`<button class="btn btn-success btn-sm" onclick="approveRentVariance(${g.id})">Approve Rent</button>`:''}
                       ${g.is_active && isAdmin()?`<button class="btn btn-danger btn-sm" onclick="checkoutModal(${g.id})">Checkout</button>`:''}
                     </div>
                   </td>
-                </tr>`).join('')}
+                </tr>`;}).join('')}
             </tbody>
           </table>
         </div>
       </div>`);
   } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+}
+
+async function approveRentVariance(id) {
+  if (!confirm('Approve this rent rate even though it differs from the room\'s standard rate?')) return;
+  try { await API.approveRentVariance(id); pgGuests(); } catch(e) { alert(e.message); }
 }
 
 function filterTable(q, tbId) {
@@ -336,17 +348,18 @@ async function guestModal(gData=null, id=null) {
         </div>
         <div class="form-row">
           <div class="form-group"><label>Room</label>
-            <select id="gf-room">
+            <select id="gf-room" onchange="checkRentVariance()">
               <option value="">— Select Room —</option>
-              ${rooms.map(r=>`<option value="${r.id}" ${g.room_id==r.id?'selected':''}>Room ${r.room_number} (${r.available_beds} beds free)</option>`).join('')}
+              ${rooms.map(r=>`<option value="${r.id}" data-rent="${r.monthly_rent}" ${g.room_id==r.id?'selected':''}>Room ${r.room_number} (${r.available_beds} beds free)</option>`).join('')}
             </select>
           </div>
           <div class="form-group"><label>Bed / Berth Number</label><input id="gf-bed" type="number" value="${g.bed_number||''}" placeholder="1, 2..."/></div>
         </div>
         <div class="form-row">
           <div class="form-group"><label>Check-in Date *</label><input id="gf-join" type="date" value="${g.join_date?g.join_date.split('T')[0]:nowDate()}"/></div>
-          <div class="form-group"><label>Monthly Rent (₹)</label><input id="gf-rent" type="number" value="${g.monthly_rent||''}" data-original="${g.monthly_rent||0}" placeholder="e.g. 5000" oninput="toggleRentEffectiveField()"/></div>
+          <div class="form-group"><label>Monthly Rent (₹)</label><input id="gf-rent" type="number" value="${g.monthly_rent||''}" data-original="${g.monthly_rent||0}" placeholder="e.g. 5000" oninput="toggleRentEffectiveField();checkRentVariance()"/></div>
         </div>
+        <div id="gf-rent-variance-warning" class="hidden" style="background:#FFFBEB;border:1px solid var(--amber);color:#92400E;padding:8px 12px;border-radius:8px;font-size:12px;margin-bottom:12px"></div>
         ${g.id ? `<div class="form-group" id="gf-rent-effective-wrap" style="display:none">
           <label>New rate effective from</label>
           <input id="gf-rent-effective" type="date" value="${nowDate()}"/>
@@ -365,6 +378,23 @@ async function guestModal(gData=null, id=null) {
         <button class="btn btn-primary" onclick="saveGuest(${g.id||'null'})">${g.id?'Save Changes':'Add Guest'}</button>
       </div>
     </div>`);
+  checkRentVariance();
+}
+
+function checkRentVariance() {
+  const roomSel = document.getElementById('gf-room');
+  const rentInput = document.getElementById('gf-rent');
+  const warning = document.getElementById('gf-rent-variance-warning');
+  if (!roomSel || !rentInput || !warning) return;
+  const selectedOption = roomSel.options[roomSel.selectedIndex];
+  const roomRent = selectedOption ? parseFloat(selectedOption.dataset.rent) : NaN;
+  const guestRent = parseFloat(rentInput.value) || 0;
+  if (roomSel.value && !isNaN(roomRent) && roomRent !== guestRent) {
+    warning.textContent = `⚠️ This differs from this room's standard rate of ${fmt(roomRent)}/bed by ${fmt(Math.abs(roomRent - guestRent))}. ${isAdmin() ? 'You can save this — as admin, it\'s automatically approved.' : 'You can still save this, but it will be flagged for admin review until approved.'}`;
+    warning.classList.remove('hidden');
+  } else {
+    warning.classList.add('hidden');
+  }
 }
 
 function toggleRentEffectiveField() {

@@ -37,6 +37,7 @@ const API = {
   getGuest: id => apiFetch(`/guests/${id}`),
   createGuest: d => apiFetch('/guests', { method:'POST', body:d }),
   updateGuest: (id,d) => apiFetch(`/guests/${id}`, { method:'PUT', body:d }),
+  approveRentVariance: id => apiFetch(`/guests/${id}/approve-rent`, { method:'PUT' }),
   checkoutGuest: id => apiFetch(`/guests/${id}`, { method:'DELETE' }),
   checkoutGuestWithRefund: (id,d) => apiFetch(`/guests/${id}/checkout`, { method:'POST', body:d }),
   getUsers: () => apiFetch('/users'),
