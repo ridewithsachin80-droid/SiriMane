@@ -666,6 +666,134 @@ router.get('/reports/export/pdf', auth, requireAdmin, async (req, res) => {
   }
 });
 
+// ── FIXED ASSETS (admin only) ─────────────────────
+router.get('/fixed-assets', auth, requireAdmin, async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM fixed_assets WHERE is_deleted=false ORDER BY purchase_date DESC');
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/fixed-assets', auth, requireAdmin, async (req, res) => {
+  const { name, category, purchase_date, value, notes } = req.body;
+  if (!name || !purchase_date || !value) return res.status(400).json({ error: 'Name, purchase date, and value are required' });
+  try {
+    const r = await pool.query(
+      `INSERT INTO fixed_assets(name,category,purchase_date,value,notes,created_by) VALUES($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [name, category||'Other', purchase_date, value, notes, req.user.id]
+    );
+    await logActivity(req, 'fixed_asset_add', `${name} — ₹${value}`);
+    res.status(201).json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.delete('/fixed-assets/:id', auth, requireAdmin, async (req, res) => {
+  try {
+    const r = await pool.query('UPDATE fixed_assets SET is_deleted=true,deleted_by=$1,deleted_at=NOW() WHERE id=$2 AND is_deleted=false RETURNING *', [req.user.id, req.params.id]);
+    if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
+    await logActivity(req, 'fixed_asset_delete', `${r.rows[0].name} (id ${req.params.id})`);
+    res.json({ message: 'Deleted' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── CAPITAL TRANSACTIONS (admin only) ─────────────
+// Tracks money the owner has put into (positive) or taken out of (negative)
+// the business — the "Equity" side of the balance sheet, separate from
+// day-to-day rent/purchases.
+router.get('/capital-transactions', auth, requireAdmin, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT c.*, u.username FROM capital_transactions c LEFT JOIN users u ON c.created_by=u.id ORDER BY c.transaction_date DESC`
+    );
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/capital-transactions', auth, requireAdmin, async (req, res) => {
+  const { amount, transaction_date, note } = req.body;
+  if (!amount || !transaction_date) return res.status(400).json({ error: 'Amount and date are required' });
+  try {
+    const r = await pool.query(
+      `INSERT INTO capital_transactions(amount,transaction_date,note,created_by) VALUES($1,$2,$3,$4) RETURNING *`,
+      [amount, transaction_date, note, req.user.id]
+    );
+    await logActivity(req, 'capital_transaction_add', `₹${amount} on ${transaction_date}${note?' — '+note:''}`);
+    res.status(201).json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.delete('/capital-transactions/:id', auth, requireAdmin, async (req, res) => {
+  try {
+    const r = await pool.query('DELETE FROM capital_transactions WHERE id=$1 RETURNING *', [req.params.id]);
+    if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
+    await logActivity(req, 'capital_transaction_delete', `₹${r.rows[0].amount} on ${r.rows[0].transaction_date}`);
+    res.json({ message: 'Deleted' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── BALANCE SHEET (admin only) ────────────────────
+// Cash-basis, deliberately — matches how Reports already recognizes income
+// (when collected, not when earned), so this stays internally consistent
+// rather than mixing cash and accrual accounting. That means rent owed but
+// not yet paid does NOT appear here as a receivable (see Rent Due for that);
+// including it would require accrual-basis P&L too, which Reports isn't.
+//
+// reconciliation_diff compares deposits collected-minus-refunded (from the
+// collections/deposit_refunds transaction history) against deposits_held
+// (from guests' current deposit_amount). These SHOULD match if every
+// deposit was logged as a collection and every checkout went through the
+// refund flow — a non-zero value here means real data to go investigate,
+// not a bug in this calculation, and balance_check will show the same gap
+// rather than silently forcing a balance.
+router.get('/balance-sheet', auth, requireAdmin, async (req, res) => {
+  try {
+    const asOf = req.query.asOf || new Date().toISOString().split('T')[0];
+
+    const [
+      collectionsTotalR, depositsCollectedR, purchasesTotalR,
+      depositRefundsTotalR, fixedAssetsTotalR, depositsHeldR, capitalNetR,
+      fixedAssetsList
+    ] = await Promise.all([
+      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND status='confirmed' AND collection_date <= $1`, [asOf]),
+      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND status='confirmed' AND collection_type='deposit' AND collection_date <= $1`, [asOf]),
+      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM purchases WHERE is_deleted=false AND status='confirmed' AND purchase_date <= $1`, [asOf]),
+      pool.query(`SELECT COALESCE(SUM(refund_amount),0) as total FROM deposit_refunds WHERE created_at::date <= $1`, [asOf]),
+      pool.query(`SELECT COALESCE(SUM(value),0) as total FROM fixed_assets WHERE is_deleted=false AND purchase_date <= $1`, [asOf]),
+      pool.query(`SELECT COALESCE(SUM(deposit_amount),0) as total FROM guests WHERE is_active=true`),
+      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM capital_transactions WHERE transaction_date <= $1`, [asOf]),
+      pool.query(`SELECT * FROM fixed_assets WHERE is_deleted=false AND purchase_date <= $1 ORDER BY purchase_date DESC`, [asOf])
+    ]);
+
+    const collectionsTotal = parseFloat(collectionsTotalR.rows[0].total);
+    const depositsCollected = parseFloat(depositsCollectedR.rows[0].total);
+    const purchasesTotal = parseFloat(purchasesTotalR.rows[0].total);
+    const depositRefundsTotal = parseFloat(depositRefundsTotalR.rows[0].total);
+    const fixedAssetsTotal = parseFloat(fixedAssetsTotalR.rows[0].total);
+    const depositsHeld = parseFloat(depositsHeldR.rows[0].total);
+    const capitalNet = parseFloat(capitalNetR.rows[0].total);
+
+    const cashPosition = capitalNet + collectionsTotal - purchasesTotal - depositRefundsTotal - fixedAssetsTotal;
+    const totalAssets = cashPosition + fixedAssetsTotal;
+
+    const retainedEarnings = (collectionsTotal - depositsCollected) - purchasesTotal;
+    const totalEquity = capitalNet + retainedEarnings;
+    const totalLiabilities = depositsHeld;
+
+    const reconciliationDiff = (depositsCollected - depositRefundsTotal) - depositsHeld;
+    const balanceCheck = totalAssets - (totalLiabilities + totalEquity);
+
+    res.json({
+      asOf,
+      assets: { cashPosition, fixedAssets: fixedAssetsTotal, total: totalAssets },
+      liabilities: { depositsHeld, total: totalLiabilities },
+      equity: { capitalNet, retainedEarnings, total: totalEquity },
+      reconciliationDiff,
+      balanceCheck,
+      fixedAssetsList: fixedAssetsList.rows
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── PUBLIC GUEST LOOKUP ──────────────────────────
 router.get('/guest-lookup', async (req, res) => {
   const { phone } = req.query;
