@@ -20,6 +20,42 @@ async function logActivity(req, action, details) {
   }
 }
 
+// Shared formatting + table-drawing helpers for every PDF export route, so
+// pagination logic lives in exactly one place instead of being copy-pasted
+// per route (and potentially drifting out of sync / breaking inconsistently).
+function fmtMoney(n) { return 'Rs ' + parseFloat(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function fmtD(d) { return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }); }
+
+// columns: [{ label, x, width, get: (row) => string, color?: (row) => string }]
+function drawPdfTable(doc, columns, rows) {
+  const pageBottom = doc.page.height - doc.page.margins.bottom;
+  function drawHeader() {
+    doc.fontSize(8).font('Helvetica-Bold');
+    const y = doc.y;
+    columns.forEach(c => doc.text(c.label, c.x, y, { width: c.width }));
+    doc.moveDown(0.5);
+    doc.font('Helvetica');
+  }
+  drawHeader();
+  doc.fontSize(8);
+  for (const row of rows) {
+    if (doc.y > pageBottom - 20) {
+      doc.addPage();
+      drawHeader();
+    }
+    const y = doc.y;
+    columns.forEach(c => {
+      if (c.color) doc.fillColor(c.color(row));
+      doc.text(String(c.get(row) ?? '—'), c.x, y, { width: c.width });
+      if (c.color) doc.fillColor('#000');
+    });
+    doc.moveDown(0.4);
+  }
+  if (rows.length === 0) {
+    doc.fillColor('#666').text('No data for this period').fillColor('#000');
+  }
+}
+
 // Computes a month-by-month rent ledger for one guest, with a running balance
 // carried forward across months (positive = guest is in credit, negative =
 // guest still owes that much). Deliberately uses the actual collection_date
@@ -351,6 +387,41 @@ router.get('/collections', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+router.get('/collections/export/pdf', auth, requireAdmin, async (req, res) => {
+  try {
+    const { month, year } = req.query;
+    let q = `SELECT c.*,g.name as guest_name,r.room_number FROM collections c LEFT JOIN guests g ON c.guest_id=g.id LEFT JOIN rooms r ON g.room_id=r.id WHERE c.is_deleted=false AND c.status='confirmed'`;
+    const p = [];
+    if (month && year) { p.push(month,year); q += ` AND EXTRACT(MONTH FROM c.collection_date)=$${p.length-1} AND EXTRACT(YEAR FROM c.collection_date)=$${p.length}`; }
+    q += ' ORDER BY c.collection_date ASC';
+    const r = await pool.query(q, p);
+    const total = r.rows.reduce((s,x) => s + parseFloat(x.amount), 0);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="sirimane-collections-${month||'all'}-${year||'all'}.pdf"`);
+    const doc = new PDFDocument({ margin: 40, size: 'A4' });
+    doc.pipe(res);
+
+    doc.fontSize(18).font('Helvetica-Bold').text('Siri Mane PG', { align: 'center' });
+    doc.fontSize(11).font('Helvetica').text('Collections', { align: 'center' });
+    if (month && year) doc.fontSize(9).fillColor('#666').text(new Date(year, month-1, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' }), { align: 'center' }).fillColor('#000');
+    doc.moveDown(1);
+    doc.fontSize(11).font('Helvetica-Bold').text(`Total: ${fmtMoney(total)}`);
+    doc.moveDown(1);
+
+    drawPdfTable(doc, [
+      { label: 'Date', x: 40, width: 60, get: r => fmtD(r.collection_date) },
+      { label: 'Type', x: 105, width: 60, get: r => r.collection_type },
+      { label: 'Guest / From', x: 170, width: 110, get: r => r.guest_name },
+      { label: 'Description', x: 285, width: 130, get: r => r.description || r.collection_month },
+      { label: 'Mode', x: 420, width: 55, get: r => r.payment_mode },
+      { label: 'Amount', x: 480, width: 75, get: r => fmtMoney(r.amount) }
+    ], r.rows);
+
+    doc.end();
+  } catch (err) { if (!res.headersSent) res.status(500).json({ error: err.message }); }
+});
+
 router.post('/collections', auth, async (req, res) => {
   const { guest_id,guest_name,amount,collection_date,collection_month,collection_type,payment_mode,description,receipt_number } = req.body;
   if (!amount) return res.status(400).json({ error: 'Amount required' });
@@ -399,6 +470,41 @@ router.get('/purchases', auth, async (req, res) => {
     const r = await pool.query(q, p);
     res.json(r.rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.get('/purchases/export/pdf', auth, requireAdmin, async (req, res) => {
+  try {
+    const { month, year } = req.query;
+    let q = `SELECT * FROM purchases WHERE is_deleted=false AND status='confirmed'`;
+    const p = [];
+    if (month && year) { p.push(month,year); q += ` AND EXTRACT(MONTH FROM purchase_date)=$${p.length-1} AND EXTRACT(YEAR FROM purchase_date)=$${p.length}`; }
+    q += ' ORDER BY purchase_date ASC';
+    const r = await pool.query(q, p);
+    const total = r.rows.reduce((s,x) => s + parseFloat(x.amount), 0);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="sirimane-purchases-${month||'all'}-${year||'all'}.pdf"`);
+    const doc = new PDFDocument({ margin: 40, size: 'A4' });
+    doc.pipe(res);
+
+    doc.fontSize(18).font('Helvetica-Bold').text('Siri Mane PG', { align: 'center' });
+    doc.fontSize(11).font('Helvetica').text('Purchases', { align: 'center' });
+    if (month && year) doc.fontSize(9).fillColor('#666').text(new Date(year, month-1, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' }), { align: 'center' }).fillColor('#000');
+    doc.moveDown(1);
+    doc.fontSize(11).font('Helvetica-Bold').text(`Total: ${fmtMoney(total)}`);
+    doc.moveDown(1);
+
+    drawPdfTable(doc, [
+      { label: 'Date', x: 40, width: 60, get: r => fmtD(r.purchase_date) },
+      { label: 'Category', x: 105, width: 80, get: r => r.category },
+      { label: 'Description', x: 190, width: 140, get: r => r.description },
+      { label: 'Paid To', x: 335, width: 90, get: r => r.paid_to },
+      { label: 'Mode', x: 430, width: 55, get: r => r.payment_mode },
+      { label: 'Amount', x: 490, width: 65, get: r => fmtMoney(r.amount) }
+    ], r.rows);
+
+    doc.end();
+  } catch (err) { if (!res.headersSent) res.status(500).json({ error: err.message }); }
 });
 
 router.post('/purchases', auth, async (req, res) => {
@@ -624,8 +730,7 @@ router.get('/reports/export/pdf', auth, requireAdmin, async (req, res) => {
       ...purchases.rows.map(r => ({ ...r, type: 'Expense' }))
     ].sort((a, b) => new Date(a.date) - new Date(b.date));
 
-    const fmtMoney = (n) => 'Rs ' + parseFloat(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const fmtD = (d) => new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    // fmtMoney and fmtD are now module-level helpers, shared across all PDF export routes.
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="sirimane-report-${from}-to-${to}.pdf"`);
@@ -777,53 +882,107 @@ router.delete('/capital-transactions/:id', auth, requireAdmin, async (req, res) 
 // refund flow — a non-zero value here means real data to go investigate,
 // not a bug in this calculation, and balance_check will show the same gap
 // rather than silently forcing a balance.
+async function computeBalanceSheetData(asOf) {
+  const [
+    collectionsTotalR, depositsCollectedR, purchasesTotalR,
+    depositRefundsTotalR, fixedAssetsTotalR, depositsHeldR, capitalNetR,
+    fixedAssetsList
+  ] = await Promise.all([
+    pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND status='confirmed' AND collection_date <= $1`, [asOf]),
+    pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND status='confirmed' AND collection_type='deposit' AND collection_date <= $1`, [asOf]),
+    pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM purchases WHERE is_deleted=false AND status='confirmed' AND purchase_date <= $1`, [asOf]),
+    pool.query(`SELECT COALESCE(SUM(refund_amount),0) as total FROM deposit_refunds WHERE created_at::date <= $1`, [asOf]),
+    pool.query(`SELECT COALESCE(SUM(value),0) as total FROM fixed_assets WHERE is_deleted=false AND purchase_date <= $1`, [asOf]),
+    pool.query(`SELECT COALESCE(SUM(deposit_amount),0) as total FROM guests WHERE is_active=true`),
+    pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM capital_transactions WHERE transaction_date <= $1`, [asOf]),
+    pool.query(`SELECT * FROM fixed_assets WHERE is_deleted=false AND purchase_date <= $1 ORDER BY purchase_date DESC`, [asOf])
+  ]);
+
+  const collectionsTotal = parseFloat(collectionsTotalR.rows[0].total);
+  const depositsCollected = parseFloat(depositsCollectedR.rows[0].total);
+  const purchasesTotal = parseFloat(purchasesTotalR.rows[0].total);
+  const depositRefundsTotal = parseFloat(depositRefundsTotalR.rows[0].total);
+  const fixedAssetsTotal = parseFloat(fixedAssetsTotalR.rows[0].total);
+  const depositsHeld = parseFloat(depositsHeldR.rows[0].total);
+  const capitalNet = parseFloat(capitalNetR.rows[0].total);
+
+  const cashPosition = capitalNet + collectionsTotal - purchasesTotal - depositRefundsTotal - fixedAssetsTotal;
+  const totalAssets = cashPosition + fixedAssetsTotal;
+
+  const retainedEarnings = (collectionsTotal - depositsCollected) - purchasesTotal;
+  const totalEquity = capitalNet + retainedEarnings;
+  const totalLiabilities = depositsHeld;
+
+  const reconciliationDiff = (depositsCollected - depositRefundsTotal) - depositsHeld;
+  const balanceCheck = totalAssets - (totalLiabilities + totalEquity);
+
+  return {
+    asOf,
+    assets: { cashPosition, fixedAssets: fixedAssetsTotal, total: totalAssets },
+    liabilities: { depositsHeld, total: totalLiabilities },
+    equity: { capitalNet, retainedEarnings, total: totalEquity },
+    reconciliationDiff,
+    balanceCheck,
+    fixedAssetsList: fixedAssetsList.rows
+  };
+}
+
 router.get('/balance-sheet', auth, requireAdmin, async (req, res) => {
   try {
     const asOf = req.query.asOf || new Date().toISOString().split('T')[0];
-
-    const [
-      collectionsTotalR, depositsCollectedR, purchasesTotalR,
-      depositRefundsTotalR, fixedAssetsTotalR, depositsHeldR, capitalNetR,
-      fixedAssetsList
-    ] = await Promise.all([
-      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND status='confirmed' AND collection_date <= $1`, [asOf]),
-      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND status='confirmed' AND collection_type='deposit' AND collection_date <= $1`, [asOf]),
-      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM purchases WHERE is_deleted=false AND status='confirmed' AND purchase_date <= $1`, [asOf]),
-      pool.query(`SELECT COALESCE(SUM(refund_amount),0) as total FROM deposit_refunds WHERE created_at::date <= $1`, [asOf]),
-      pool.query(`SELECT COALESCE(SUM(value),0) as total FROM fixed_assets WHERE is_deleted=false AND purchase_date <= $1`, [asOf]),
-      pool.query(`SELECT COALESCE(SUM(deposit_amount),0) as total FROM guests WHERE is_active=true`),
-      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM capital_transactions WHERE transaction_date <= $1`, [asOf]),
-      pool.query(`SELECT * FROM fixed_assets WHERE is_deleted=false AND purchase_date <= $1 ORDER BY purchase_date DESC`, [asOf])
-    ]);
-
-    const collectionsTotal = parseFloat(collectionsTotalR.rows[0].total);
-    const depositsCollected = parseFloat(depositsCollectedR.rows[0].total);
-    const purchasesTotal = parseFloat(purchasesTotalR.rows[0].total);
-    const depositRefundsTotal = parseFloat(depositRefundsTotalR.rows[0].total);
-    const fixedAssetsTotal = parseFloat(fixedAssetsTotalR.rows[0].total);
-    const depositsHeld = parseFloat(depositsHeldR.rows[0].total);
-    const capitalNet = parseFloat(capitalNetR.rows[0].total);
-
-    const cashPosition = capitalNet + collectionsTotal - purchasesTotal - depositRefundsTotal - fixedAssetsTotal;
-    const totalAssets = cashPosition + fixedAssetsTotal;
-
-    const retainedEarnings = (collectionsTotal - depositsCollected) - purchasesTotal;
-    const totalEquity = capitalNet + retainedEarnings;
-    const totalLiabilities = depositsHeld;
-
-    const reconciliationDiff = (depositsCollected - depositRefundsTotal) - depositsHeld;
-    const balanceCheck = totalAssets - (totalLiabilities + totalEquity);
-
-    res.json({
-      asOf,
-      assets: { cashPosition, fixedAssets: fixedAssetsTotal, total: totalAssets },
-      liabilities: { depositsHeld, total: totalLiabilities },
-      equity: { capitalNet, retainedEarnings, total: totalEquity },
-      reconciliationDiff,
-      balanceCheck,
-      fixedAssetsList: fixedAssetsList.rows
-    });
+    res.json(await computeBalanceSheetData(asOf));
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.get('/balance-sheet/export/pdf', auth, requireAdmin, async (req, res) => {
+  try {
+    const asOf = req.query.asOf || new Date().toISOString().split('T')[0];
+    const bs = await computeBalanceSheetData(asOf);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="sirimane-balance-sheet-${asOf}.pdf"`);
+    const doc = new PDFDocument({ margin: 40, size: 'A4' });
+    doc.pipe(res);
+
+    doc.fontSize(18).font('Helvetica-Bold').text('Siri Mane PG', { align: 'center' });
+    doc.fontSize(11).font('Helvetica').text('Balance Sheet', { align: 'center' });
+    doc.fontSize(9).fillColor('#666').text(`As of ${fmtD(asOf)}`, { align: 'center' }).fillColor('#000');
+    doc.moveDown(1.5);
+
+    if (Math.abs(bs.reconciliationDiff) > 0.5) {
+      doc.fontSize(9).fillColor('#92400E').text(`Note: reconciliation gap of ${fmtMoney(Math.abs(bs.reconciliationDiff))} between deposits collected/refunded and deposits currently held — worth checking guest deposit records.`, { width: 515 }).fillColor('#000');
+      doc.moveDown(1);
+    }
+
+    doc.fontSize(12).font('Helvetica-Bold').text('Assets');
+    doc.fontSize(10).font('Helvetica');
+    doc.text(`Cash Position: ${fmtMoney(bs.assets.cashPosition)}`);
+    doc.text(`Fixed Assets (at cost): ${fmtMoney(bs.assets.fixedAssets)}`);
+    doc.font('Helvetica-Bold').text(`Total Assets: ${fmtMoney(bs.assets.total)}`);
+    doc.font('Helvetica');
+    doc.moveDown(1);
+
+    doc.fontSize(12).font('Helvetica-Bold').text('Liabilities & Equity');
+    doc.fontSize(10).font('Helvetica');
+    doc.text(`Security Deposits Held: ${fmtMoney(bs.liabilities.depositsHeld)}`);
+    doc.text(`Capital (net): ${fmtMoney(bs.equity.capitalNet)}`);
+    doc.text(`Retained Earnings: ${fmtMoney(bs.equity.retainedEarnings)}`);
+    doc.font('Helvetica-Bold').text(`Total: ${fmtMoney(bs.liabilities.total + bs.equity.total)}`);
+    doc.font('Helvetica');
+    doc.moveDown(1.5);
+
+    doc.fontSize(12).font('Helvetica-Bold').text('Fixed Assets Detail');
+    doc.moveDown(0.3);
+    drawPdfTable(doc, [
+      { label: 'Date', x: 40, width: 60, get: r => fmtD(r.purchase_date) },
+      { label: 'Name', x: 105, width: 140, get: r => r.name },
+      { label: 'Category', x: 250, width: 90, get: r => r.category },
+      { label: 'Value', x: 345, width: 70, get: r => fmtMoney(r.value) },
+      { label: 'Notes', x: 420, width: 135, get: r => r.notes }
+    ], bs.fixedAssetsList);
+
+    doc.end();
+  } catch (err) { if (!res.headersSent) res.status(500).json({ error: err.message }); }
 });
 
 // ── PUBLIC GUEST LOOKUP ──────────────────────────
@@ -854,31 +1013,65 @@ router.post('/guest-message', async (req, res) => {
 // Now backed by the same ledger math as the per-guest ledger below, so a
 // guest who overpaid last month correctly shows reduced (or zero) amount
 // due this month, instead of resetting to a fresh month-only snapshot.
+async function computeRentDueList() {
+  const guests = await pool.query(`
+    SELECT g.id, g.name, g.phone, g.join_date, g.leave_date, g.monthly_rent, r.room_number
+    FROM guests g LEFT JOIN rooms r ON g.room_id = r.id
+    WHERE g.is_active = true AND g.monthly_rent > 0
+    ORDER BY g.name ASC
+  `);
+  const results = [];
+  for (const guest of guests.rows) {
+    const { currentBalance } = await computeGuestLedger(guest);
+    results.push({
+      id: guest.id,
+      name: guest.name,
+      phone: guest.phone,
+      room_number: guest.room_number,
+      monthly_rent: guest.monthly_rent,
+      current_balance: currentBalance,
+      amount_due: currentBalance < 0 ? Math.abs(currentBalance) : 0,
+      credit: currentBalance > 0 ? currentBalance : 0
+    });
+  }
+  results.sort((a, b) => b.amount_due - a.amount_due);
+  return results;
+}
+
 router.get('/rent-due', auth, async (req, res) => {
   try {
-    const guests = await pool.query(`
-      SELECT g.id, g.name, g.phone, g.join_date, g.leave_date, g.monthly_rent, r.room_number
-      FROM guests g LEFT JOIN rooms r ON g.room_id = r.id
-      WHERE g.is_active = true AND g.monthly_rent > 0
-      ORDER BY g.name ASC
-    `);
-    const results = [];
-    for (const guest of guests.rows) {
-      const { currentBalance } = await computeGuestLedger(guest);
-      results.push({
-        id: guest.id,
-        name: guest.name,
-        phone: guest.phone,
-        room_number: guest.room_number,
-        monthly_rent: guest.monthly_rent,
-        current_balance: currentBalance,
-        amount_due: currentBalance < 0 ? Math.abs(currentBalance) : 0,
-        credit: currentBalance > 0 ? currentBalance : 0
-      });
-    }
-    results.sort((a, b) => b.amount_due - a.amount_due);
-    res.json(results);
+    res.json(await computeRentDueList());
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.get('/rent-due/export/pdf', auth, requireAdmin, async (req, res) => {
+  try {
+    const list = await computeRentDueList();
+    const totalDue = list.reduce((s,g) => s + parseFloat(g.amount_due), 0);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="sirimane-rent-due-${new Date().toISOString().split('T')[0]}.pdf"`);
+    const doc = new PDFDocument({ margin: 40, size: 'A4' });
+    doc.pipe(res);
+
+    doc.fontSize(18).font('Helvetica-Bold').text('Siri Mane PG', { align: 'center' });
+    doc.fontSize(11).font('Helvetica').text('Rent Due', { align: 'center' });
+    doc.fontSize(9).fillColor('#666').text(`As of ${fmtD(new Date())}`, { align: 'center' }).fillColor('#000');
+    doc.moveDown(1);
+    doc.fontSize(11).font('Helvetica-Bold').text(`Total Outstanding: ${fmtMoney(totalDue)}`);
+    doc.moveDown(1);
+
+    drawPdfTable(doc, [
+      { label: 'Name', x: 40, width: 110, get: r => r.name },
+      { label: 'Room', x: 155, width: 60, get: r => r.room_number ? 'Room '+r.room_number : '—' },
+      { label: 'Phone', x: 220, width: 90, get: r => r.phone },
+      { label: 'Monthly Rent', x: 315, width: 80, get: r => fmtMoney(r.monthly_rent) },
+      { label: 'Balance', x: 400, width: 90, get: r => parseFloat(r.amount_due) > 0 ? fmtMoney(r.amount_due) + ' due' : parseFloat(r.credit) > 0 ? fmtMoney(r.credit) + ' credit' : 'Settled', color: r => parseFloat(r.amount_due) > 0 ? '#b91c1c' : '#0a7a3e' },
+      { label: 'Status', x: 495, width: 60, get: r => parseFloat(r.amount_due) > 0 ? 'Pending' : 'OK' }
+    ], list);
+
+    doc.end();
+  } catch (err) { if (!res.headersSent) res.status(500).json({ error: err.message }); }
 });
 
 // ── PER-GUEST LEDGER ───────────────────────────────
