@@ -97,6 +97,35 @@ async function migrate() {
     await client.query(`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'confirmed';`);
     console.log('✅ purchases: status column ready (staff approval workflow)');
 
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS fixed_assets (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(150) NOT NULL,
+        category VARCHAR(50),
+        purchase_date DATE NOT NULL,
+        value DECIMAL(10,2) NOT NULL,
+        notes TEXT,
+        created_by INTEGER REFERENCES users(id),
+        is_deleted BOOLEAN DEFAULT FALSE,
+        deleted_by INTEGER REFERENCES users(id),
+        deleted_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    console.log('✅ fixed_assets table ready');
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS capital_transactions (
+        id SERIAL PRIMARY KEY,
+        amount DECIMAL(10,2) NOT NULL,
+        transaction_date DATE NOT NULL,
+        note TEXT,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    console.log('✅ capital_transactions table ready');
+
     console.log('\n🎉 Accountability migration completed successfully!');
   } catch (err) {
     console.error('❌ Migration failed:', err.message);
