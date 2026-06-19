@@ -126,6 +126,9 @@ async function migrate() {
     `);
     console.log('✅ capital_transactions table ready');
 
+    await client.query(`ALTER TABLE guests ADD COLUMN IF NOT EXISTS rent_variance_approved BOOLEAN DEFAULT FALSE;`);
+    console.log('✅ guests: rent_variance_approved column ready (defaults to needing review, so any existing rent/room mismatches surface immediately)');
+
     console.log('\n🎉 Accountability migration completed successfully!');
   } catch (err) {
     console.error('❌ Migration failed:', err.message);
