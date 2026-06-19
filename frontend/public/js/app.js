@@ -47,7 +47,10 @@ function setupNav() {
   document.querySelectorAll('.nav-item[data-page]').forEach(b => b.addEventListener('click', () => navigate(b.dataset.page)));
 }
 
+let currentPage = null;
+
 function navigate(page) {
+  currentPage = page;
   document.querySelectorAll('.nav-item[data-page]').forEach(b => b.classList.toggle('active', b.dataset.page===page));
   const titles = { dashboard:'Dashboard', rooms:'Rooms', guests:'Guests', 'daily-menu':'Daily Menu', payments:'Payments', 'guest-messages':'Guest Messages', inbox:'Inbox', purchases:'Purchases', collections:'Collections', 'rent-due':'Rent Due', reports:'Reports', admin:'Admin' };
   document.getElementById('page-title').textContent = titles[page]||page;
@@ -86,9 +89,25 @@ function openModal(html) {
 function closeModal() { stopPurchaseVoice(); document.getElementById('modal-container').innerHTML = ''; }
 function loading() { setContent('<div class="loading-center"><div class="spinner"></div></div>'); }
 function nowDate() { return new Date().toISOString().split('T')[0]; }
-function monthPicker() {
+function monthPicker(month, year, onChangeFn) {
   const n = new Date();
-  return `<input type="month" id="month-picker" value="${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}" style="padding:7px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;cursor:pointer">`;
+  const m = month || (n.getMonth()+1);
+  const y = year || n.getFullYear();
+  const val = `${y}-${String(m).padStart(2,'0')}`;
+  return `<input type="month" id="month-picker" value="${val}" onchange="${onChangeFn}(this.value)" style="padding:7px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;cursor:pointer">`;
+}
+
+function onPurchasesMonthChange(value) {
+  const [y, m] = value.split('-').map(Number);
+  pgPurchases(m, y);
+}
+function onCollectionsMonthChange(value) {
+  const [y, m] = value.split('-').map(Number);
+  pgCollections(m, y);
+}
+function onReportsMonthChange(value) {
+  const [y, m] = value.split('-').map(Number);
+  pgReports(m, y);
 }
 
 // ── DASHBOARD ─────────────────────────────────────
@@ -605,18 +624,31 @@ async function saveMenu() {
 }
 
 // ── PAYMENTS (same as collections) ───────────────
-async function pgPayments() {
+let paymentsCurrentMonth = null;
+let paymentsCurrentYear = null;
+
+async function pgPayments(month, year) {
   loading();
   document.getElementById('topbar-actions').innerHTML = `<button class="btn btn-primary btn-sm" onclick="collectionModal()">+ Record Payment</button>`;
   try {
     const now = new Date();
-    const list = await API.getCollections(`?month=${now.getMonth()+1}&year=${now.getFullYear()}`);
+    const m = month || (now.getMonth()+1);
+    const y = year || now.getFullYear();
+    paymentsCurrentMonth = m;
+    paymentsCurrentYear = y;
+    const list = await API.getCollections(`?month=${m}&year=${y}`);
     const total = list.reduce((s,c)=>s+parseFloat(c.amount),0);
     setContent(`
-      <div class="page-header"><h1>Payments</h1><p>Track rent payments</p></div>
+      <div class="page-header flex justify-between items-center">
+        <div><h1>Payments</h1><p>Track rent payments</p></div>
+        <div class="flex items-center gap-2">
+          <span style="font-size:13px;color:var(--text-muted)">Showing</span>
+          ${monthPicker(m, y, 'onPaymentsMonthChange')}
+        </div>
+      </div>
       <div class="card">
         <div class="card-header">
-          <h3>Payment Records</h3>
+          <h3>Payment Records — ${fmt(total)} total</h3>
           <button class="btn btn-primary btn-sm" onclick="collectionModal()">+ Record Payment</button>
         </div>
         <div class="table-wrap">
@@ -624,21 +656,31 @@ async function pgPayments() {
             <thead><tr><th>GUEST</th><th>MONTH</th><th>AMOUNT</th><th>DATE</th><th>MODE</th><th>STATUS</th><th>ACTIONS</th></tr></thead>
             <tbody>
               ${list.length===0
-                ? `<tr class="empty-row"><td colspan="7">No payments yet.</td></tr>`
+                ? `<tr class="empty-row"><td colspan="7">No payments for this month.</td></tr>`
                 : list.map(c=>`<tr>
                   <td><strong>${c.guest_name||c.guest_name||'—'}</strong></td>
                   <td>${c.collection_month||fmtMonth(c.collection_date)}</td>
                   <td class="text-green fw-600">${fmt(c.amount)}</td>
                   <td>${fmtDate(c.collection_date)}</td>
                   <td><span class="badge badge-blue">${c.payment_mode}</span></td>
-                  <td><span class="badge badge-green">Received</span></td>
-                  <td>${isAdmin()?`<button class="btn btn-danger btn-sm btn-icon" onclick="delCollection(${c.id})">✕</button>`:'—'}</td>
+                  <td><span class="badge ${c.status==='pending_verification'?'badge-amber':'badge-green'}">${c.status==='pending_verification'?'Pending':'Received'}</span></td>
+                  <td>${isAdmin()?`<button class="btn btn-danger btn-sm btn-icon" onclick="delCollectionFromPayments(${c.id})">✕</button>`:'—'}</td>
                 </tr>`).join('')}
             </tbody>
           </table>
         </div>
       </div>`);
   } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+}
+
+function onPaymentsMonthChange(value) {
+  const [y, m] = value.split('-').map(Number);
+  pgPayments(m, y);
+}
+
+async function delCollectionFromPayments(id) {
+  if(!confirm('Delete this record?')) return;
+  try { await API.deleteCollection(id); pgPayments(paymentsCurrentMonth, paymentsCurrentYear); } catch(e) { alert(e.message); }
 }
 
 // ── GUEST MESSAGES (Announcements) ───────────────
@@ -802,19 +844,28 @@ const PURCHASE_VOICE_FILLER_WORDS = new Set(['rupees','rupee','rs','paid','to','
 let purchaseRecognition = null;
 let purchaseListening = false;
 
-async function pgPurchases() {
+let purchasesListCache = [];
+let purchasesCurrentMonth = null;
+let purchasesCurrentYear = null;
+
+async function pgPurchases(month, year) {
   loading();
   document.getElementById('topbar-actions').innerHTML = `<button class="btn btn-primary btn-sm" onclick="purchaseModal()">+ Add Purchase</button>`;
   try {
     const now = new Date();
-    const list = await API.getPurchases(`?month=${now.getMonth()+1}&year=${now.getFullYear()}`);
+    const m = month || (now.getMonth()+1);
+    const y = year || now.getFullYear();
+    purchasesCurrentMonth = m;
+    purchasesCurrentYear = y;
+    const list = await API.getPurchases(`?month=${m}&year=${y}`);
+    purchasesListCache = list;
     const total = list.reduce((s,p)=>s+parseFloat(p.amount),0);
     const byCat = {};
     list.forEach(p => { byCat[p.category]=(byCat[p.category]||0)+parseFloat(p.amount); });
     setContent(`
       <div class="page-header"><h1>🛒 Purchases</h1><p>Track all PG expenses and purchases</p></div>
       <div class="stat-grid mb-5">
-        <div class="stat-card red"><div class="s-label">This Month</div><div class="s-value">${fmt(total)}</div><div class="s-sub">${now.toLocaleString('en-IN',{month:'long',year:'numeric'})}</div></div>
+        <div class="stat-card red"><div class="s-label">This Month</div><div class="s-value">${fmt(total)}</div><div class="s-sub">${new Date(y,m-1,1).toLocaleString('en-IN',{month:'long',year:'numeric'})}</div></div>
         <div class="stat-card"><div class="s-label">Groceries</div><div class="s-value">${fmt(byCat['Groceries']||0)}</div><div class="s-sub" style="color:var(--green)">Food &amp; vegetables</div></div>
         <div class="stat-card"><div class="s-label">Maintenance</div><div class="s-value">${fmt(byCat['Maintenance']||0)}</div><div class="s-sub" style="color:var(--amber)">Repairs &amp; upkeep</div></div>
         <div class="stat-card"><div class="s-label">Utilities</div><div class="s-value">${fmt((byCat['Electricity']||0)+(byCat['Water']||0)+(byCat['Internet']||0))}</div><div class="s-sub" style="color:var(--blue)">Bills &amp; services</div></div>
@@ -823,7 +874,7 @@ async function pgPurchases() {
         <div class="card-header">
           <h3>All Purchases</h3>
           <div class="flex gap-2 items-center">
-            ${monthPicker()}
+            ${monthPicker(m, y, 'onPurchasesMonthChange')}
             <select id="cat-filter" style="margin:0" onchange="filterPurchases()">
               <option value="">All Categories</option>
               ${['Groceries','Maintenance','Electricity','Water','Internet','Cleaning','Salary','Other'].map(c=>`<option>${c}</option>`).join('')}
@@ -834,19 +885,7 @@ async function pgPurchases() {
         <div class="table-wrap">
           <table>
             <thead><tr><th>DATE</th><th>CATEGORY</th><th>DESCRIPTION</th><th>AMOUNT</th><th>PAID TO</th><th>MODE</th><th>ACTIONS</th></tr></thead>
-            <tbody id="purchases-tb">
-              ${list.length===0
-                ? `<tr class="empty-row"><td colspan="7">No purchases found for this filter.</td></tr>`
-                : list.map(p=>`<tr>
-                  <td>${fmtDate(p.purchase_date)}</td>
-                  <td><span class="badge badge-amber">${p.category}</span></td>
-                  <td>${p.description||'—'}</td>
-                  <td class="text-red fw-600">${fmt(p.amount)}</td>
-                  <td>${p.paid_to||'—'}</td>
-                  <td>${p.payment_mode}</td>
-                  <td>${isAdmin()?`<button class="btn btn-danger btn-sm btn-icon" onclick="delPurchase(${p.id})">✕</button>`:'—'}</td>
-                </tr>`).join('')}
-            </tbody>
+            <tbody id="purchases-tb">${renderPurchaseRows(list)}</tbody>
           </table>
         </div>
       </div>`);
@@ -893,16 +932,43 @@ function purchaseModal() {
   }
 }
 
+function renderPurchaseRows(list) {
+  return list.length===0
+    ? `<tr class="empty-row"><td colspan="7">No purchases found for this filter.</td></tr>`
+    : list.map(p=>`<tr>
+      <td>${fmtDate(p.purchase_date)}</td>
+      <td><span class="badge badge-amber">${p.category}</span></td>
+      <td>${p.description||'—'}</td>
+      <td class="text-red fw-600">${fmt(p.amount)}</td>
+      <td>${p.paid_to||'—'}</td>
+      <td>${p.payment_mode}</td>
+      <td>${isAdmin()?`<button class="btn btn-danger btn-sm btn-icon" onclick="delPurchase(${p.id})">✕</button>`:'—'}</td>
+    </tr>`).join('');
+}
+
+function filterPurchases() {
+  const cat = document.getElementById('cat-filter').value;
+  const filtered = cat ? purchasesListCache.filter(p => p.category === cat) : purchasesListCache;
+  document.getElementById('purchases-tb').innerHTML = renderPurchaseRows(filtered);
+}
+
 async function savePurchase() {
   const al = document.getElementById('pu-alert');
   const d = { amount:document.getElementById('pu-amt').value, purchase_date:document.getElementById('pu-date').value, category:document.getElementById('pu-cat').value, description:document.getElementById('pu-desc').value, paid_to:document.getElementById('pu-paid').value, payment_mode:document.getElementById('pu-mode').value };
   if(!d.amount) { showAlert(al,'Amount required'); return; }
-  try { await API.createPurchase(d); closeModal(); pgPurchases(); } catch(e) { showAlert(al,e.message); }
+  try {
+    await API.createPurchase(d);
+    closeModal();
+    // Jump to whichever month the purchase was actually dated, so it's
+    // immediately visible instead of vanishing into a different month's view.
+    const dt = d.purchase_date ? new Date(d.purchase_date) : new Date();
+    pgPurchases(dt.getMonth()+1, dt.getFullYear());
+  } catch(e) { showAlert(al,e.message); }
 }
 
 async function delPurchase(id) {
   if(!confirm('Delete?')) return;
-  try { await API.deletePurchase(id); pgPurchases(); } catch(e) { alert(e.message); }
+  try { await API.deletePurchase(id); pgPurchases(purchasesCurrentMonth, purchasesCurrentYear); } catch(e) { alert(e.message); }
 }
 
 // ── VOICE INPUT FOR PURCHASES ──────────────────────
@@ -1067,12 +1133,21 @@ function parsePurchaseVoiceText(rawText) {
 }
 
 // ── COLLECTIONS (Income) ──────────────────────────
-async function pgCollections() {
+let collectionsListCache = [];
+let collectionsCurrentMonth = null;
+let collectionsCurrentYear = null;
+
+async function pgCollections(month, year) {
   loading();
   document.getElementById('topbar-actions').innerHTML = `<button class="btn btn-primary btn-sm" onclick="collectionModal()">+ Add Collection</button>`;
   try {
     const now = new Date();
-    const list = await API.getCollections(`?month=${now.getMonth()+1}&year=${now.getFullYear()}`);
+    const m = month || (now.getMonth()+1);
+    const y = year || now.getFullYear();
+    collectionsCurrentMonth = m;
+    collectionsCurrentYear = y;
+    const list = await API.getCollections(`?month=${m}&year=${y}`);
+    collectionsListCache = list;
     const confirmedList = list.filter(c => c.status !== 'pending_verification');
     const total = confirmedList.reduce((s,c)=>s+parseFloat(c.amount),0);
     const byType = {};
@@ -1082,7 +1157,7 @@ async function pgCollections() {
       <div class="page-header"><h1>💵 Collections</h1><p>Track all income — rent, deposits, and extra charges</p></div>
       ${pendingCount>0?`<div class="alert" style="background:var(--amber-light,#FFFBEB);border:1px solid var(--amber,#F59E0B);color:#92400E;margin-bottom:16px">⏳ ${pendingCount} resident-reported UPI payment${pendingCount>1?'s':''} awaiting your confirmation below — check your bank/UPI app, then confirm or reject.</div>`:''}
       <div class="stat-grid mb-5">
-        <div class="stat-card green"><div class="s-label">This Month (Confirmed)</div><div class="s-value">${fmt(total)}</div><div class="s-sub">${now.toLocaleString('en-IN',{month:'long',year:'numeric'})}</div></div>
+        <div class="stat-card green"><div class="s-label">This Month (Confirmed)</div><div class="s-value">${fmt(total)}</div><div class="s-sub">${new Date(y,m-1,1).toLocaleString('en-IN',{month:'long',year:'numeric'})}</div></div>
         <div class="stat-card"><div class="s-label">Rent</div><div class="s-value">${fmt(byType['rent']||0)}</div><div class="s-sub" style="color:var(--green)">Monthly rent</div></div>
         <div class="stat-card"><div class="s-label">Deposits</div><div class="s-value">${fmt(byType['deposit']||0)}</div><div class="s-sub" style="color:var(--blue)">Security deposits</div></div>
         <div class="stat-card"><div class="s-label">Extra Charges</div><div class="s-value">${fmt(byType['extra']||byType['other']||0)}</div><div class="s-sub" style="color:var(--amber)">Laundry, food, etc.</div></div>
@@ -1091,10 +1166,10 @@ async function pgCollections() {
         <div class="card-header">
           <h3>All Collections</h3>
           <div class="flex gap-2 items-center">
-            ${monthPicker()}
-            <select style="margin:0">
-              <option>All Types</option>
-              <option>Rent</option><option>Deposit</option><option>Extra</option>
+            ${monthPicker(m, y, 'onCollectionsMonthChange')}
+            <select id="coll-type-filter" style="margin:0" onchange="filterCollections()">
+              <option value="">All Types</option>
+              <option value="rent">Rent</option><option value="deposit">Deposit</option><option value="extra">Extra</option>
             </select>
             <button class="btn btn-primary btn-sm" onclick="collectionModal()">+ Add Collection</button>
           </div>
@@ -1102,30 +1177,41 @@ async function pgCollections() {
         <div class="table-wrap">
           <table>
             <thead><tr><th>DATE</th><th>TYPE</th><th>GUEST / FROM</th><th>DESCRIPTION</th><th>AMOUNT</th><th>MODE</th><th>ACTIONS</th></tr></thead>
-            <tbody>
-              ${list.length===0
-                ? `<tr class="empty-row"><td colspan="7">No collections found for this filter.</td></tr>`
-                : list.map(c=>{
-                  const pending = c.status === 'pending_verification';
-                  return `<tr ${pending?'style="background:#FFFBEB"':''}>
-                  <td>${fmtDate(c.collection_date)}</td>
-                  <td><span class="badge badge-green" style="text-transform:capitalize">${c.collection_type}</span> ${pending?'<span class="badge badge-amber">Pending</span>':''}</td>
-                  <td>${c.guest_name||'—'}</td>
-                  <td>${c.description||c.collection_month||'—'}</td>
-                  <td class="text-green fw-600">${fmt(c.amount)}</td>
-                  <td>${c.payment_mode}</td>
-                  <td>${pending && isAdmin()
-                    ? `<div class="flex gap-2"><button class="btn btn-primary btn-sm" onclick="confirmPendingCollection(${c.id})">Confirm</button><button class="btn btn-danger btn-sm btn-icon" onclick="delCollection(${c.id})">✕</button></div>`
-                    : isAdmin() ? `<button class="btn btn-danger btn-sm btn-icon" onclick="delCollection(${c.id})">✕</button>` : '—'}</td>
-                </tr>`;}).join('')}
-            </tbody>
+            <tbody id="collections-tb">${renderCollectionRows(list)}</tbody>
           </table>
         </div>
       </div>`);
   } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
 }
 
+function renderCollectionRows(list) {
+  return list.length===0
+    ? `<tr class="empty-row"><td colspan="7">No collections found for this filter.</td></tr>`
+    : list.map(c=>{
+      const pending = c.status === 'pending_verification';
+      return `<tr ${pending?'style="background:#FFFBEB"':''}>
+      <td>${fmtDate(c.collection_date)}</td>
+      <td><span class="badge badge-green" style="text-transform:capitalize">${c.collection_type}</span> ${pending?'<span class="badge badge-amber">Pending</span>':''}</td>
+      <td>${c.guest_name||'—'}</td>
+      <td>${c.description||c.collection_month||'—'}</td>
+      <td class="text-green fw-600">${fmt(c.amount)}</td>
+      <td>${c.payment_mode}</td>
+      <td>${pending && isAdmin()
+        ? `<div class="flex gap-2"><button class="btn btn-primary btn-sm" onclick="confirmPendingCollection(${c.id})">Confirm</button><button class="btn btn-danger btn-sm btn-icon" onclick="delCollection(${c.id})">✕</button></div>`
+        : isAdmin() ? `<button class="btn btn-danger btn-sm btn-icon" onclick="delCollection(${c.id})">✕</button>` : '—'}</td>
+    </tr>`;}).join('');
+}
+
+function filterCollections() {
+  const type = document.getElementById('coll-type-filter').value;
+  const filtered = type ? collectionsListCache.filter(c => c.collection_type === type) : collectionsListCache;
+  document.getElementById('collections-tb').innerHTML = renderCollectionRows(filtered);
+}
+
+let collectionModalGuestId = null;
+
 async function collectionModal(guestId=null, guestName='') {
+  collectionModalGuestId = guestId;
   let guests = [];
   try { guests = await API.getGuests(); } catch {}
   openModal(`
@@ -1174,17 +1260,27 @@ async function saveCollection() {
   const guestName = guestId ? guestSel.options[guestSel.selectedIndex].text : '';
   const d = { guest_id:guestId||null, guest_name:guestName, amount:document.getElementById('cl-amt').value, collection_date:document.getElementById('cl-date').value, collection_type:document.getElementById('cl-type').value, payment_mode:document.getElementById('cl-mode').value, collection_month:document.getElementById('cl-month').value, description:document.getElementById('cl-desc').value };
   if(!d.amount) { showAlert(al,'Amount required'); return; }
-  try { await API.createCollection(d); closeModal(); pgCollections(); } catch(e) { showAlert(al,e.message); }
+  try {
+    await API.createCollection(d);
+    closeModal();
+    // Jump to whichever month this was actually dated, so it's immediately
+    // visible instead of vanishing into a different month's view. Return to
+    // wherever the modal was actually opened from.
+    const dt = d.collection_date ? new Date(d.collection_date) : new Date();
+    if (collectionModalGuestId) viewGuest(collectionModalGuestId);
+    else if (currentPage === 'payments') pgPayments(dt.getMonth()+1, dt.getFullYear());
+    else pgCollections(dt.getMonth()+1, dt.getFullYear());
+  } catch(e) { showAlert(al,e.message); }
 }
 
 async function delCollection(id) {
   if(!confirm('Delete this record?')) return;
-  try { await API.deleteCollection(id); pgCollections(); } catch(e) { alert(e.message); }
+  try { await API.deleteCollection(id); pgCollections(collectionsCurrentMonth, collectionsCurrentYear); } catch(e) { alert(e.message); }
 }
 
 async function confirmPendingCollection(id) {
   if(!confirm('Confirm this payment actually arrived in your bank/UPI app?')) return;
-  try { await API.confirmCollection(id); pgCollections(); } catch(e) { alert(e.message); }
+  try { await API.confirmCollection(id); pgCollections(collectionsCurrentMonth, collectionsCurrentYear); } catch(e) { alert(e.message); }
 }
 
 // ── RENT DUE TRACKER ──────────────────────────────
@@ -1228,10 +1324,10 @@ async function pgRentDue() {
 }
 
 // ── REPORTS ───────────────────────────────────────
-async function pgReports() {
+async function pgReports(month, year) {
   loading();
   const now = new Date();
-  const m = now.getMonth()+1; const y = now.getFullYear();
+  const m = month || (now.getMonth()+1); const y = year || now.getFullYear();
   try {
     const r = await API.getReports(m,y);
     setContent(`
@@ -1239,7 +1335,7 @@ async function pgReports() {
         <div><h1>📋 Reports</h1><p>Monthly Profit &amp; Loss summary</p></div>
         <div class="flex items-center gap-2">
           <span style="font-size:13px;color:var(--text-muted)">Select Month</span>
-          ${monthPicker()}
+          ${monthPicker(m, y, 'onReportsMonthChange')}
         </div>
       </div>
       <div class="stat-grid mb-6 mt-4">
