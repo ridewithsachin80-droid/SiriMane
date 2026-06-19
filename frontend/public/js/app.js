@@ -1841,12 +1841,13 @@ async function renderAdminRefundsTab() {
     document.getElementById('admin-tab-content').innerHTML = `
       <div class="card">
         <div class="card-header"><h3>Deposit Refund History</h3></div>
+        <p class="text-muted" style="font-size:12px;padding:0 20px 12px">Real checkouts shouldn't normally need deleting — this is here mainly for cleaning up test or mistaken entries.</p>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>DATE</th><th>GUEST</th><th>ROOM</th><th>DEPOSIT</th><th>DEDUCTIONS</th><th>REFUNDED</th><th>MODE</th><th>BY</th></tr></thead>
+            <thead><tr><th>DATE</th><th>GUEST</th><th>ROOM</th><th>DEPOSIT</th><th>DEDUCTIONS</th><th>REFUNDED</th><th>MODE</th><th>BY</th><th>ACTIONS</th></tr></thead>
             <tbody>
               ${refunds.length===0
-                ? `<tr class="empty-row"><td colspan="8">No checkouts processed yet.</td></tr>`
+                ? `<tr class="empty-row"><td colspan="9">No checkouts processed yet.</td></tr>`
                 : refunds.map(r=>`<tr>
                   <td>${fmtDate(r.created_at)}</td>
                   <td><strong>${r.guest_name}</strong></td>
@@ -1856,10 +1857,16 @@ async function renderAdminRefundsTab() {
                   <td class="${parseFloat(r.refund_amount)<0?'text-red':'text-green'} fw-600">${fmt(r.refund_amount)}</td>
                   <td>${r.refund_mode}</td>
                   <td>${r.processed_by_username||'—'}</td>
+                  <td><button class="btn btn-danger btn-sm btn-icon" onclick="delDepositRefund(${r.id})">✕</button></td>
                 </tr>`).join('')}
             </tbody>
           </table>
         </div>
       </div>`;
   } catch(e) { document.getElementById('admin-tab-content').innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
+}
+
+async function delDepositRefund(id) {
+  if (!confirm('Delete this refund record? This should only be used to clean up test or mistaken entries, not real checkouts.')) return;
+  try { await API.deleteDepositRefund(id); renderAdminRefundsTab(); } catch(e) { alert(e.message); }
 }
