@@ -311,10 +311,10 @@ async function pgGuests() {
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>NAME</th><th>PHONE</th><th>ROOM / BERTH</th><th>CHECK-IN</th><th>RENT</th><th>STATUS</th><th>DOCS</th><th>ACTIONS</th></tr></thead>
+            <thead><tr><th>NAME</th><th>PHONE</th><th>ROOM / BERTH</th><th>CHECK-IN</th><th>RENT</th><th>DEPOSIT</th><th>STATUS</th><th>DOCS</th><th>ACTIONS</th></tr></thead>
             <tbody id="guests-tb">
               ${list.length===0
-                ? `<tr class="empty-row"><td colspan="8">No guests yet. Click Add Guest to register.</td></tr>`
+                ? `<tr class="empty-row"><td colspan="9">No guests yet. Click Add Guest to register.</td></tr>`
                 : list.map(g=>{
                   const variance = hasVariance(g);
                   const needsApproval = variance && !g.rent_variance_approved;
@@ -325,6 +325,7 @@ async function pgGuests() {
                   <td>${g.room_number?'Room '+g.room_number+(g.bed_number?' / Bed '+g.bed_number:''):'-'}</td>
                   <td>${fmtDate(g.join_date)}</td>
                   <td>${fmt(g.monthly_rent)}/mo ${variance?`<span class="badge ${needsApproval?'badge-amber':'badge-blue'}" title="Room rate is ${fmt(g.room_rent)}">${needsApproval?'Pending Approval':'Variance'}</span>`:''}</td>
+                  <td>${fmt(g.deposit_amount)}</td>
                   <td><span class="badge ${g.is_active?'badge-green':'badge-red'}">${g.is_active?'Active':'Left'}</span></td>
                   <td><span class="badge badge-gray">${g.id_proof_type||'—'}</span></td>
                   <td>
