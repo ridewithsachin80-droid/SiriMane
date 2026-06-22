@@ -287,6 +287,17 @@ router.post('/guests', auth, async (req, res) => {
         [r.rows[0].id, monthly_rent, join_date, req.user.id, 'Initial rate at check-in']
       );
     }
+    // Auto-log the deposit as a real Collection, so it's not just a number
+    // on the guest's profile with no matching transaction — this is what
+    // keeps the balance sheet's deposit reconciliation accurate without
+    // needing a separate manual entry every time.
+    if (parseFloat(deposit_amount) > 0) {
+      const depositStatus = req.user.role === 'admin' ? 'confirmed' : 'pending_approval';
+      await pool.query(
+        `INSERT INTO collections(guest_id,guest_name,amount,collection_date,collection_type,payment_mode,description,created_by,status) VALUES($1,$2,$3,$4,'deposit','cash','Security deposit at check-in',$5,$6)`,
+        [r.rows[0].id, name, deposit_amount, join_date, req.user.id, depositStatus]
+      );
+    }
     await logActivity(req, 'guest_add', `${name}${room_id?' (room assigned)':''}${!rentVarianceApproved?' — rent differs from room rate, pending approval':''}`);
     res.status(201).json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -295,10 +306,12 @@ router.post('/guests', auth, async (req, res) => {
 router.put('/guests/:id', auth, async (req, res) => {
   const { name,phone,email,emergency_contact,room_id,bed_number,monthly_rent,deposit_amount,notes,leave_date,is_active,rent_effective_from } = req.body;
   try {
-    const existing = await pool.query('SELECT monthly_rent FROM guests WHERE id=$1', [req.params.id]);
+    const existing = await pool.query('SELECT monthly_rent,deposit_amount FROM guests WHERE id=$1', [req.params.id]);
     if (!existing.rows[0]) return res.status(404).json({ error: 'Not found' });
     const oldRent = parseFloat(existing.rows[0].monthly_rent) || 0;
     const newRent = monthly_rent !== undefined && monthly_rent !== null ? parseFloat(monthly_rent) : oldRent;
+    const oldDeposit = parseFloat(existing.rows[0].deposit_amount) || 0;
+    const newDeposit = deposit_amount !== undefined && deposit_amount !== null ? parseFloat(deposit_amount) : oldDeposit;
 
     // Recompute the rent-variance flag against whichever room is being set,
     // same rule as guest creation: admin's own edit self-authorizes, staff's
@@ -323,6 +336,19 @@ router.put('/guests/:id', auth, async (req, res) => {
         [req.params.id, newRent, effectiveFrom, req.user.id]
       );
       await logActivity(req, 'rent_change', `${r.rows[0].name}: ₹${oldRent} → ₹${newRent}, effective ${effectiveFrom}${!rentVarianceApproved?' — differs from room rate, pending approval':''}`);
+    }
+
+    // If the deposit went UP, log the difference as a real collection (e.g.
+    // a top-up payment) so it stays reconciled. A decrease isn't
+    // auto-logged — a negative deposit entry would be confusing; correct
+    // those directly on the original Collection entry instead.
+    if (newDeposit > oldDeposit) {
+      const depositStatus = req.user.role === 'admin' ? 'confirmed' : 'pending_approval';
+      await pool.query(
+        `INSERT INTO collections(guest_id,guest_name,amount,collection_date,collection_type,payment_mode,description,created_by,status) VALUES($1,$2,$3,CURRENT_DATE,'deposit','cash','Additional deposit top-up',$4,$5)`,
+        [req.params.id, r.rows[0].name, newDeposit - oldDeposit, req.user.id, depositStatus]
+      );
+      await logActivity(req, 'deposit_topup', `${r.rows[0].name}: +₹${newDeposit - oldDeposit} deposit`);
     }
 
     res.json(r.rows[0]);
