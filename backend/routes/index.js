@@ -170,26 +170,31 @@ router.get('/auth/me', auth, (req, res) => res.json({ user: req.user }));
 // ── DASHBOARD ────────────────────────────────────
 router.get('/dashboard', auth, async (req, res) => {
   try {
-    const [guests, rooms, beds, income, expenses, recentGuests, recentPayments] = await Promise.all([
+    const [guests, rooms, beds, income, expenses, recentGuests, recentPayments, checklistTotal, checklistToday] = await Promise.all([
       pool.query('SELECT COUNT(*) FROM guests WHERE is_active=true'),
       pool.query(`SELECT COUNT(*) as total_rooms, COALESCE(SUM(total_beds),0) as total_beds FROM rooms WHERE is_active=true`),
       pool.query(`SELECT COALESCE(SUM(r.total_beds),0) - COUNT(g.id) as available FROM rooms r LEFT JOIN guests g ON r.id=g.room_id AND g.is_active=true WHERE r.is_active=true`),
       pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND status='confirmed' AND DATE_TRUNC('month',collection_date)=DATE_TRUNC('month',NOW())`),
       pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM purchases WHERE is_deleted=false AND status='confirmed' AND DATE_TRUNC('month',purchase_date)=DATE_TRUNC('month',NOW())`),
       pool.query(`SELECT g.*,r.room_number FROM guests g LEFT JOIN rooms r ON g.room_id=r.id WHERE g.is_active=true ORDER BY g.created_at DESC LIMIT 5`),
-      pool.query(`SELECT c.*,g.name as guest_name FROM collections c LEFT JOIN guests g ON c.guest_id=g.id WHERE c.is_deleted=false AND c.status='confirmed' ORDER BY c.collection_date DESC LIMIT 5`)
+      pool.query(`SELECT c.*,g.name as guest_name FROM collections c LEFT JOIN guests g ON c.guest_id=g.id WHERE c.is_deleted=false AND c.status='confirmed' ORDER BY c.collection_date DESC LIMIT 5`),
+      pool.query('SELECT COUNT(*) FROM checklist_items WHERE is_active=true'),
+      pool.query(`SELECT COUNT(*) FILTER (WHERE is_checked) as checked FROM checklist_log WHERE log_date=CURRENT_DATE`)
     ]);
     const totalBeds = parseInt(rooms.rows[0].total_beds) || 0;
     const availBeds = parseInt(beds.rows[0].available) || 0;
     const inc = parseFloat(income.rows[0].total);
     const exp = parseFloat(expenses.rows[0].total);
+    const checklistItemTotal = parseInt(checklistTotal.rows[0].count) || 0;
+    const checklistChecked = parseInt(checklistToday.rows[0].checked) || 0;
     res.json({
       totalGuests: parseInt(guests.rows[0].count),
       totalRooms: parseInt(rooms.rows[0].total_rooms),
       totalBeds, availableBeds: availBeds,
       occupancyPercent: totalBeds > 0 ? Math.round(((totalBeds - availBeds) / totalBeds) * 100) : 0,
       monthlyIncome: inc, monthlyExpenses: exp, netProfit: inc - exp,
-      recentGuests: recentGuests.rows, recentPayments: recentPayments.rows
+      recentGuests: recentGuests.rows, recentPayments: recentPayments.rows,
+      todayChecklist: { checked: checklistChecked, total: checklistItemTotal, percent: checklistItemTotal > 0 ? Math.round((checklistChecked / checklistItemTotal) * 100) : 0 }
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1238,6 +1243,139 @@ router.delete('/deposit-refunds/:id', auth, requireAdmin, async (req, res) => {
     if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
     await logActivity(req, 'deposit_refund_delete', `${r.rows[0].guest_name} — ₹${r.rows[0].refund_amount} (id ${req.params.id})`);
     res.json({ message: 'Deleted' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── DAILY WARDEN CHECKLIST ─────────────────────────
+// Canonical section order (matches the paper checklist), used everywhere
+// items need to be grouped/sorted since Postgres won't order VARCHAR that
+// way on its own.
+const CHECKLIST_SECTION_ORDER = ['Morning', 'Mid-Day', 'Evening', 'Night', 'Closing'];
+const CHECKLIST_SECTION_LABELS = { 'Morning': '🌅 Morning', 'Mid-Day': '☀️ Mid-Day', 'Evening': '🌇 Evening', 'Night': '🌙 Night / Gate Closing', 'Closing': '✅ Closing the Day' };
+
+function sectionCaseSql(col) {
+  return `CASE ${col} ${CHECKLIST_SECTION_ORDER.map((s, i) => `WHEN '${s}' THEN ${i}`).join(' ')} ELSE 99 END`;
+}
+
+// Warden's checklist for a single day — every active item, plus whether it's
+// been ticked yet today (and by whom), grouped by section in paper-checklist
+// order. Any logged-in user (staff or admin) can view and tick this; it's
+// the warden's own daily routine, not an admin-gated report.
+router.get('/checklist', auth, async (req, res) => {
+  try {
+    const date = req.query.date || new Date().toISOString().split('T')[0];
+    const r = await pool.query(
+      `SELECT i.id, i.section, i.time_label, i.task, i.sort_order,
+              l.is_checked, l.checked_at, u.username as checked_by_username
+       FROM checklist_items i
+       LEFT JOIN checklist_log l ON l.item_id = i.id AND l.log_date = $1
+       LEFT JOIN users u ON l.checked_by = u.id
+       WHERE i.is_active = true
+       ORDER BY ${sectionCaseSql('i.section')}, i.sort_order, i.id`,
+      [date]
+    );
+    const bySection = {};
+    CHECKLIST_SECTION_ORDER.forEach(s => { bySection[s] = []; });
+    r.rows.forEach(row => { (bySection[row.section] = bySection[row.section] || []).push(row); });
+    const sections = Object.keys(bySection)
+      .sort((a, b) => CHECKLIST_SECTION_ORDER.indexOf(a) - CHECKLIST_SECTION_ORDER.indexOf(b))
+      .map(section => ({ section, label: CHECKLIST_SECTION_LABELS[section] || section, items: bySection[section] }));
+    const total = r.rows.length;
+    const checked = r.rows.filter(row => row.is_checked).length;
+    res.json({ date, sections, summary: { total, checked, percent: total > 0 ? Math.round((checked / total) * 100) : 0 } });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Tick/untick a single item for a given date. Upserts so ticking the same
+// item twice for the same date just updates who/when rather than erroring.
+router.put('/checklist/:itemId', auth, async (req, res) => {
+  const { date, checked } = req.body;
+  if (!date) return res.status(400).json({ error: 'date is required' });
+  try {
+    const r = await pool.query(
+      `INSERT INTO checklist_log(item_id, log_date, is_checked, checked_by, checked_at)
+       VALUES($1,$2,$3,$4,$5)
+       ON CONFLICT (item_id, log_date)
+       DO UPDATE SET is_checked=$3, checked_by=$4, checked_at=$5
+       RETURNING *`,
+      [req.params.itemId, date, !!checked, req.user.id, checked ? new Date() : null]
+    );
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Admin-facing completion trend — one row per day for the last N days, so
+// the owner can see at a glance whether the warden is actually completing
+// the daily routine (not just today's snapshot).
+router.get('/checklist/summary', auth, requireAdmin, async (req, res) => {
+  try {
+    const days = Math.min(parseInt(req.query.days) || 30, 90);
+    const totalR = await pool.query('SELECT COUNT(*) FROM checklist_items WHERE is_active=true');
+    const total = parseInt(totalR.rows[0].count) || 0;
+    const r = await pool.query(
+      `SELECT log_date::date as date, COUNT(*) FILTER (WHERE is_checked) as checked
+       FROM checklist_log
+       WHERE log_date >= CURRENT_DATE - $1::int AND log_date <= CURRENT_DATE
+       GROUP BY log_date ORDER BY log_date DESC`,
+      [days - 1]
+    );
+    const byDate = {};
+    r.rows.forEach(row => { byDate[row.date.toISOString().split('T')[0]] = parseInt(row.checked); });
+    const result = [];
+    for (let i = 0; i < days; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().split('T')[0];
+      const checked = byDate[key] || 0;
+      result.push({ date: key, checked, total, percent: total > 0 ? Math.round((checked / total) * 100) : 0 });
+    }
+    res.json(result);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── CHECKLIST ITEMS (admin manages the master task list) ──
+router.get('/checklist-items', auth, requireAdmin, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT * FROM checklist_items WHERE is_active=true ORDER BY ${sectionCaseSql('section')}, sort_order, id`
+    );
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/checklist-items', auth, requireAdmin, async (req, res) => {
+  const { section, time_label, task, sort_order } = req.body;
+  if (!section || !task) return res.status(400).json({ error: 'Section and task are required' });
+  try {
+    const r = await pool.query(
+      `INSERT INTO checklist_items(section, time_label, task, sort_order) VALUES($1,$2,$3,$4) RETURNING *`,
+      [section, time_label || '—', task, sort_order || 0]
+    );
+    await logActivity(req, 'checklist_item_add', `${section}: ${task}`);
+    res.status(201).json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.put('/checklist-items/:id', auth, requireAdmin, async (req, res) => {
+  const { section, time_label, task, sort_order } = req.body;
+  try {
+    const r = await pool.query(
+      `UPDATE checklist_items SET section=COALESCE($1,section),time_label=COALESCE($2,time_label),task=COALESCE($3,task),sort_order=COALESCE($4,sort_order) WHERE id=$5 RETURNING *`,
+      [section, time_label, task, sort_order, req.params.id]
+    );
+    if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Soft delete — keeps historical checklist_log rows (and past completion %)
+// intact for dates before this item was retired.
+router.delete('/checklist-items/:id', auth, requireAdmin, async (req, res) => {
+  try {
+    const r = await pool.query('UPDATE checklist_items SET is_active=false WHERE id=$1 RETURNING *', [req.params.id]);
+    if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
+    await logActivity(req, 'checklist_item_remove', `${r.rows[0].section}: ${r.rows[0].task}`);
+    res.json({ message: 'Removed' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

@@ -79,7 +79,14 @@ const API = {
   getCapitalTransactions: () => apiFetch('/capital-transactions'),
   createCapitalTransaction: d => apiFetch('/capital-transactions', { method:'POST', body:d }),
   deleteCapitalTransaction: id => apiFetch(`/capital-transactions/${id}`, { method:'DELETE' }),
-  getBalanceSheet: (asOf) => apiFetch(`/balance-sheet${asOf?`?asOf=${asOf}`:''}`)
+  getBalanceSheet: (asOf) => apiFetch(`/balance-sheet${asOf?`?asOf=${asOf}`:''}`),
+  getChecklist: (date) => apiFetch(`/checklist?date=${date}`),
+  toggleChecklistItem: (itemId,date,checked) => apiFetch(`/checklist/${itemId}`, { method:'PUT', body:{date,checked} }),
+  getChecklistSummary: (days) => apiFetch(`/checklist/summary?days=${days||30}`),
+  getChecklistItems: () => apiFetch('/checklist-items'),
+  createChecklistItem: d => apiFetch('/checklist-items', { method:'POST', body:d }),
+  updateChecklistItem: (id,d) => apiFetch(`/checklist-items/${id}`, { method:'PUT', body:d }),
+  deleteChecklistItem: id => apiFetch(`/checklist-items/${id}`, { method:'DELETE' })
 };
 
 // Export downloads need the auth header, so a plain <a href> won't work —

@@ -52,11 +52,11 @@ let currentPage = null;
 function navigate(page) {
   currentPage = page;
   document.querySelectorAll('.nav-item[data-page]').forEach(b => b.classList.toggle('active', b.dataset.page===page));
-  const titles = { dashboard:'Dashboard', rooms:'Rooms', guests:'Guests', 'daily-menu':'Daily Menu', payments:'Payments', 'guest-messages':'Guest Messages', inbox:'Inbox', purchases:'Purchases', collections:'Collections', 'rent-due':'Rent Due', reports:'Reports', 'balance-sheet':'Balance Sheet', admin:'Admin' };
+  const titles = { dashboard:'Dashboard', rooms:'Rooms', guests:'Guests', 'daily-menu':'Daily Menu', 'daily-checklist':'Daily Checklist', payments:'Payments', 'guest-messages':'Guest Messages', inbox:'Inbox', purchases:'Purchases', collections:'Collections', 'rent-due':'Rent Due', reports:'Reports', 'balance-sheet':'Balance Sheet', admin:'Admin' };
   document.getElementById('page-title').textContent = titles[page]||page;
   document.getElementById('topbar-actions').innerHTML = '';
   document.getElementById('sidebar').classList.remove('open');
-  const pages = { dashboard:pgDashboard, rooms:pgRooms, guests:pgGuests, 'daily-menu':pgMenu, payments:pgPayments, 'guest-messages':pgAnnouncements, inbox:pgInbox, purchases:pgPurchases, collections:pgCollections, 'rent-due':pgRentDue, reports:pgReports, 'balance-sheet':pgBalanceSheet, admin:pgAdmin };
+  const pages = { dashboard:pgDashboard, rooms:pgRooms, guests:pgGuests, 'daily-menu':pgMenu, 'daily-checklist':pgChecklist, payments:pgPayments, 'guest-messages':pgAnnouncements, inbox:pgInbox, purchases:pgPurchases, collections:pgCollections, 'rent-due':pgRentDue, reports:pgReports, 'balance-sheet':pgBalanceSheet, admin:pgAdmin };
   if(pages[page]) pages[page]();
 }
 
@@ -180,6 +180,18 @@ async function pgDashboard() {
           <div class="s-label">Net Profit</div>
           <div class="s-value">${fmt(d.netProfit)}</div>
           <div class="s-sub">This month</div>
+        </div>
+      </div>
+      <div class="card mb-6" style="cursor:pointer" onclick="navigate('daily-checklist')">
+        <div class="card-header">
+          <h3>✅ Today's Warden Checklist</h3>
+          <span class="text-muted" style="font-size:13px">${d.todayChecklist.checked} / ${d.todayChecklist.total} done</span>
+        </div>
+        <div style="padding:0 20px 16px">
+          <div style="background:var(--border,#E2E8F0);border-radius:8px;height:10px;overflow:hidden">
+            <div style="background:${d.todayChecklist.percent>=100?'var(--green,#16A34A)':'var(--blue,#4F46E5)'};height:100%;width:${d.todayChecklist.percent}%;transition:width .3s"></div>
+          </div>
+          <div style="margin-top:6px;font-size:13px;color:var(--text-muted)">${d.todayChecklist.percent}% complete for today — tap to open</div>
         </div>
       </div>
       <div class="card">
@@ -678,6 +690,127 @@ async function saveMenu() {
   const d = { day_of_week:document.getElementById('mn-day').value, meal_type:document.getElementById('mn-meal').value, items:document.getElementById('mn-items').value.trim() };
   if(!d.items) { showAlert(al,'Enter menu items'); return; }
   try { await API.saveMenu(d); closeModal(); pgMenu(); } catch(e) { showAlert(al,e.message); }
+}
+
+// ── DAILY CHECKLIST ───────────────────────────────
+let checklistCurrentDate = null;
+
+async function pgChecklist(date) {
+  loading();
+  const d = date || checklistCurrentDate || nowDate();
+  checklistCurrentDate = d;
+  const isToday = d === nowDate();
+  document.getElementById('topbar-actions').innerHTML = isAdmin()
+    ? `<button class="btn btn-outline btn-sm" onclick="checklistHistoryModal()">📊 History</button> <button class="btn btn-outline btn-sm" onclick="checklistManageModal()">⚙️ Manage Items</button>`
+    : '';
+  try {
+    const data = await API.getChecklist(d);
+    setContent(`
+      <div class="page-header flex justify-between items-center mb-5">
+        <div><h1>Daily Checklist</h1><p>Owner-cum-Warden routine — tick off as you complete each task</p></div>
+      </div>
+      <div class="card mb-6">
+        <div class="card-header flex justify-between items-center">
+          <input type="date" id="cl-date" value="${d}" max="${nowDate()}" onchange="pgChecklist(this.value)" style="max-width:180px"/>
+          <span style="font-weight:600">${data.summary.checked} / ${data.summary.total} done (${data.summary.percent}%)</span>
+        </div>
+        <div style="padding:0 20px 16px">
+          <div style="background:#E2E8F0;border-radius:8px;height:10px;overflow:hidden">
+            <div style="background:${data.summary.percent>=100?'#16A34A':'#4F46E5'};height:100%;width:${data.summary.percent}%;transition:width .3s"></div>
+          </div>
+        </div>
+      </div>
+      ${data.sections.map(sec => `
+        <div class="card mb-6">
+          <div class="card-header"><h3>${sec.label}</h3></div>
+          <div style="padding:4px 20px 16px">
+            ${sec.items.length===0 ? '<div class="text-muted" style="padding:12px 0">No tasks in this section</div>' : sec.items.map(item => `
+              <label style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid #F1F5F9;cursor:pointer">
+                <input type="checkbox" ${item.is_checked?'checked':''} onchange="toggleChecklistItem(${item.id}, this.checked)" style="margin-top:3px;width:18px;height:18px;flex-shrink:0"/>
+                <span style="flex:1">
+                  <span style="${item.is_checked?'text-decoration:line-through;color:var(--text-muted)':''}">${item.time_label && item.time_label!=='—' ? `<strong>${item.time_label}</strong> — `:''}${item.task}</span>
+                  ${item.is_checked && item.checked_by_username ? `<br><span class="text-muted" style="font-size:12px">✔ ${item.checked_by_username}${item.checked_at?' at '+new Date(item.checked_at).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}):''}</span>` : ''}
+                </span>
+              </label>
+            `).join('')}
+          </div>
+        </div>
+      `).join('')}
+    `);
+  } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+}
+
+async function toggleChecklistItem(itemId, checked) {
+  try { await API.toggleChecklistItem(itemId, checklistCurrentDate, checked); pgChecklist(checklistCurrentDate); }
+  catch(e) { alert(e.message); pgChecklist(checklistCurrentDate); }
+}
+
+async function checklistHistoryModal() {
+  openModal(`<div class="modal" style="max-width:520px"><div class="modal-header"><h3>📊 Checklist History</h3><button class="modal-close" onclick="closeModal()">×</button></div><div class="modal-body"><div class="loading-center"><div class="spinner"></div></div></div></div>`);
+  try {
+    const rows = await API.getChecklistSummary(30);
+    document.querySelector('#modal-container .modal-body').innerHTML = `
+      <p class="text-muted" style="margin-bottom:10px;font-size:13px">Last 30 days — completion of the daily warden checklist</p>
+      <div style="max-height:420px;overflow-y:auto">
+        <table>
+          <thead><tr><th>DATE</th><th>DONE</th><th>%</th></tr></thead>
+          <tbody>
+            ${rows.map(r => `<tr onclick="closeModal();pgChecklist('${r.date}')" style="cursor:pointer">
+              <td>${fmtDate(r.date)}</td>
+              <td>${r.checked} / ${r.total}</td>
+              <td><span class="badge ${r.percent>=100?'badge-green':r.percent>=50?'badge-blue':'badge-red'}">${r.percent}%</span></td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } catch(e) { document.querySelector('#modal-container .modal-body').innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
+}
+
+async function checklistManageModal() {
+  openModal(`<div class="modal" style="max-width:600px"><div class="modal-header"><h3>⚙️ Manage Checklist Tasks</h3><button class="modal-close" onclick="closeModal()">×</button></div><div class="modal-body" id="cl-manage-body"><div class="loading-center"><div class="spinner"></div></div></div></div>`);
+  await renderChecklistManage();
+}
+
+async function renderChecklistManage() {
+  const body = document.getElementById('cl-manage-body');
+  try {
+    const items = await API.getChecklistItems();
+    const sections = ['Morning','Mid-Day','Evening','Night','Closing'];
+    body.innerHTML = `
+      <div id="cl-manage-alert" class="alert alert-danger hidden"></div>
+      <div style="max-height:340px;overflow-y:auto;margin-bottom:14px">
+        ${items.length===0 ? '<div class="text-muted">No tasks yet</div>' : items.map(i => `
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #F1F5F9;gap:8px">
+            <span style="font-size:13px"><strong>${i.section}</strong>${i.time_label && i.time_label!=='—' ? ' · '+i.time_label:''} — ${i.task}</span>
+            <button class="btn btn-outline btn-sm" onclick="removeChecklistItem(${i.id})">Remove</button>
+          </div>`).join('')}
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Section</label>
+          <select id="cl-new-section">${sections.map(s=>`<option value="${s}">${s}</option>`).join('')}</select>
+        </div>
+        <div class="form-group"><label>Time (optional)</label><input type="text" id="cl-new-time" placeholder="e.g. 7:00 AM"/></div>
+      </div>
+      <div class="form-group"><label>Task</label><input type="text" id="cl-new-task" placeholder="e.g. Check water tank level"/></div>
+      <button class="btn btn-primary" onclick="addChecklistItem()">+ Add Task</button>
+    `;
+  } catch(e) { body.innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
+}
+
+async function addChecklistItem() {
+  const al = document.getElementById('cl-manage-alert');
+  const task = document.getElementById('cl-new-task').value.trim();
+  if (!task) { showAlert(al, 'Enter a task'); return; }
+  try {
+    await API.createChecklistItem({ section: document.getElementById('cl-new-section').value, time_label: document.getElementById('cl-new-time').value.trim() || '—', task });
+    await renderChecklistManage();
+  } catch(e) { showAlert(al, e.message); }
+}
+
+async function removeChecklistItem(id) {
+  if (!confirm('Remove this task from the daily checklist?')) return;
+  try { await API.deleteChecklistItem(id); await renderChecklistManage(); }
+  catch(e) { alert(e.message); }
 }
 
 // ── PAYMENTS (same as collections) ───────────────
