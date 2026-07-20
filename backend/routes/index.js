@@ -1166,6 +1166,50 @@ router.post('/guests/:id/rent-history', auth, requireAdmin, async (req, res) => 
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+router.get('/guests/:id/room-history', auth, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT h.*, u.username FROM guest_room_history h LEFT JOIN users u ON h.changed_by=u.id WHERE h.guest_id=$1 ORDER BY h.effective_from ASC, h.id ASC`,
+      [req.params.id]
+    );
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Internal room/bed shift — moves the guest to a different room within the
+// PG (not a checkout). Admin only, and the effective date can be backdated
+// (e.g. logging a shift that actually happened a few days ago), same rule
+// as rent-history backfill: can't be before check-in, can't be in the future.
+router.post('/guests/:id/shift-room', auth, requireAdmin, async (req, res) => {
+  const { room_id, bed_number, effective_from, note } = req.body;
+  if (!room_id) return res.status(400).json({ error: 'New room is required' });
+  if (!effective_from) return res.status(400).json({ error: 'Effective date is required' });
+  try {
+    const g = await pool.query(`SELECT g.*,r.room_number FROM guests g LEFT JOIN rooms r ON g.room_id=r.id WHERE g.id=$1`, [req.params.id]);
+    const guest = g.rows[0];
+    if (!guest) return res.status(404).json({ error: 'Guest not found' });
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    if (effective_from > todayStr) return res.status(400).json({ error: 'Effective date cannot be in the future' });
+    if (guest.join_date && effective_from < new Date(guest.join_date).toISOString().split('T')[0]) {
+      return res.status(400).json({ error: 'Effective date cannot be before the check-in date' });
+    }
+
+    const newRoom = await pool.query('SELECT room_number FROM rooms WHERE id=$1', [room_id]);
+    if (!newRoom.rows[0]) return res.status(404).json({ error: 'Room not found' });
+
+    const hist = await pool.query(
+      `INSERT INTO guest_room_history(guest_id,from_room_number,from_bed_number,to_room_id,to_room_number,to_bed_number,effective_from,changed_by,note)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [guest.id, guest.room_number || null, guest.bed_number || null, room_id, newRoom.rows[0].room_number, bed_number || null, effective_from, req.user.id, note || null]
+    );
+    await pool.query('UPDATE guests SET room_id=$1,bed_number=$2 WHERE id=$3', [room_id, bed_number || null, guest.id]);
+    await logActivity(req, 'guest_room_shift', `${guest.name}: ${guest.room_number||'—'} → ${newRoom.rows[0].room_number}, effective ${effective_from}`);
+
+    res.status(201).json(hist.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── APP SETTINGS (admin only) ─────────────────────
 router.get('/settings', auth, requireAdmin, async (req, res) => {
   try {

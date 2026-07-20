@@ -90,7 +90,9 @@ const API = {
   getComplaints: (status) => apiFetch(`/complaints${status && status!=='all' ? '?status='+status : ''}`),
   createComplaint: d => apiFetch('/complaints', { method:'POST', body:d }),
   updateComplaint: (id,d) => apiFetch(`/complaints/${id}`, { method:'PUT', body:d }),
-  deleteComplaint: id => apiFetch(`/complaints/${id}`, { method:'DELETE' })
+  deleteComplaint: id => apiFetch(`/complaints/${id}`, { method:'DELETE' }),
+  getRoomHistory: (guestId) => apiFetch(`/guests/${guestId}/room-history`),
+  shiftGuestRoom: (guestId,d) => apiFetch(`/guests/${guestId}/shift-room`, { method:'POST', body:d })
 };
 
 // Export downloads need the auth header, so a plain <a href> won't work —

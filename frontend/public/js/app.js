@@ -387,6 +387,7 @@ async function pgGuests(filter) {
                       <button class="btn btn-outline btn-sm" onclick="viewGuest(${g.id})">View</button>
                       <button class="btn btn-primary btn-sm" onclick="guestModal(null,${g.id})">Edit</button>
                       ${needsApproval && isAdmin()?`<button class="btn btn-success btn-sm" onclick="approveRentVariance(${g.id})">Approve Rent</button>`:''}
+                      ${g.is_active && isAdmin()?`<button class="btn btn-outline btn-sm" onclick="roomShiftModal(${g.id},'${g.name.replace(/'/g,"\\'")}')">Shift Room</button>`:''}
                       ${g.is_active && isAdmin()?`<button class="btn btn-danger btn-sm" onclick="checkoutModal(${g.id})">Checkout</button>`:''}
                     </div>
                   </td>
@@ -512,10 +513,11 @@ async function saveGuest(id) {
 
 async function viewGuest(id) {
   try {
-    const [g, ledgerData, history] = await Promise.all([
+    const [g, ledgerData, history, roomHistory] = await Promise.all([
       API.getGuest(id),
       API.getGuestLedger(id).catch(()=>null),
-      API.getRentHistory(id).catch(()=>[])
+      API.getRentHistory(id).catch(()=>[]),
+      API.getRoomHistory(id).catch(()=>[])
     ]);
     const balance = ledgerData ? parseFloat(ledgerData.current_balance) : null;
     const balanceLabel = balance===null ? '' : balance < -0.5 ? `${fmt(Math.abs(balance))} due` : balance > 0.5 ? `${fmt(balance)} credit` : 'Settled';
@@ -558,6 +560,16 @@ async function viewGuest(id) {
             ? '<p class="text-muted mb-5">No rate history recorded.</p>'
             : `<table class="mb-5"><thead><tr><th>EFFECTIVE FROM</th><th>RATE</th><th>SET BY</th><th>NOTE</th></tr></thead><tbody>
               ${history.map(h=>`<tr><td>${fmtDate(h.effective_from)}</td><td class="fw-600">${fmt(h.monthly_rent)}</td><td>${h.username||'—'}</td><td class="text-muted">${h.note||'—'}</td></tr>`).join('')}
+              </tbody></table>`}
+
+          <div class="flex justify-between items-center mb-4">
+            <h4 style="font-size:14px;margin:0">Room Shift History</h4>
+            ${isAdmin()?`<button class="btn btn-outline btn-sm" onclick="roomShiftModal(${g.id},'${g.name.replace(/'/g,"\\'")}')">+ Shift Room</button>`:''}
+          </div>
+          ${roomHistory.length===0
+            ? '<p class="text-muted mb-5">No internal room shifts recorded.</p>'
+            : `<table class="mb-5"><thead><tr><th>EFFECTIVE FROM</th><th>MOVE</th><th>BY</th><th>NOTE</th></tr></thead><tbody>
+              ${roomHistory.map(h=>`<tr><td>${fmtDate(h.effective_from)}</td><td>${h.from_room_number?'Room '+h.from_room_number:'—'} → Room ${h.to_room_number}${h.to_bed_number?' / Bed '+h.to_bed_number:''}</td><td>${h.username||'—'}</td><td class="text-muted">${h.note||'—'}</td></tr>`).join('')}
               </tbody></table>`}
 
           <h4 style="margin-bottom:10px;font-size:14px">All Transactions</h4>
@@ -603,6 +615,55 @@ async function saveRentHistory(guestId) {
   };
   if (!d.monthly_rent || !d.effective_from) { showAlert(al, 'Rent amount and effective date are both required'); return; }
   try { await API.addRentHistory(guestId, d); closeModal(); viewGuest(guestId); }
+  catch(e) { showAlert(al, e.message); }
+}
+
+async function roomShiftModal(guestId, guestName) {
+  let g, rooms = [];
+  try {
+    [g, rooms] = await Promise.all([API.getGuest(guestId), API.getRooms()]);
+  } catch(e) { alert(e.message); return; }
+  openModal(`
+    <div class="modal">
+      <div class="modal-header"><h3>🔀 Shift Room — ${guestName}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+      <div class="modal-body">
+        <div id="rs-alert" class="alert alert-danger hidden"></div>
+        <p class="text-muted" style="font-size:12px;margin-bottom:14px">Moves this guest to a different room/bed within the PG. Not a checkout — their rent, deposit, and ledger stay attached to them.</p>
+        <div style="background:#F8FAFC;padding:8px 12px;border-radius:8px;border:1px solid var(--border);margin-bottom:14px;font-size:13px">
+          <strong>Current:</strong> ${g.room_number?'Room '+g.room_number+(g.bed_number?' / Bed '+g.bed_number:''):'No room assigned'}
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>New Room *</label>
+            <select id="rs-room">
+              <option value="">— Select Room —</option>
+              ${rooms.map(r=>`<option value="${r.id}" ${g.room_id==r.id?'disabled':''}>Room ${r.room_number} (${r.available_beds} beds free)</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group"><label>New Bed / Berth</label><input id="rs-bed" type="number" placeholder="1, 2..."/></div>
+        </div>
+        <div class="form-group"><label>Effective From *</label><input id="rs-date" type="date" value="${nowDate()}" max="${nowDate()}" ${g.join_date?`min="${g.join_date.split('T')[0]}"`:''}/>
+          <p style="font-size:11px;color:var(--text-muted);margin-top:4px">Backdate this if the shift already happened and just wasn't logged then.</p>
+        </div>
+        <div class="form-group"><label>Note</label><input id="rs-note" placeholder="e.g. requested a window bed"/></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveRoomShift(${guestId})">Confirm Shift</button>
+      </div>
+    </div>`);
+}
+
+async function saveRoomShift(guestId) {
+  const al = document.getElementById('rs-alert');
+  const d = {
+    room_id: document.getElementById('rs-room').value,
+    bed_number: document.getElementById('rs-bed').value || null,
+    effective_from: document.getElementById('rs-date').value,
+    note: document.getElementById('rs-note').value
+  };
+  if (!d.room_id) { showAlert(al, 'Select the new room'); return; }
+  if (!d.effective_from) { showAlert(al, 'Effective date is required'); return; }
+  try { await API.shiftGuestRoom(guestId, d); closeModal(); pgGuests(); }
   catch(e) { showAlert(al, e.message); }
 }
 
