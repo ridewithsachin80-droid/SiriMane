@@ -170,7 +170,7 @@ router.get('/auth/me', auth, (req, res) => res.json({ user: req.user }));
 // ── DASHBOARD ────────────────────────────────────
 router.get('/dashboard', auth, async (req, res) => {
   try {
-    const [guests, rooms, beds, income, expenses, recentGuests, recentPayments, checklistTotal, checklistToday] = await Promise.all([
+    const [guests, rooms, beds, income, expenses, recentGuests, recentPayments, checklistTotal, checklistToday, openComplaints] = await Promise.all([
       pool.query('SELECT COUNT(*) FROM guests WHERE is_active=true'),
       pool.query(`SELECT COUNT(*) as total_rooms, COALESCE(SUM(total_beds),0) as total_beds FROM rooms WHERE is_active=true`),
       pool.query(`SELECT COALESCE(SUM(r.total_beds),0) - COUNT(g.id) as available FROM rooms r LEFT JOIN guests g ON r.id=g.room_id AND g.is_active=true WHERE r.is_active=true`),
@@ -179,7 +179,8 @@ router.get('/dashboard', auth, async (req, res) => {
       pool.query(`SELECT g.*,r.room_number FROM guests g LEFT JOIN rooms r ON g.room_id=r.id WHERE g.is_active=true ORDER BY g.created_at DESC LIMIT 5`),
       pool.query(`SELECT c.*,g.name as guest_name FROM collections c LEFT JOIN guests g ON c.guest_id=g.id WHERE c.is_deleted=false AND c.status='confirmed' ORDER BY c.collection_date DESC LIMIT 5`),
       pool.query('SELECT COUNT(*) FROM checklist_items WHERE is_active=true'),
-      pool.query(`SELECT COUNT(*) FILTER (WHERE is_checked) as checked FROM checklist_log WHERE log_date=CURRENT_DATE`)
+      pool.query(`SELECT COUNT(*) FILTER (WHERE is_checked) as checked FROM checklist_log WHERE log_date=CURRENT_DATE`),
+      pool.query(`SELECT COUNT(*) FROM complaints WHERE status != 'resolved'`)
     ]);
     const totalBeds = parseInt(rooms.rows[0].total_beds) || 0;
     const availBeds = parseInt(beds.rows[0].available) || 0;
@@ -194,7 +195,8 @@ router.get('/dashboard', auth, async (req, res) => {
       occupancyPercent: totalBeds > 0 ? Math.round(((totalBeds - availBeds) / totalBeds) * 100) : 0,
       monthlyIncome: inc, monthlyExpenses: exp, netProfit: inc - exp,
       recentGuests: recentGuests.rows, recentPayments: recentPayments.rows,
-      todayChecklist: { checked: checklistChecked, total: checklistItemTotal, percent: checklistItemTotal > 0 ? Math.round((checklistChecked / checklistItemTotal) * 100) : 0 }
+      todayChecklist: { checked: checklistChecked, total: checklistItemTotal, percent: checklistItemTotal > 0 ? Math.round((checklistChecked / checklistItemTotal) * 100) : 0 },
+      openComplaints: parseInt(openComplaints.rows[0].count) || 0
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1246,6 +1248,76 @@ router.delete('/deposit-refunds/:id', auth, requireAdmin, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── COMPLAINT / MAINTENANCE REGISTER ─────────────
+// Feeds the checklist tasks "Log any new issues in Complaint/Maintenance
+// Register" and "Update status on yesterday's complaints" with a real,
+// trackable register instead of just a to-do line. Guests can raise their
+// own (via /guest-complaint below); staff/admin can log ones found on
+// rounds. Any logged-in user can view/update status — this is the warden's
+// day-to-day tool, not an admin-only report.
+router.get('/complaints', auth, async (req, res) => {
+  try {
+    const { status } = req.query;
+    let q = 'SELECT c.*, u.username as resolved_by_username FROM complaints c LEFT JOIN users u ON c.resolved_by = u.id WHERE 1=1';
+    const p = [];
+    if (status && status !== 'all') { p.push(status); q += ` AND c.status=$${p.length}`; }
+    q += ' ORDER BY (c.status=\'resolved\'), c.created_at DESC';
+    const r = await pool.query(q, p);
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/complaints', auth, async (req, res) => {
+  const { guest_id, guest_name, room_number, category, description } = req.body;
+  if (!description) return res.status(400).json({ error: 'Description is required' });
+  try {
+    const r = await pool.query(
+      `INSERT INTO complaints(guest_id,guest_name,room_number,category,description,status,raised_by,created_by)
+       VALUES($1,$2,$3,$4,$5,'open',$6,$7) RETURNING *`,
+      [guest_id || null, guest_name || null, room_number || null, category || 'other', description, req.user.role === 'admin' ? 'admin' : 'staff', req.user.id]
+    );
+    await logActivity(req, 'complaint_add', `${category || 'other'}: ${description.slice(0, 80)}`);
+    res.status(201).json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.put('/complaints/:id', auth, async (req, res) => {
+  const { status, category, description, resolution_notes } = req.body;
+  try {
+    const existing = await pool.query('SELECT * FROM complaints WHERE id=$1', [req.params.id]);
+    if (!existing.rows[0]) return res.status(404).json({ error: 'Not found' });
+    const oldStatus = existing.rows[0].status;
+    const finalStatus = status || oldStatus;
+    const wasResolved = oldStatus === 'resolved';
+    const nowResolved = finalStatus === 'resolved';
+
+    let resolvedAt = existing.rows[0].resolved_at;
+    let resolvedBy = existing.rows[0].resolved_by;
+    if (nowResolved && !wasResolved) { resolvedAt = new Date(); resolvedBy = req.user.id; }
+    else if (!nowResolved) { resolvedAt = null; resolvedBy = null; }
+
+    const r = await pool.query(
+      `UPDATE complaints SET
+         status=$1, category=COALESCE($2,category), description=COALESCE($3,description),
+         resolution_notes=COALESCE($4,resolution_notes), updated_at=NOW(),
+         resolved_at=$5, resolved_by=$6
+       WHERE id=$7 RETURNING *`,
+      [finalStatus, category, description, resolution_notes, resolvedAt, resolvedBy, req.params.id]
+    );
+    await logActivity(req, 'complaint_update', `#${req.params.id} → ${r.rows[0].status}`);
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.delete('/complaints/:id', auth, requireAdmin, async (req, res) => {
+  try {
+    const r = await pool.query('DELETE FROM complaints WHERE id=$1 RETURNING *', [req.params.id]);
+    if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
+    await logActivity(req, 'complaint_delete', `#${req.params.id}`);
+    res.json({ message: 'Deleted' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── DAILY WARDEN CHECKLIST ─────────────────────────
 // Canonical section order (matches the paper checklist), used everywhere
 // items need to be grouped/sorted since Postgres won't order VARCHAR that
@@ -1304,27 +1376,47 @@ router.put('/checklist/:itemId', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Admin-facing completion trend — one row per day for the last N days, so
-// the owner can see at a glance whether the warden is actually completing
-// the daily routine (not just today's snapshot).
+// Admin-facing completion trend — either the last N days (legacy ?days=)
+// or a specific calendar month (?month=YYYY-MM), so the owner can look back
+// at any past month, not just a rolling 30-day window.
 router.get('/checklist/summary', auth, requireAdmin, async (req, res) => {
   try {
-    const days = Math.min(parseInt(req.query.days) || 30, 90);
     const totalR = await pool.query('SELECT COUNT(*) FROM checklist_items WHERE is_active=true');
     const total = parseInt(totalR.rows[0].count) || 0;
+
+    const today = new Date();
+    const todayUTC = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
+    let startDate, endDate;
+
+    if (req.query.month) {
+      const [y, m] = req.query.month.split('-').map(Number);
+      if (!y || !m) return res.status(400).json({ error: 'month must be YYYY-MM' });
+      startDate = new Date(Date.UTC(y, m - 1, 1));
+      endDate = new Date(Date.UTC(y, m, 0)); // last day of that month
+      if (endDate > todayUTC) endDate = todayUTC; // don't show future days of the current month
+    } else {
+      const days = Math.min(parseInt(req.query.days) || 30, 90);
+      endDate = todayUTC;
+      startDate = new Date(todayUTC);
+      startDate.setUTCDate(startDate.getUTCDate() - (days - 1));
+    }
+
+    if (endDate < startDate) return res.json([]); // a future month was requested
+
+    const startStr = startDate.toISOString().split('T')[0];
+    const endStr = endDate.toISOString().split('T')[0];
     const r = await pool.query(
       `SELECT log_date::date as date, COUNT(*) FILTER (WHERE is_checked) as checked
        FROM checklist_log
-       WHERE log_date >= CURRENT_DATE - $1::int AND log_date <= CURRENT_DATE
-       GROUP BY log_date ORDER BY log_date DESC`,
-      [days - 1]
+       WHERE log_date >= $1 AND log_date <= $2
+       GROUP BY log_date`,
+      [startStr, endStr]
     );
     const byDate = {};
     r.rows.forEach(row => { byDate[row.date.toISOString().split('T')[0]] = parseInt(row.checked); });
+
     const result = [];
-    for (let i = 0; i < days; i++) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
+    for (let d = new Date(endDate); d >= startDate; d.setUTCDate(d.getUTCDate() - 1)) {
       const key = d.toISOString().split('T')[0];
       const checked = byDate[key] || 0;
       result.push({ date: key, checked, total, percent: total > 0 ? Math.round((checked / total) * 100) : 0 });
@@ -1481,6 +1573,34 @@ router.post('/guest-change-password', guestAuth, async (req, res) => {
     const hash = await bcrypt.hash(newPassword, 10);
     await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [hash, g.id]);
     res.json({ message: 'Password changed successfully' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/guest-complaint — resident raises an issue directly into the
+// Complaint/Maintenance Register (separate from the general "Message Us"
+// inbox, so it shows up with a trackable Open/In Progress/Resolved status
+// the warden and admin both work from).
+router.post('/guest-complaint', guestAuth, async (req, res) => {
+  const { category, description } = req.body;
+  if (!description || !description.trim()) return res.status(400).json({ error: 'Description is required' });
+  try {
+    const g = req.guest;
+    const room = g.room_id ? await pool.query('SELECT room_number FROM rooms WHERE id=$1', [g.room_id]) : { rows: [{}] };
+    const r = await pool.query(
+      `INSERT INTO complaints(guest_id,guest_name,room_number,category,description,status,raised_by)
+       VALUES($1,$2,$3,$4,$5,'open','guest') RETURNING *`,
+      [g.id, g.name, room.rows[0]?.room_number || null, category || 'other', description.trim()]
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/guest-complaints — resident's own complaint history + status,
+// so they can see whether management has acted on what they raised.
+router.get('/guest-complaints', guestAuth, async (req, res) => {
+  try {
+    const r = await pool.query('SELECT id,category,description,status,resolution_notes,created_at,resolved_at FROM complaints WHERE guest_id=$1 ORDER BY created_at DESC', [req.guest.id]);
+    res.json(r.rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

@@ -82,11 +82,15 @@ const API = {
   getBalanceSheet: (asOf) => apiFetch(`/balance-sheet${asOf?`?asOf=${asOf}`:''}`),
   getChecklist: (date) => apiFetch(`/checklist?date=${date}`),
   toggleChecklistItem: (itemId,date,checked) => apiFetch(`/checklist/${itemId}`, { method:'PUT', body:{date,checked} }),
-  getChecklistSummary: (days) => apiFetch(`/checklist/summary?days=${days||30}`),
+  getChecklistSummary: (opts) => apiFetch(`/checklist/summary?${typeof opts==='object' && opts.month ? 'month='+opts.month : 'days='+((typeof opts==='number'?opts:30))}`),
   getChecklistItems: () => apiFetch('/checklist-items'),
   createChecklistItem: d => apiFetch('/checklist-items', { method:'POST', body:d }),
   updateChecklistItem: (id,d) => apiFetch(`/checklist-items/${id}`, { method:'PUT', body:d }),
-  deleteChecklistItem: id => apiFetch(`/checklist-items/${id}`, { method:'DELETE' })
+  deleteChecklistItem: id => apiFetch(`/checklist-items/${id}`, { method:'DELETE' }),
+  getComplaints: (status) => apiFetch(`/complaints${status && status!=='all' ? '?status='+status : ''}`),
+  createComplaint: d => apiFetch('/complaints', { method:'POST', body:d }),
+  updateComplaint: (id,d) => apiFetch(`/complaints/${id}`, { method:'PUT', body:d }),
+  deleteComplaint: id => apiFetch(`/complaints/${id}`, { method:'DELETE' })
 };
 
 // Export downloads need the auth header, so a plain <a href> won't work —

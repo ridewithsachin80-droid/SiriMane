@@ -2,7 +2,7 @@
 
 // ── INIT ──────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  if (getToken()) { showApp(); navigate('dashboard'); loadInboxCount(); }
+  if (getToken()) { showApp(); navigate('dashboard'); loadInboxCount(); loadComplaintsCount(); }
   else showLogin();
   setupLogin();
   setupNav();
@@ -35,7 +35,7 @@ function setupLogin() {
       const d = await API.login(u, p);
       setToken(d.token);
       localStorage.setItem('sm_user', JSON.stringify(d.user));
-      showApp(); navigate('dashboard'); loadInboxCount();
+      showApp(); navigate('dashboard'); loadInboxCount(); loadComplaintsCount();
     } catch(e) { showAlert(al, e.message||'Login failed'); }
     finally { btn.disabled=false; btn.innerHTML='🔐 Login'; }
   };
@@ -52,11 +52,11 @@ let currentPage = null;
 function navigate(page) {
   currentPage = page;
   document.querySelectorAll('.nav-item[data-page]').forEach(b => b.classList.toggle('active', b.dataset.page===page));
-  const titles = { dashboard:'Dashboard', rooms:'Rooms', guests:'Guests', 'daily-menu':'Daily Menu', 'daily-checklist':'Daily Checklist', payments:'Payments', 'guest-messages':'Guest Messages', inbox:'Inbox', purchases:'Purchases', collections:'Collections', 'rent-due':'Rent Due', reports:'Reports', 'balance-sheet':'Balance Sheet', admin:'Admin' };
+  const titles = { dashboard:'Dashboard', rooms:'Rooms', guests:'Guests', 'daily-menu':'Daily Menu', 'daily-checklist':'Daily Checklist', complaints:'Complaints', payments:'Payments', 'guest-messages':'Guest Messages', inbox:'Inbox', purchases:'Purchases', collections:'Collections', 'rent-due':'Rent Due', reports:'Reports', 'balance-sheet':'Balance Sheet', admin:'Admin' };
   document.getElementById('page-title').textContent = titles[page]||page;
   document.getElementById('topbar-actions').innerHTML = '';
   document.getElementById('sidebar').classList.remove('open');
-  const pages = { dashboard:pgDashboard, rooms:pgRooms, guests:pgGuests, 'daily-menu':pgMenu, 'daily-checklist':pgChecklist, payments:pgPayments, 'guest-messages':pgAnnouncements, inbox:pgInbox, purchases:pgPurchases, collections:pgCollections, 'rent-due':pgRentDue, reports:pgReports, 'balance-sheet':pgBalanceSheet, admin:pgAdmin };
+  const pages = { dashboard:pgDashboard, rooms:pgRooms, guests:pgGuests, 'daily-menu':pgMenu, 'daily-checklist':pgChecklist, complaints:pgComplaints, payments:pgPayments, 'guest-messages':pgAnnouncements, inbox:pgInbox, purchases:pgPurchases, collections:pgCollections, 'rent-due':pgRentDue, reports:pgReports, 'balance-sheet':pgBalanceSheet, admin:pgAdmin };
   if(pages[page]) pages[page]();
 }
 
@@ -66,6 +66,16 @@ async function loadInboxCount() {
     const unread = msgs.filter(m => !m.is_read).length;
     const badge = document.getElementById('inbox-badge');
     if (unread > 0) { badge.textContent = unread; badge.classList.remove('hidden'); }
+    else badge.classList.add('hidden');
+  } catch {}
+}
+
+async function loadComplaintsCount() {
+  try {
+    const list = await API.getComplaints('all');
+    const open = list.filter(c => c.status !== 'resolved').length;
+    const badge = document.getElementById('complaints-badge');
+    if (open > 0) { badge.textContent = open; badge.classList.remove('hidden'); }
     else badge.classList.add('hidden');
   } catch {}
 }
@@ -193,6 +203,13 @@ async function pgDashboard() {
           </div>
           <div style="margin-top:6px;font-size:13px;color:var(--text-muted)">${d.todayChecklist.percent}% complete for today — tap to open</div>
         </div>
+      </div>
+      <div class="card mb-6" style="cursor:pointer" onclick="navigate('complaints')">
+        <div class="card-header">
+          <h3>🛠️ Complaint / Maintenance Register</h3>
+          <span class="badge ${d.openComplaints>0?'badge-red':'badge-green'}">${d.openComplaints} open</span>
+        </div>
+        <div style="padding:0 20px 16px;font-size:13px;color:var(--text-muted)">${d.openComplaints>0?`${d.openComplaints} issue(s) still open — tap to review and update status`:'No open issues right now — tap to view history'}</div>
       </div>
       <div class="card">
         <div class="card-header">
@@ -729,6 +746,7 @@ async function pgChecklist(date) {
                 <input type="checkbox" ${item.is_checked?'checked':''} onchange="toggleChecklistItem(${item.id}, this.checked)" style="margin-top:3px;width:18px;height:18px;flex-shrink:0"/>
                 <span style="flex:1">
                   <span style="${item.is_checked?'text-decoration:line-through;color:var(--text-muted)':''}">${item.time_label && item.time_label!=='—' ? `<strong>${item.time_label}</strong> — `:''}${item.task}</span>
+                  ${/complaint|maintenance register/i.test(item.task) ? ` <button class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:11px" onclick="event.preventDefault();navigate('complaints')">Open Register →</button>` : ''}
                   ${item.is_checked && item.checked_by_username ? `<br><span class="text-muted" style="font-size:12px">✔ ${item.checked_by_username}${item.checked_at?' at '+new Date(item.checked_at).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}):''}</span>` : ''}
                 </span>
               </label>
@@ -745,13 +763,36 @@ async function toggleChecklistItem(itemId, checked) {
   catch(e) { alert(e.message); pgChecklist(checklistCurrentDate); }
 }
 
-async function checklistHistoryModal() {
+function currentYearMonth() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; }
+
+function shiftYearMonth(ym, delta) {
+  let [y,m] = ym.split('-').map(Number);
+  m += delta;
+  if (m < 1) { m = 12; y--; }
+  if (m > 12) { m = 1; y++; }
+  return `${y}-${String(m).padStart(2,'0')}`;
+}
+
+async function checklistHistoryModal(month) {
+  const ym = month || currentYearMonth();
   openModal(`<div class="modal" style="max-width:520px"><div class="modal-header"><h3>📊 Checklist History</h3><button class="modal-close" onclick="closeModal()">×</button></div><div class="modal-body"><div class="loading-center"><div class="spinner"></div></div></div></div>`);
+  await renderChecklistHistory(ym);
+}
+
+async function renderChecklistHistory(ym) {
+  const body = document.querySelector('#modal-container .modal-body');
+  const monthLabel = new Date(ym+'-01T00:00:00').toLocaleDateString('en-IN',{month:'long',year:'numeric'});
+  const isCurrentMonth = ym === currentYearMonth();
   try {
-    const rows = await API.getChecklistSummary(30);
-    document.querySelector('#modal-container .modal-body').innerHTML = `
-      <p class="text-muted" style="margin-bottom:10px;font-size:13px">Last 30 days — completion of the daily warden checklist</p>
-      <div style="max-height:420px;overflow-y:auto">
+    const rows = await API.getChecklistSummary({ month: ym });
+    body.innerHTML = `
+      <div class="flex justify-between items-center mb-3">
+        <button class="btn btn-outline btn-sm" onclick="renderChecklistHistory('${shiftYearMonth(ym,-1)}')">← Prev</button>
+        <strong>${monthLabel}</strong>
+        <button class="btn btn-outline btn-sm" onclick="renderChecklistHistory('${shiftYearMonth(ym,1)}')" ${isCurrentMonth?'disabled':''}>Next →</button>
+      </div>
+      ${rows.length===0 ? '<p class="text-muted" style="text-align:center;padding:20px">No data for this month</p>' : `
+      <div style="max-height:380px;overflow-y:auto">
         <table>
           <thead><tr><th>DATE</th><th>DONE</th><th>%</th></tr></thead>
           <tbody>
@@ -762,8 +803,9 @@ async function checklistHistoryModal() {
             </tr>`).join('')}
           </tbody>
         </table>
-      </div>`;
-  } catch(e) { document.querySelector('#modal-container .modal-body').innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
+      </div>`}
+    `;
+  } catch(e) { body.innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
 }
 
 async function checklistManageModal() {
@@ -771,30 +813,48 @@ async function checklistManageModal() {
   await renderChecklistManage();
 }
 
-async function renderChecklistManage() {
+async function renderChecklistManage(editItem) {
   const body = document.getElementById('cl-manage-body');
   try {
     const items = await API.getChecklistItems();
     const sections = ['Morning','Mid-Day','Evening','Night','Closing'];
+    const isEditing = !!editItem;
     body.innerHTML = `
       <div id="cl-manage-alert" class="alert alert-danger hidden"></div>
-      <div style="max-height:340px;overflow-y:auto;margin-bottom:14px">
+      <div style="max-height:300px;overflow-y:auto;margin-bottom:14px">
         ${items.length===0 ? '<div class="text-muted">No tasks yet</div>' : items.map(i => `
           <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #F1F5F9;gap:8px">
             <span style="font-size:13px"><strong>${i.section}</strong>${i.time_label && i.time_label!=='—' ? ' · '+i.time_label:''} — ${i.task}</span>
-            <button class="btn btn-outline btn-sm" onclick="removeChecklistItem(${i.id})">Remove</button>
+            <span style="flex-shrink:0;display:flex;gap:6px">
+              <button class="btn btn-outline btn-sm" onclick='renderChecklistManage(${JSON.stringify(i).replace(/'/g,"&#39;")})'>Edit</button>
+              <button class="btn btn-outline btn-sm" onclick="removeChecklistItem(${i.id})">Remove</button>
+            </span>
           </div>`).join('')}
       </div>
+      <h4 style="margin-bottom:8px;font-size:13px;color:var(--text-muted)">${isEditing ? 'Edit Task' : 'Add New Task'}</h4>
       <div class="form-row">
         <div class="form-group"><label>Section</label>
-          <select id="cl-new-section">${sections.map(s=>`<option value="${s}">${s}</option>`).join('')}</select>
+          <select id="cl-new-section">${sections.map(s=>`<option value="${s}" ${isEditing&&editItem.section===s?'selected':''}>${s}</option>`).join('')}</select>
         </div>
-        <div class="form-group"><label>Time (optional)</label><input type="text" id="cl-new-time" placeholder="e.g. 7:00 AM"/></div>
+        <div class="form-group"><label>Time (optional)</label><input type="text" id="cl-new-time" placeholder="e.g. 7:00 AM" value="${isEditing && editItem.time_label!=='—' ? editItem.time_label : ''}"/></div>
       </div>
-      <div class="form-group"><label>Task</label><input type="text" id="cl-new-task" placeholder="e.g. Check water tank level"/></div>
-      <button class="btn btn-primary" onclick="addChecklistItem()">+ Add Task</button>
+      <div class="form-group"><label>Task</label><input type="text" id="cl-new-task" placeholder="e.g. Check water tank level" value="${isEditing ? editItem.task.replace(/"/g,'&quot;') : ''}"/></div>
+      <div class="flex gap-2">
+        <button class="btn btn-primary" onclick="${isEditing ? `saveEditedChecklistItem(${editItem.id})` : 'addChecklistItem()'}">${isEditing ? 'Save Changes' : '+ Add Task'}</button>
+        ${isEditing ? `<button class="btn btn-outline" onclick="renderChecklistManage()">Cancel</button>` : ''}
+      </div>
     `;
   } catch(e) { body.innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
+}
+
+async function saveEditedChecklistItem(id) {
+  const al = document.getElementById('cl-manage-alert');
+  const task = document.getElementById('cl-new-task').value.trim();
+  if (!task) { showAlert(al, 'Enter a task'); return; }
+  try {
+    await API.updateChecklistItem(id, { section: document.getElementById('cl-new-section').value, time_label: document.getElementById('cl-new-time').value.trim() || '—', task });
+    await renderChecklistManage();
+  } catch(e) { showAlert(al, e.message); }
 }
 
 async function addChecklistItem() {
@@ -810,6 +870,119 @@ async function addChecklistItem() {
 async function removeChecklistItem(id) {
   if (!confirm('Remove this task from the daily checklist?')) return;
   try { await API.deleteChecklistItem(id); await renderChecklistManage(); }
+  catch(e) { alert(e.message); }
+}
+
+// ── COMPLAINT / MAINTENANCE REGISTER ──────────────
+let complaintsCurrentFilter = 'all';
+const COMPLAINT_CATEGORIES = ['Electrical','Water','Wifi/Internet','Cleaning','Furniture','Security','Food/Mess','Other'];
+
+async function pgComplaints(filter) {
+  loading();
+  const f = filter || complaintsCurrentFilter;
+  complaintsCurrentFilter = f;
+  document.getElementById('topbar-actions').innerHTML = `<button class="btn btn-primary btn-sm" onclick="complaintModal()">+ Log Issue</button>`;
+  try {
+    const list = await API.getComplaints(f);
+    const tabs = [['all','All'],['open','Open'],['in_progress','In Progress'],['resolved','Resolved']];
+    setContent(`
+      <div class="page-header flex justify-between items-center mb-5">
+        <div><h1>Complaint / Maintenance Register</h1><p>Issues raised by guests or logged on rounds — kept in sync between warden and admin</p></div>
+        <button class="btn btn-primary btn-sm" onclick="complaintModal()">+ Log Issue</button>
+      </div>
+      <div class="flex gap-2 mb-4" style="flex-wrap:wrap">
+        ${tabs.map(([val,label]) => `<button class="btn ${f===val?'btn-primary':'btn-outline'} btn-sm" onclick="pgComplaints('${val}')">${label}</button>`).join('')}
+      </div>
+      <div class="card">
+        ${list.length===0 ? '<div style="text-align:center;padding:48px;color:var(--text-muted)">🛠️<br><br>No issues here.</div>' : `
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>DATE</th><th>CATEGORY</th><th>ISSUE</th><th>FROM</th><th>STATUS</th><th>ACTIONS</th></tr></thead>
+            <tbody>
+              ${list.map(c => `
+                <tr>
+                  <td>${fmtDate(c.created_at)}</td>
+                  <td>${c.category}</td>
+                  <td style="max-width:260px">${c.description}${c.resolution_notes?`<br><span class="text-muted" style="font-size:12px">✔ ${c.resolution_notes}</span>`:''}</td>
+                  <td>${c.guest_name || (c.raised_by==='guest'?'Guest':'Staff')}${c.room_number?' · Room '+c.room_number:''}</td>
+                  <td><span class="badge ${c.status==='resolved'?'badge-green':c.status==='in_progress'?'badge-blue':'badge-red'}">${c.status.replace('_',' ')}</span></td>
+                  <td>
+                    ${c.status!=='resolved' ? `<button class="btn btn-outline btn-sm" onclick="complaintStatusModal(${c.id},'${c.status}')">Update</button>` : ''}
+                    ${isAdmin() ? `<button class="btn btn-outline btn-sm" onclick="deleteComplaint(${c.id})">Delete</button>` : ''}
+                  </td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`}
+      </div>
+    `);
+  } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+}
+
+function complaintModal() {
+  openModal(`
+    <div class="modal">
+      <div class="modal-header"><h3>🛠️ Log an Issue</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+      <div class="modal-body">
+        <div id="cp-alert" class="alert alert-danger hidden"></div>
+        <div class="form-row">
+          <div class="form-group"><label>Category</label>
+            <select id="cp-category">${COMPLAINT_CATEGORIES.map(c=>`<option value="${c}">${c}</option>`).join('')}</select>
+          </div>
+          <div class="form-group"><label>Room / Guest (optional)</label><input id="cp-room" placeholder="e.g. Room 12 or guest name"/></div>
+        </div>
+        <div class="form-group"><label>Description *</label><textarea id="cp-desc" rows="3" placeholder="What's the issue?"></textarea></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveComplaint()">Save</button>
+      </div>
+    </div>`);
+}
+
+async function saveComplaint() {
+  const al = document.getElementById('cp-alert');
+  const description = document.getElementById('cp-desc').value.trim();
+  if (!description) { showAlert(al, 'Enter a description'); return; }
+  try {
+    await API.createComplaint({ category: document.getElementById('cp-category').value, guest_name: document.getElementById('cp-room').value.trim() || null, description });
+    closeModal(); pgComplaints(complaintsCurrentFilter); loadComplaintsCount();
+  } catch(e) { showAlert(al, e.message); }
+}
+
+function complaintStatusModal(id, currentStatus) {
+  openModal(`
+    <div class="modal">
+      <div class="modal-header"><h3>Update Status</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+      <div class="modal-body">
+        <div id="cps-alert" class="alert alert-danger hidden"></div>
+        <div class="form-group"><label>Status</label>
+          <select id="cps-status">
+            <option value="open" ${currentStatus==='open'?'selected':''}>Open</option>
+            <option value="in_progress" ${currentStatus==='in_progress'?'selected':''}>In Progress</option>
+            <option value="resolved" ${currentStatus==='resolved'?'selected':''}>Resolved</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Resolution Notes (optional)</label><textarea id="cps-notes" rows="2" placeholder="What was done?"></textarea></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveComplaintStatus(${id})">Save</button>
+      </div>
+    </div>`);
+}
+
+async function saveComplaintStatus(id) {
+  const al = document.getElementById('cps-alert');
+  try {
+    await API.updateComplaint(id, { status: document.getElementById('cps-status').value, resolution_notes: document.getElementById('cps-notes').value.trim() || null });
+    closeModal(); pgComplaints(complaintsCurrentFilter); loadComplaintsCount();
+  } catch(e) { showAlert(al, e.message); }
+}
+
+async function deleteComplaint(id) {
+  if (!confirm('Delete this complaint record?')) return;
+  try { await API.deleteComplaint(id); pgComplaints(complaintsCurrentFilter); loadComplaintsCount(); }
   catch(e) { alert(e.message); }
 }
 

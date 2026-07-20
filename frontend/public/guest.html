@@ -156,6 +156,7 @@
       <button class="tab" onclick="showTab('details')">My Details</button>
       <button class="tab" onclick="showTab('menu')">Daily Menu</button>
       <button class="tab" onclick="showTab('notices')">Notices</button>
+      <button class="tab" onclick="showTab('complaint')">Report Issue</button>
       <button class="tab" onclick="showTab('message')">Message Us</button>
       <button class="tab" onclick="showTab('settings')">Settings</button>
     </div>
@@ -212,6 +213,36 @@
       <div id="p-notices">
         <div class="card">
           <div class="card-b" style="text-align:center;color:#94A3B8;padding:32px">📢 No notices at the moment</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- REPORT ISSUE TAB -->
+    <div id="tab-complaint" class="hidden">
+      <div class="card">
+        <div class="card-h">🛠️ Report a Maintenance / Other Issue</div>
+        <div class="card-b">
+          <div id="cpg-alert" class="hidden"></div>
+          <div class="form-group">
+            <label>Category</label>
+            <select id="cpg-category">
+              <option>Electrical</option><option>Water</option><option>Wifi/Internet</option>
+              <option>Cleaning</option><option>Furniture</option><option>Security</option>
+              <option>Food/Mess</option><option>Other</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Describe the issue *</label>
+            <textarea id="cpg-desc" rows="4" placeholder="e.g. Tube light not working in corridor near room 5"></textarea>
+          </div>
+          <button class="btn btn-amber" id="cpg-btn" onclick="sendComplaint()">🛠️ Submit Issue</button>
+          <p style="font-size:11px;color:#94A3B8;margin-top:10px;text-align:center">This goes straight into the warden's Complaint Register so it doesn't get missed</p>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-h">📋 My Reported Issues</div>
+        <div class="card-b" id="cpg-history">
+          <p style="text-align:center;color:#94A3B8;font-size:13px">No issues reported yet</p>
         </div>
       </div>
     </div>
@@ -479,6 +510,53 @@ function renderNotices(notices) {
       </div>`).join('');
 }
 
+// ── REPORT ISSUE ───────────────────────────────────
+async function sendComplaint() {
+  const al = document.getElementById('cpg-alert');
+  const description = document.getElementById('cpg-desc').value.trim();
+  if (!description) { showAl(al, 'Please describe the issue', 'danger'); return; }
+
+  const btn = document.getElementById('cpg-btn');
+  btn.disabled = true; btn.textContent = 'Submitting...';
+  try {
+    const res = await fetch('/api/guest-complaint', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + guestToken },
+      body: JSON.stringify({ category: document.getElementById('cpg-category').value, description })
+    });
+    const data = await res.json();
+    if (!res.ok) { showAl(al, data.error || 'Failed to submit', 'danger'); return; }
+    document.getElementById('cpg-desc').value = '';
+    showAl(al, '✅ Issue reported! The warden has been notified.', 'success');
+    loadComplaintHistory();
+  } catch(e) {
+    showAl(al, 'Failed to send. Try again.', 'danger');
+  } finally {
+    btn.disabled = false; btn.textContent = '🛠️ Submit Issue';
+  }
+}
+
+async function loadComplaintHistory() {
+  const el = document.getElementById('cpg-history');
+  try {
+    const res = await fetch('/api/guest-complaints', { headers: { 'Authorization': 'Bearer ' + guestToken } });
+    const list = await res.json();
+    if (!res.ok || !list.length) { el.innerHTML = '<p style="text-align:center;color:#94A3B8;font-size:13px">No issues reported yet</p>'; return; }
+    const statusColor = { open: '#EF4444', in_progress: '#4F46E5', resolved: '#16A34A' };
+    const statusLabel = { open: 'Open', in_progress: 'In Progress', resolved: 'Resolved' };
+    el.innerHTML = list.map(c => `
+      <div class="info-row" style="display:block;padding:10px 0">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <strong style="font-size:13px">${c.category}</strong>
+          <span style="font-size:11px;font-weight:700;color:${statusColor[c.status]||'#64748B'}">${statusLabel[c.status]||c.status}</span>
+        </div>
+        <div style="font-size:12px;color:#475569;margin-top:2px">${c.description}</div>
+        ${c.resolution_notes ? `<div style="font-size:11px;color:#16A34A;margin-top:2px">✔ ${c.resolution_notes}</div>` : ''}
+        <div style="font-size:10px;color:#94A3B8;margin-top:2px">${fmtDate(c.created_at)}</div>
+      </div>`).join('');
+  } catch(e) { /* silent */ }
+}
+
 // ── SEND MESSAGE ──────────────────────────────────
 async function sendMessage() {
   const al = document.getElementById('msg-alert');
@@ -540,13 +618,14 @@ async function changePassword() {
 
 // ── TABS ──────────────────────────────────────────
 function showTab(tab) {
-  ['pay','details','menu','notices','message','settings'].forEach(t => {
+  ['pay','details','menu','notices','complaint','message','settings'].forEach(t => {
     document.getElementById('tab-'+t).classList.add('hidden');
   });
   document.getElementById('tab-'+tab).classList.remove('hidden');
   document.querySelectorAll('.tab').forEach((b,i) => {
-    b.classList.toggle('active', ['pay','details','menu','notices','message','settings'][i]===tab);
+    b.classList.toggle('active', ['pay','details','menu','notices','complaint','message','settings'][i]===tab);
   });
+  if (tab === 'complaint') loadComplaintHistory();
 }
 
 // ── HELPERS ───────────────────────────────────────
