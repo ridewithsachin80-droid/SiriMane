@@ -374,7 +374,8 @@ router.put('/guests/:id/approve-rent', auth, requireAdmin, async (req, res) => {
 
 router.delete('/guests/:id', auth, requireAdmin, async (req, res) => {
   try {
-    await pool.query('UPDATE guests SET is_active=false,leave_date=CURRENT_DATE WHERE id=$1', [req.params.id]);
+    const leaveDate = req.body?.leave_date || new Date().toISOString().split('T')[0];
+    await pool.query('UPDATE guests SET is_active=false,leave_date=$2 WHERE id=$1', [req.params.id, leaveDate]);
     res.json({ message: 'Checked out' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -384,12 +385,22 @@ router.delete('/guests/:id', auth, requireAdmin, async (req, res) => {
 // in one step so the two can never get out of sync. Admin only, since it's
 // the final sign-off on a financial transaction.
 router.post('/guests/:id/checkout', auth, requireAdmin, async (req, res) => {
-  const { deductions, deduction_notes, refund_mode } = req.body;
+  const { deductions, deduction_notes, refund_mode, leave_date } = req.body;
   try {
     const g = await pool.query(`SELECT g.*,r.room_number FROM guests g LEFT JOIN rooms r ON g.room_id=r.id WHERE g.id=$1`, [req.params.id]);
     const guest = g.rows[0];
     if (!guest) return res.status(404).json({ error: 'Guest not found' });
     if (!guest.is_active) return res.status(400).json({ error: 'Guest is already checked out' });
+
+    // Default to today if not given; allow backdating (e.g. logging a
+    // checkout that actually happened a few days ago) but not future-dating
+    // beyond today.
+    const checkoutDate = leave_date || new Date().toISOString().split('T')[0];
+    const todayStr = new Date().toISOString().split('T')[0];
+    if (checkoutDate > todayStr) return res.status(400).json({ error: 'Checkout date cannot be in the future' });
+    if (guest.join_date && checkoutDate < new Date(guest.join_date).toISOString().split('T')[0]) {
+      return res.status(400).json({ error: 'Checkout date cannot be before the check-in date' });
+    }
 
     const deductionAmount = parseFloat(deductions) || 0;
     const depositAmount = parseFloat(guest.deposit_amount) || 0;
@@ -400,8 +411,8 @@ router.post('/guests/:id/checkout', auth, requireAdmin, async (req, res) => {
        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
       [guest.id, guest.name, guest.room_number, depositAmount, deductionAmount, deduction_notes || null, refundAmount, refund_mode || 'cash', req.user.id]
     );
-    await pool.query('UPDATE guests SET is_active=false,leave_date=CURRENT_DATE WHERE id=$1', [guest.id]);
-    await logActivity(req, 'guest_checkout', `${guest.name} (room ${guest.room_number || '—'}) — refund ₹${refundAmount}`);
+    await pool.query('UPDATE guests SET is_active=false,leave_date=$2 WHERE id=$1', [guest.id, checkoutDate]);
+    await logActivity(req, 'guest_checkout', `${guest.name} (room ${guest.room_number || '—'}) — refund ₹${refundAmount}, effective ${checkoutDate}`);
 
     res.status(201).json(refund.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }

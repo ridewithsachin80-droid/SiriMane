@@ -320,16 +320,27 @@ async function delRoom(id,num) {
 }
 
 // ── GUESTS ────────────────────────────────────────
-async function pgGuests() {
+let guestsCurrentFilter = 'active';
+
+async function pgGuests(filter) {
   loading();
+  const f = filter || guestsCurrentFilter;
+  guestsCurrentFilter = f;
   document.getElementById('topbar-actions').innerHTML = `<button class="btn btn-primary btn-sm" onclick="guestModal()">+ Add Guest</button>`;
   try {
-    const list = await API.getGuests();
+    const list = await API.getGuests('?active=all');
+    const filtered = f === 'active' ? list.filter(g=>g.is_active) : f === 'left' ? list.filter(g=>!g.is_active) : list;
     const hasVariance = (g) => g.room_id && g.room_rent !== null && g.room_rent !== undefined && parseFloat(g.monthly_rent) !== parseFloat(g.room_rent);
     const pendingCount = list.filter(g => hasVariance(g) && !g.rent_variance_approved).length;
+    const leftCount = list.filter(g=>!g.is_active).length;
     setContent(`
       <div class="page-header"><h1>Guests</h1><p>Register and manage PG residents</p></div>
       ${pendingCount>0?`<div class="alert" style="background:#FFFBEB;border:1px solid var(--amber);color:#92400E;margin-bottom:16px">⏳ ${pendingCount} guest${pendingCount>1?'s have':' has'} a rent that differs from their room's standard rate and ${pendingCount>1?'need':'needs'} your approval — look for the amber "Variance" badge below.</div>`:''}
+      <div class="flex gap-2 mb-4" style="flex-wrap:wrap">
+        <button class="btn ${f==='active'?'btn-primary':'btn-outline'} btn-sm" onclick="pgGuests('active')">Active</button>
+        <button class="btn ${f==='left'?'btn-primary':'btn-outline'} btn-sm" onclick="pgGuests('left')">Left (${leftCount})</button>
+        <button class="btn ${f==='all'?'btn-primary':'btn-outline'} btn-sm" onclick="pgGuests('all')">All</button>
+      </div>
       <div class="card">
         <div class="card-header">
           <h3>All Guests</h3>
@@ -342,19 +353,19 @@ async function pgGuests() {
           <table>
             <thead><tr><th>NAME</th><th>PHONE</th><th>ROOM / BERTH</th><th>CHECK-IN</th><th>RENT</th><th>DEPOSIT</th><th>STATUS</th><th>DOCS</th><th>ACTIONS</th></tr></thead>
             <tbody id="guests-tb">
-              ${list.length===0
-                ? `<tr class="empty-row"><td colspan="9">No guests yet. Click Add Guest to register.</td></tr>`
-                : list.map(g=>{
+              ${filtered.length===0
+                ? `<tr class="empty-row"><td colspan="9">${f==='left'?'No guests have checked out yet.':'No guests yet. Click Add Guest to register.'}</td></tr>`
+                : filtered.map(g=>{
                   const variance = hasVariance(g);
                   const needsApproval = variance && !g.rent_variance_approved;
                   return `
-                <tr data-search="${g.name.toLowerCase()} ${g.phone||''}">
-                  <td><strong>${g.name}</strong><br><span class="text-muted">${g.email||''}</span></td>
-                  <td>${g.phone||'—'}</td>
-                  <td>${g.room_number?'Room '+g.room_number+(g.bed_number?' / Bed '+g.bed_number:''):'-'}</td>
-                  <td>${fmtDate(g.join_date)}</td>
-                  <td>${fmt(g.monthly_rent)}/mo ${variance?`<span class="badge ${needsApproval?'badge-amber':'badge-blue'}" title="Room rate is ${fmt(g.room_rent)}">${needsApproval?'Pending Approval':'Variance'}</span>`:''}</td>
-                  <td>${fmt(g.deposit_amount)}</td>
+                <tr data-search="${g.name.toLowerCase()} ${g.phone||''}" style="${!g.is_active?'opacity:0.55':''}">
+                  <td><strong style="${!g.is_active?'text-decoration:line-through':''}">${g.name}</strong><br><span class="text-muted">${g.email||''}</span></td>
+                  <td style="${!g.is_active?'text-decoration:line-through':''}">${g.phone||'—'}</td>
+                  <td style="${!g.is_active?'text-decoration:line-through':''}">${g.room_number?'Room '+g.room_number+(g.bed_number?' / Bed '+g.bed_number:''):'-'}</td>
+                  <td>${fmtDate(g.join_date)}${!g.is_active && g.leave_date ? `<br><span class="text-muted" style="font-size:11px">→ ${fmtDate(g.leave_date)}</span>` : ''}</td>
+                  <td style="${!g.is_active?'text-decoration:line-through':''}">${fmt(g.monthly_rent)}/mo ${variance?`<span class="badge ${needsApproval?'badge-amber':'badge-blue'}" title="Room rate is ${fmt(g.room_rent)}">${needsApproval?'Pending Approval':'Variance'}</span>`:''}</td>
+                  <td style="${!g.is_active?'text-decoration:line-through':''}">${fmt(g.deposit_amount)}</td>
                   <td><span class="badge ${g.is_active?'badge-green':'badge-red'}">${g.is_active?'Active':'Left'}</span></td>
                   <td><span class="badge badge-gray">${g.id_proof_type||'—'}</span></td>
                   <td>
@@ -585,6 +596,7 @@ async function checkoutModal(id) {
   let g;
   try { g = await API.getGuest(id); } catch(e) { alert(e.message); return; }
   const deposit = parseFloat(g.deposit_amount) || 0;
+  const minDate = g.join_date ? new Date(g.join_date).toISOString().split('T')[0] : '';
   openModal(`
     <div class="modal">
       <div class="modal-header"><h3>🚪 Checkout ${g.name}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
@@ -593,6 +605,9 @@ async function checkoutModal(id) {
         <div style="background:#F8FAFC;padding:10px 12px;border-radius:8px;border:1px solid var(--border);margin-bottom:14px">
           <div style="font-size:11px;color:var(--text-muted);font-weight:600">DEPOSIT PAID</div>
           <div style="font-size:18px;font-weight:600">${fmt(deposit)}</div>
+        </div>
+        <div class="form-group"><label>Checkout Date</label><input id="co-date" type="date" value="${nowDate()}" max="${nowDate()}" ${minDate?`min="${minDate}"`:''}/>
+          <p style="font-size:11px;color:var(--text-muted);margin-top:4px">Backdate this if the guest actually moved out earlier and it wasn't logged then.</p>
         </div>
         <div class="form-group"><label>Deductions (₹)</label><input id="co-deduct" type="number" placeholder="0" value="0" oninput="updateRefundPreview(${deposit})"/></div>
         <div class="form-group"><label>Deduction Reason</label><textarea id="co-notes" rows="2" placeholder="e.g. room damage, unpaid dues, cleaning charges"></textarea></div>
@@ -623,11 +638,13 @@ function updateRefundPreview(deposit) {
 async function submitCheckout(id) {
   const al = document.getElementById('co-alert');
   const d = {
+    leave_date: document.getElementById('co-date').value,
     deductions: document.getElementById('co-deduct').value || 0,
     deduction_notes: document.getElementById('co-notes').value,
     refund_mode: document.getElementById('co-mode').value
   };
-  if (!confirm('This will check the guest out and finalize the deposit refund. Continue?')) return;
+  if (!d.leave_date) { showAlert(al, 'Select a checkout date'); return; }
+  if (!confirm(`This will check the guest out effective ${fmtDate(d.leave_date)} and finalize the deposit refund. Continue?`)) return;
   try {
     await API.checkoutGuestWithRefund(id, d);
     closeModal();
