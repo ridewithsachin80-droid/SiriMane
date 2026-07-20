@@ -170,7 +170,7 @@ router.get('/auth/me', auth, (req, res) => res.json({ user: req.user }));
 // ── DASHBOARD ────────────────────────────────────
 router.get('/dashboard', auth, async (req, res) => {
   try {
-    const [guests, rooms, beds, income, expenses, recentGuests, recentPayments, checklistTotal, checklistToday, openComplaints] = await Promise.all([
+    const [guests, rooms, beds, income, expenses, recentGuests, recentPayments, checklistTotal, checklistToday, openComplaints, pendingVariance] = await Promise.all([
       pool.query('SELECT COUNT(*) FROM guests WHERE is_active=true'),
       pool.query(`SELECT COUNT(*) as total_rooms, COALESCE(SUM(total_beds),0) as total_beds FROM rooms WHERE is_active=true`),
       pool.query(`SELECT COALESCE(SUM(r.total_beds),0) - COUNT(g.id) as available FROM rooms r LEFT JOIN guests g ON r.id=g.room_id AND g.is_active=true WHERE r.is_active=true`),
@@ -180,7 +180,11 @@ router.get('/dashboard', auth, async (req, res) => {
       pool.query(`SELECT c.*,g.name as guest_name FROM collections c LEFT JOIN guests g ON c.guest_id=g.id WHERE c.is_deleted=false AND c.status='confirmed' ORDER BY c.collection_date DESC LIMIT 5`),
       pool.query('SELECT COUNT(*) FROM checklist_items WHERE is_active=true'),
       pool.query(`SELECT COUNT(*) FILTER (WHERE is_checked) as checked FROM checklist_log WHERE log_date=CURRENT_DATE`),
-      pool.query(`SELECT COUNT(*) FROM complaints WHERE status != 'resolved'`)
+      pool.query(`SELECT COUNT(*) FROM complaints WHERE status != 'resolved'`),
+      pool.query(`SELECT g.id,g.name,g.monthly_rent,r.room_number,r.monthly_rent as room_rent
+                   FROM guests g JOIN rooms r ON g.room_id=r.id
+                   WHERE g.is_active=true AND g.rent_variance_approved=false AND g.monthly_rent != r.monthly_rent
+                   ORDER BY g.name`)
     ]);
     const totalBeds = parseInt(rooms.rows[0].total_beds) || 0;
     const availBeds = parseInt(beds.rows[0].available) || 0;
@@ -196,7 +200,8 @@ router.get('/dashboard', auth, async (req, res) => {
       monthlyIncome: inc, monthlyExpenses: exp, netProfit: inc - exp,
       recentGuests: recentGuests.rows, recentPayments: recentPayments.rows,
       todayChecklist: { checked: checklistChecked, total: checklistItemTotal, percent: checklistItemTotal > 0 ? Math.round((checklistChecked / checklistItemTotal) * 100) : 0 },
-      openComplaints: parseInt(openComplaints.rows[0].count) || 0
+      openComplaints: parseInt(openComplaints.rows[0].count) || 0,
+      pendingVariance: pendingVariance.rows
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

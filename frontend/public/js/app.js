@@ -192,6 +192,20 @@ async function pgDashboard() {
           <div class="s-sub">This month</div>
         </div>
       </div>
+      ${d.pendingVariance.length>0 ? `
+      <div class="card mb-6">
+        <div class="card-header">
+          <h3>⏳ Rent Approvals Pending</h3>
+          <span class="badge badge-amber">${d.pendingVariance.length}</span>
+        </div>
+        <div style="padding:4px 20px 16px">
+          ${d.pendingVariance.map(g => `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #F1F5F9">
+              <span style="font-size:13px"><strong>${g.name}</strong>${g.room_number?' · Room '+g.room_number:''} — charging ${fmt(g.monthly_rent)}/mo (room rate ${fmt(g.room_rent)}/mo)</span>
+              <button class="btn btn-success btn-sm" onclick="approveRentVariance(${g.id}, pgDashboard)">Approve</button>
+            </div>`).join('')}
+        </div>
+      </div>` : ''}
       <div class="card mb-6" style="cursor:pointer" onclick="navigate('daily-checklist')">
         <div class="card-header">
           <h3>✅ Today's Warden Checklist</h3>
@@ -384,9 +398,9 @@ async function pgGuests(filter) {
   } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
 }
 
-async function approveRentVariance(id) {
+async function approveRentVariance(id, refresh) {
   if (!confirm('Approve this rent rate even though it differs from the room\'s standard rate?')) return;
-  try { await API.approveRentVariance(id); pgGuests(); } catch(e) { alert(e.message); }
+  try { await API.approveRentVariance(id); (refresh || pgGuests)(); } catch(e) { alert(e.message); }
 }
 
 function filterTable(q, tbId) {
