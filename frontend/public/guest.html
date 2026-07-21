@@ -473,8 +473,27 @@ function renderDetails(g) {
           <div style="color:#64748B;font-size:11px">${fmtDate(p.collection_date)} · ${p.payment_mode}</div>
           ${p.collection_month ? `<div style="color:#94A3B8;font-size:11px">${p.collection_month}</div>` : ''}
         </div>
-        <span class="text-green">${fmt(p.amount)}</span>
+        <div style="text-align:right">
+          <div class="text-green">${fmt(p.amount)}</div>
+          ${(!p.status || p.status==='confirmed') ? `<button onclick="downloadGuestReceipt(${p.id})" style="margin-top:4px;background:none;border:none;color:#7B52E8;font-size:11px;cursor:pointer;padding:0">🧾 Receipt</button>` : ''}
+        </div>
       </div>`).join('');
+}
+
+async function downloadGuestReceipt(id) {
+  try {
+    const res = await fetch(`/api/guest-receipt/${id}/pdf`, { headers: { 'Authorization': 'Bearer ' + guestToken } });
+    if (!res.ok) { alert('Could not download receipt.'); return; }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `receipt-SM-${String(id).padStart(5,'0')}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch(e) { alert('Could not download receipt.'); }
 }
 
 // ── RENDER MENU ───────────────────────────────────

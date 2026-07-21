@@ -260,17 +260,23 @@ async function pgRooms() {
     setContent(`
       <div class="page-header"><h1>Rooms</h1><p>Manage rooms including bunk beds</p></div>
       <div class="card">
-        <div class="card-header"><h3>All Rooms</h3><button class="btn btn-primary btn-sm" onclick="roomModal()">+ Add Room</button></div>
+        <div class="card-header">
+          <h3>All Rooms</h3>
+          <div class="flex gap-2">
+            <input type="text" placeholder="🔍 Search room, floor, type..." style="width:200px;margin:0" oninput="filterTable(this.value,'rooms-tb')" />
+            <button class="btn btn-primary btn-sm" onclick="roomModal()">+ Add Room</button>
+          </div>
+        </div>
         <div class="table-wrap">
           <table>
             <thead><tr><th>ROOM NO.</th><th>FLOOR</th><th>TYPE</th><th>CAPACITY</th><th>OCCUPIED</th><th>RENT</th><th>STATUS</th><th>ACTIONS</th></tr></thead>
-            <tbody>
+            <tbody id="rooms-tb">
               ${list.length===0
                 ? `<tr class="empty-row"><td colspan="8">No rooms yet. Click Add Room to get started.</td></tr>`
                 : list.map(r=>{
                   const occ = parseInt(r.occupied_beds)||0;
                   const full = occ >= r.total_beds;
-                  return `<tr>
+                  return `<tr data-search="${r.room_number.toLowerCase()} floor ${r.floor} ${r.room_type.toLowerCase()}">
                     <td><strong>${r.room_number}</strong></td>
                     <td>Floor ${r.floor}</td>
                     <td style="text-transform:capitalize">${r.room_type}</td>
@@ -404,9 +410,9 @@ async function approveRentVariance(id, refresh) {
   try { await API.approveRentVariance(id); (refresh || pgGuests)(); } catch(e) { alert(e.message); }
 }
 
-function filterTable(q, tbId) {
-  document.querySelectorAll(`#${tbId} tr[data-search]`).forEach(tr => {
-    tr.style.display = tr.dataset.search.includes(q.toLowerCase()) ? '' : 'none';
+function filterTable(q, containerId) {
+  document.querySelectorAll(`#${containerId} [data-search]`).forEach(el => {
+    el.style.display = el.dataset.search.includes(q.toLowerCase()) ? '' : 'none';
   });
 }
 
@@ -982,17 +988,20 @@ async function pgComplaints(filter) {
         <div><h1>Complaint / Maintenance Register</h1><p>Issues raised by guests or logged on rounds — kept in sync between warden and admin</p></div>
         <button class="btn btn-primary btn-sm" onclick="complaintModal()">+ Log Issue</button>
       </div>
-      <div class="flex gap-2 mb-4" style="flex-wrap:wrap">
-        ${tabs.map(([val,label]) => `<button class="btn ${f===val?'btn-primary':'btn-outline'} btn-sm" onclick="pgComplaints('${val}')">${label}</button>`).join('')}
+      <div class="flex gap-2 mb-4" style="flex-wrap:wrap;justify-content:space-between">
+        <div class="flex gap-2" style="flex-wrap:wrap">
+          ${tabs.map(([val,label]) => `<button class="btn ${f===val?'btn-primary':'btn-outline'} btn-sm" onclick="pgComplaints('${val}')">${label}</button>`).join('')}
+        </div>
+        <input type="text" placeholder="🔍 Search issue, category, guest..." style="width:220px;margin:0" oninput="filterTable(this.value,'complaints-tb')" />
       </div>
       <div class="card">
         ${list.length===0 ? '<div style="text-align:center;padding:48px;color:var(--text-muted)">🛠️<br><br>No issues here.</div>' : `
         <div class="table-wrap">
           <table>
             <thead><tr><th>DATE</th><th>CATEGORY</th><th>ISSUE</th><th>FROM</th><th>STATUS</th><th>ACTIONS</th></tr></thead>
-            <tbody>
+            <tbody id="complaints-tb">
               ${list.map(c => `
-                <tr>
+                <tr data-search="${c.category.toLowerCase()} ${c.description.toLowerCase()} ${(c.guest_name||'').toLowerCase()} ${(c.room_number||'').toLowerCase()}">
                   <td>${fmtDate(c.created_at)}</td>
                   <td>${c.category}</td>
                   <td style="max-width:260px">${c.description}${c.resolution_notes?`<br><span class="text-muted" style="font-size:12px">✔ ${c.resolution_notes}</span>`:''}</td>
@@ -1104,22 +1113,30 @@ async function pgPayments(month, year) {
       <div class="card">
         <div class="card-header">
           <h3>Payment Records — ${fmt(total)} total</h3>
-          <button class="btn btn-primary btn-sm" onclick="collectionModal()">+ Record Payment</button>
+          <div class="flex gap-2">
+            <input type="text" placeholder="🔍 Search guest..." style="width:200px;margin:0" oninput="filterTable(this.value,'payments-tb')" />
+            <button class="btn btn-primary btn-sm" onclick="collectionModal()">+ Record Payment</button>
+          </div>
         </div>
         <div class="table-wrap">
           <table>
             <thead><tr><th>GUEST</th><th>MONTH</th><th>AMOUNT</th><th>DATE</th><th>MODE</th><th>STATUS</th><th>ACTIONS</th></tr></thead>
-            <tbody>
+            <tbody id="payments-tb">
               ${list.length===0
                 ? `<tr class="empty-row"><td colspan="7">No payments for this month.</td></tr>`
-                : list.map(c=>`<tr>
+                : list.map(c=>`<tr data-search="${(c.guest_name||'').toLowerCase()}">
                   <td><strong>${c.guest_name||c.guest_name||'—'}</strong></td>
                   <td>${c.collection_month||fmtMonth(c.collection_date)}</td>
                   <td class="text-green fw-600">${fmt(c.amount)}</td>
                   <td>${fmtDate(c.collection_date)}</td>
                   <td><span class="badge badge-blue">${c.payment_mode}</span></td>
                   <td><span class="badge ${c.status&&c.status.startsWith('pending')?'badge-amber':'badge-green'}">${c.status==='pending_verification'?'Pending Verification':c.status==='pending_approval'?'Pending Approval':'Received'}</span></td>
-                  <td>${isAdmin()?`<button class="btn btn-danger btn-sm btn-icon" onclick="delCollectionFromPayments(${c.id})">✕</button>`:'—'}</td>
+                  <td>
+                    <div class="flex gap-2">
+                      <button class="btn btn-outline btn-sm" onclick="downloadReceipt(${c.id})" title="Download receipt">🧾</button>
+                      ${isAdmin()?`<button class="btn btn-danger btn-sm btn-icon" onclick="delCollectionFromPayments(${c.id})">✕</button>`:''}
+                    </div>
+                  </td>
                 </tr>`).join('')}
             </tbody>
           </table>
@@ -1147,12 +1164,18 @@ async function pgAnnouncements() {
     setContent(`
       <div class="page-header"><h1>Guest Messages</h1><p>Post announcements and notices to all guests</p></div>
       <div class="card">
-        <div class="card-header"><h3>Posted Messages</h3>${isAdmin()?`<button class="btn btn-primary btn-sm" onclick="announcementModal()">📢 Post Message</button>`:''}</div>
+        <div class="card-header">
+          <h3>Posted Messages</h3>
+          <div class="flex gap-2">
+            ${list.length>0?`<input type="text" placeholder="🔍 Search title, message..." style="width:200px;margin:0" oninput="filterTable(this.value,'ann-list')" />`:''}
+            ${isAdmin()?`<button class="btn btn-primary btn-sm" onclick="announcementModal()">📢 Post Message</button>`:''}
+          </div>
+        </div>
         ${list.length===0
           ? '<div style="text-align:center;padding:48px;color:var(--text-muted)">📢<br><br>No messages posted yet. Click Post Message.</div>'
-          : `<div>
+          : `<div id="ann-list">
             ${list.map(a=>`
-            <div style="padding:16px 20px;border-bottom:1px solid var(--border)">
+            <div data-search="${a.title.toLowerCase()} ${a.message.toLowerCase()}" style="padding:16px 20px;border-bottom:1px solid var(--border)">
               <div class="flex justify-between items-center mb-4">
                 <div class="flex items-center gap-2">
                   <span class="badge ${a.priority==='urgent'?'badge-red':a.priority==='important'?'badge-amber':'badge-blue'}">${a.priority}</span>
@@ -1217,12 +1240,16 @@ async function pgInbox() {
       <div class="card">
         <div class="card-header">
           <h3>All Messages from Guests ${unread>0?`<span class="badge badge-red" style="margin-left:6px">${unread} unread</span>`:''}</h3>
-          <button class="btn btn-outline btn-sm" onclick="pgInbox()">🔄 Refresh</button>
+          <div class="flex gap-2">
+            ${msgs.length>0?`<input type="text" placeholder="🔍 Search guest, subject..." style="width:200px;margin:0" oninput="filterTable(this.value,'inbox-list')" />`:''}
+            <button class="btn btn-outline btn-sm" onclick="pgInbox()">🔄 Refresh</button>
+          </div>
         </div>
+        <div id="inbox-list">
         ${msgs.length===0
           ? '<div style="text-align:center;padding:48px;color:var(--text-muted)">📭<br><br>No messages from guests yet.</div>'
           : msgs.map(m=>`
-          <div class="inbox-item ${!m.is_read?'unread':''}" onclick="viewInboxMsg(${JSON.stringify(m).replace(/"/g,'&quot;')})">
+          <div data-search="${(m.guest_name||'').toLowerCase()} ${(m.subject||'').toLowerCase()} ${(m.message||'').toLowerCase()} ${(m.room_number||'').toLowerCase()}" class="inbox-item ${!m.is_read?'unread':''}" onclick="viewInboxMsg(${JSON.stringify(m).replace(/"/g,'&quot;')})">
             <div class="flex justify-between items-center">
               <div>
                 <strong style="font-size:14px">${m.guest_name}</strong>
@@ -1235,6 +1262,7 @@ async function pgInbox() {
             <div class="text-muted" style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${m.message}</div>
             ${m.reply?`<div style="margin-top:6px;padding:6px 10px;background:var(--green-light);border-radius:6px;font-size:12px;color:#065F46">✅ Replied</div>`:''}
           </div>`).join('')}
+        </div>
       </div>`);
   } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
 }
@@ -1341,6 +1369,7 @@ async function pgPurchases(month, year) {
               <option value="">All Categories</option>
               ${['Groceries','Maintenance','Electricity','Water','Internet','Cleaning','Salary','Other'].map(c=>`<option>${c}</option>`).join('')}
             </select>
+            <input type="text" id="pu-search" placeholder="🔍 Search description, paid to..." style="width:200px;margin:0" oninput="filterPurchases()" />
             <button class="btn btn-primary btn-sm" onclick="purchaseModal()">+ Add Purchase</button>
           </div>
         </div>
@@ -1414,7 +1443,9 @@ function renderPurchaseRows(list) {
 
 function filterPurchases() {
   const cat = document.getElementById('cat-filter').value;
-  const filtered = cat ? purchasesListCache.filter(p => p.category === cat) : purchasesListCache;
+  const q = (document.getElementById('pu-search')?.value || '').toLowerCase().trim();
+  let filtered = cat ? purchasesListCache.filter(p => p.category === cat) : purchasesListCache;
+  if (q) filtered = filtered.filter(p => `${p.description||''} ${p.paid_to||''} ${p.category||''}`.toLowerCase().includes(q));
   document.getElementById('purchases-tb').innerHTML = renderPurchaseRows(filtered);
 }
 
@@ -1669,6 +1700,7 @@ async function pgCollections(month, year) {
               <option value="">All Types</option>
               <option value="rent">Rent</option><option value="deposit">Deposit</option><option value="extra">Extra</option>
             </select>
+            <input type="text" id="coll-search" placeholder="🔍 Search guest, description..." style="width:200px;margin:0" oninput="filterCollections()" />
             <button class="btn btn-primary btn-sm" onclick="collectionModal()">+ Add Collection</button>
           </div>
         </div>
@@ -1696,15 +1728,27 @@ function renderCollectionRows(list) {
       <td>${c.description||c.collection_month||'—'}</td>
       <td class="text-green fw-600">${fmt(c.amount)}</td>
       <td>${c.payment_mode}</td>
-      <td>${pending && isAdmin()
-        ? `<div class="flex gap-2"><button class="btn btn-primary btn-sm" onclick="confirmPendingCollection(${c.id})">${pendingApproval?'Approve':'Confirm'}</button><button class="btn btn-danger btn-sm btn-icon" onclick="delCollection(${c.id})">✕</button></div>`
-        : isAdmin() ? `<button class="btn btn-danger btn-sm btn-icon" onclick="delCollection(${c.id})">✕</button>` : '—'}</td>
+      <td>
+        <div class="flex gap-2">
+          <button class="btn btn-outline btn-sm" onclick="downloadReceipt(${c.id})" title="Download receipt">🧾</button>
+          ${pending && isAdmin()
+            ? `<button class="btn btn-primary btn-sm" onclick="confirmPendingCollection(${c.id})">${pendingApproval?'Approve':'Confirm'}</button><button class="btn btn-danger btn-sm btn-icon" onclick="delCollection(${c.id})">✕</button>`
+            : isAdmin() ? `<button class="btn btn-danger btn-sm btn-icon" onclick="delCollection(${c.id})">✕</button>` : ''}
+        </div>
+      </td>
     </tr>`;}).join('');
+}
+
+function downloadReceipt(id) {
+  API.downloadExport(`/collections/${id}/receipt/pdf`, `receipt-SM-${String(id).padStart(5,'0')}.pdf`)
+    .catch(e => alert('Could not generate receipt: ' + e.message));
 }
 
 function filterCollections() {
   const type = document.getElementById('coll-type-filter').value;
-  const filtered = type ? collectionsListCache.filter(c => c.collection_type === type) : collectionsListCache;
+  const q = (document.getElementById('coll-search')?.value || '').toLowerCase().trim();
+  let filtered = type ? collectionsListCache.filter(c => c.collection_type === type) : collectionsListCache;
+  if (q) filtered = filtered.filter(c => `${c.guest_name||''} ${c.description||''} ${c.collection_month||''}`.toLowerCase().includes(q));
   document.getElementById('collections-tb').innerHTML = renderCollectionRows(filtered);
 }
 
@@ -1826,17 +1870,20 @@ async function pgRentDue() {
         <div class="stat-card"><div class="s-label">Settled or Ahead</div><div class="s-value">${fullyPaidCount} / ${list.length}</div><div class="s-sub" style="color:var(--green)">Guests</div></div>
       </div>
       <div class="card">
-        <div class="card-header"><h3>All Active Guests</h3></div>
+        <div class="card-header">
+          <h3>All Active Guests</h3>
+          <input type="text" placeholder="🔍 Search name, room, phone..." style="width:200px;margin:0" oninput="filterTable(this.value,'rentdue-tb')" />
+        </div>
         <div class="table-wrap">
           <table>
             <thead><tr><th>NAME</th><th>ROOM</th><th>PHONE</th><th>MONTHLY RENT</th><th>BALANCE</th><th>STATUS</th></tr></thead>
-            <tbody>
+            <tbody id="rentdue-tb">
               ${list.length===0
                 ? `<tr class="empty-row"><td colspan="6">No guests with rent configured.</td></tr>`
                 : list.map(g=>{
                   const due = parseFloat(g.amount_due);
                   const credit = parseFloat(g.credit);
-                  return `<tr>
+                  return `<tr data-search="${g.name.toLowerCase()} ${(g.room_number||'').toLowerCase()} ${(g.phone||'').toLowerCase()}">
                   <td><strong>${g.name}</strong></td>
                   <td>${g.room_number?'Room '+g.room_number:'—'}</td>
                   <td>${g.phone||'—'}</td>
@@ -2114,14 +2161,20 @@ async function pgBalanceSheet(asOf) {
       </div>
 
       <div class="card mb-6">
-        <div class="card-header"><h3>🏠 Fixed Assets</h3><button class="btn btn-primary btn-sm" onclick="fixedAssetModal()">+ Add Asset</button></div>
+        <div class="card-header">
+          <h3>🏠 Fixed Assets</h3>
+          <div class="flex gap-2">
+            ${assets.length>0?`<input type="text" placeholder="🔍 Search..." style="width:180px;margin:0" oninput="filterTable(this.value,'assets-tb')" />`:''}
+            <button class="btn btn-primary btn-sm" onclick="fixedAssetModal()">+ Add Asset</button>
+          </div>
+        </div>
         <div class="table-wrap">
           <table>
             <thead><tr><th>DATE</th><th>NAME</th><th>CATEGORY</th><th>VALUE</th><th>NOTES</th><th>ACTIONS</th></tr></thead>
-            <tbody>
+            <tbody id="assets-tb">
               ${assets.length===0
                 ? `<tr class="empty-row"><td colspan="6">No fixed assets added yet.</td></tr>`
-                : assets.map(a=>`<tr>
+                : assets.map(a=>`<tr data-search="${a.name.toLowerCase()} ${a.category.toLowerCase()} ${(a.notes||'').toLowerCase()}">
                   <td>${fmtDate(a.purchase_date)}</td>
                   <td><strong>${a.name}</strong></td>
                   <td><span class="badge badge-blue">${a.category}</span></td>
@@ -2135,15 +2188,21 @@ async function pgBalanceSheet(asOf) {
       </div>
 
       <div class="card">
-        <div class="card-header"><h3>💰 Capital Transactions</h3><button class="btn btn-primary btn-sm" onclick="capitalModal()">+ Add Entry</button></div>
+        <div class="card-header">
+          <h3>💰 Capital Transactions</h3>
+          <div class="flex gap-2">
+            ${capital.length>0?`<input type="text" placeholder="🔍 Search note, by..." style="width:180px;margin:0" oninput="filterTable(this.value,'capital-tb')" />`:''}
+            <button class="btn btn-primary btn-sm" onclick="capitalModal()">+ Add Entry</button>
+          </div>
+        </div>
         <p class="text-muted" style="font-size:12px;padding:0 20px 12px">Money you've put into the business (positive) or taken out (negative) — separate from day-to-day rent and purchases.</p>
         <div class="table-wrap">
           <table>
             <thead><tr><th>DATE</th><th>AMOUNT</th><th>NOTE</th><th>BY</th><th>ACTIONS</th></tr></thead>
-            <tbody>
+            <tbody id="capital-tb">
               ${capital.length===0
                 ? `<tr class="empty-row"><td colspan="5">No capital transactions yet.</td></tr>`
-                : capital.map(c=>`<tr>
+                : capital.map(c=>`<tr data-search="${(c.note||'').toLowerCase()} ${(c.username||'').toLowerCase()}">
                   <td>${fmtDate(c.transaction_date)}</td>
                   <td class="fw-600 ${parseFloat(c.amount)<0?'text-red':'text-green'}">${fmt(c.amount)}</td>
                   <td class="text-muted">${c.note||'—'}</td>
@@ -2287,6 +2346,16 @@ async function renderAdminSettingsTab() {
   try {
     const settings = await API.getSettings();
     document.getElementById('admin-tab-content').innerHTML = `
+      <div class="card mb-6">
+        <div class="card-header"><h3>PG Details (used on printed receipts)</h3></div>
+        <div style="padding:20px;max-width:480px">
+          <div id="pg-settings-alert" class="alert alert-danger hidden"></div>
+          <div class="form-group"><label>PG Name</label><input id="set-pg-name" placeholder="e.g. Siri Mane" value="${settings.pg_name||''}"/></div>
+          <div class="form-group"><label>Address</label><textarea id="set-pg-address" rows="2" placeholder="e.g. 5th cross, Gangothri Road,&#10;SIT Ext, Tumakuru.">${settings.pg_address||''}</textarea></div>
+          <div class="form-group"><label>Phone</label><input id="set-pg-phone" placeholder="e.g. 9880217627" value="${settings.pg_phone||''}"/></div>
+          <button class="btn btn-primary" onclick="savePgSettings()">Save PG Details</button>
+        </div>
+      </div>
       <div class="card">
         <div class="card-header"><h3>UPI Payment Settings</h3></div>
         <div style="padding:20px;max-width:480px">
@@ -2298,6 +2367,17 @@ async function renderAdminSettingsTab() {
         </div>
       </div>`;
   } catch(e) { document.getElementById('admin-tab-content').innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
+}
+
+async function savePgSettings() {
+  const al = document.getElementById('pg-settings-alert');
+  const d = {
+    pg_name: document.getElementById('set-pg-name').value.trim(),
+    pg_address: document.getElementById('set-pg-address').value.trim(),
+    pg_phone: document.getElementById('set-pg-phone').value.trim()
+  };
+  try { await API.updateSettings(d); renderAdminSettingsTab(); }
+  catch(e) { showAlert(al, e.message); }
 }
 
 async function saveAdminSettings() {
@@ -2315,12 +2395,18 @@ async function renderAdminStaffTab() {
     const users = await API.getUsers();
     document.getElementById('admin-tab-content').innerHTML = `
       <div class="card">
-        <div class="card-header"><h3>Staff &amp; Admin Accounts</h3><button class="btn btn-primary btn-sm" onclick="staffModal()">+ Add Staff</button></div>
+        <div class="card-header">
+          <h3>Staff &amp; Admin Accounts</h3>
+          <div class="flex gap-2">
+            ${users.length>0?`<input type="text" placeholder="🔍 Search username..." style="width:180px;margin:0" oninput="filterTable(this.value,'staff-tb')" />`:''}
+            <button class="btn btn-primary btn-sm" onclick="staffModal()">+ Add Staff</button>
+          </div>
+        </div>
         <div class="table-wrap">
           <table>
             <thead><tr><th>USERNAME</th><th>ROLE</th><th>CREATED</th><th>ACTIONS</th></tr></thead>
-            <tbody>
-              ${users.map(u=>`<tr>
+            <tbody id="staff-tb">
+              ${users.map(u=>`<tr data-search="${u.username.toLowerCase()} ${u.role.toLowerCase()}">
                 <td><strong>${u.username}</strong></td>
                 <td><span class="badge ${u.role==='admin'?'badge-purple':'badge-blue'}">${u.role}</span></td>
                 <td>${fmtDate(u.created_at)}</td>
@@ -2374,14 +2460,17 @@ async function renderAdminAuditTab() {
     const log = await API.getActivityLog();
     document.getElementById('admin-tab-content').innerHTML = `
       <div class="card">
-        <div class="card-header"><h3>Recent Activity</h3></div>
+        <div class="card-header">
+          <h3>Recent Activity</h3>
+          ${log.length>0?`<input type="text" placeholder="🔍 Search user, action, details..." style="width:220px;margin:0" oninput="filterTable(this.value,'audit-tb')" />`:''}
+        </div>
         <div class="table-wrap">
           <table>
             <thead><tr><th>WHEN</th><th>USER</th><th>ACTION</th><th>DETAILS</th></tr></thead>
-            <tbody>
+            <tbody id="audit-tb">
               ${log.length===0
                 ? `<tr class="empty-row"><td colspan="4">No activity recorded yet.</td></tr>`
-                : log.map(a=>`<tr>
+                : log.map(a=>`<tr data-search="${(a.username||'').toLowerCase()} ${a.action.toLowerCase()} ${(a.details||'').toLowerCase()}">
                   <td style="white-space:nowrap">${new Date(a.created_at).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}</td>
                   <td>${a.username||'—'}</td>
                   <td><span class="badge badge-gray">${a.action}</span></td>
@@ -2399,15 +2488,18 @@ async function renderAdminRefundsTab() {
     const refunds = await API.getDepositRefunds();
     document.getElementById('admin-tab-content').innerHTML = `
       <div class="card">
-        <div class="card-header"><h3>Deposit Refund History</h3></div>
+        <div class="card-header">
+          <h3>Deposit Refund History</h3>
+          ${refunds.length>0?`<input type="text" placeholder="🔍 Search guest, room..." style="width:200px;margin:0" oninput="filterTable(this.value,'refunds-tb')" />`:''}
+        </div>
         <p class="text-muted" style="font-size:12px;padding:0 20px 12px">Real checkouts shouldn't normally need deleting — this is here mainly for cleaning up test or mistaken entries.</p>
         <div class="table-wrap">
           <table>
             <thead><tr><th>DATE</th><th>GUEST</th><th>ROOM</th><th>DEPOSIT</th><th>DEDUCTIONS</th><th>REFUNDED</th><th>MODE</th><th>BY</th><th>ACTIONS</th></tr></thead>
-            <tbody>
+            <tbody id="refunds-tb">
               ${refunds.length===0
                 ? `<tr class="empty-row"><td colspan="9">No checkouts processed yet.</td></tr>`
-                : refunds.map(r=>`<tr>
+                : refunds.map(r=>`<tr data-search="${r.guest_name.toLowerCase()} ${(r.room_number||'').toLowerCase()}">
                   <td>${fmtDate(r.created_at)}</td>
                   <td><strong>${r.guest_name}</strong></td>
                   <td>${r.room_number||'—'}</td>
