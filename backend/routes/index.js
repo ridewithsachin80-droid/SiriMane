@@ -3,6 +3,7 @@ const router = require('express').Router();
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const PDFDocument = require('pdfkit');
+const path = require('path');
 const pool = require('../db');
 const auth = require('../middleware/auth');
 const requireAdmin = auth.requireAdmin;
@@ -25,6 +26,34 @@ async function logActivity(req, action, details) {
 // per route (and potentially drifting out of sync / breaking inconsistently).
 function fmtMoney(n) { return 'Rs ' + parseFloat(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function fmtD(d) { return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }); }
+
+// Converts a rupee amount to words using Indian numbering (lakh/crore), for
+// the "Amount in words" line on printed receipts. Paise are dropped since a
+// receipt states the whole-rupee amount actually received.
+function amountInWords(amount) {
+  const ones = ['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+  const tens = ['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+  function twoDigits(n) {
+    if (n < 20) return ones[n];
+    return tens[Math.floor(n/10)] + (n%10 ? ' ' + ones[n%10] : '');
+  }
+  function threeDigits(n) {
+    if (n < 100) return twoDigits(n);
+    return ones[Math.floor(n/100)] + ' Hundred' + (n%100 ? ' ' + twoDigits(n%100) : '');
+  }
+  let n = Math.round(Math.abs(parseFloat(amount) || 0));
+  if (n === 0) return 'Zero Rupees Only';
+  const crore = Math.floor(n / 10000000); n %= 10000000;
+  const lakh = Math.floor(n / 100000); n %= 100000;
+  const thousand = Math.floor(n / 1000); n %= 1000;
+  const hundred = n;
+  let parts = [];
+  if (crore) parts.push(threeDigits(crore) + ' Crore');
+  if (lakh) parts.push(threeDigits(lakh) + ' Lakh');
+  if (thousand) parts.push(threeDigits(thousand) + ' Thousand');
+  if (hundred) parts.push(threeDigits(hundred));
+  return parts.join(' ') + ' Rupees Only';
+}
 
 // columns: [{ label, x, width, get: (row) => string, color?: (row) => string }]
 function drawPdfTable(doc, columns, rows) {
@@ -485,6 +514,110 @@ router.post('/collections', auth, async (req, res) => {
     await logActivity(req, 'collection_add', `₹${amount} ${collection_type||'rent'} from ${guest_name||'guest #'+guest_id}${status==='pending_approval'?' (pending approval)':''}`);
     res.status(201).json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Draws the actual receipt onto a PDFDocument — shared by the staff-facing
+// and guest-facing receipt routes so the design only lives in one place.
+const RECEIPT_LOGO_PATH = path.join(__dirname, '../assets/siri-mane-logo.jpg');
+const RECEIPT_LOGO_ASPECT = 577 / 1249; // height/width of the cropped logo asset
+
+function drawReceiptPdf(doc, c, settings) {
+  const pgName = settings.pg_name || 'Siri Mane';
+  const pgAddress = settings.pg_address || '5th cross, Gangothri Road,\nSIT Ext, Tumakuru.';
+  const pgPhone = settings.pg_phone || '9880217627';
+  const guestName = c.guest_full_name || c.guest_name || 'Guest';
+  const receiptNo = 'SM-' + String(c.id).padStart(5, '0');
+  const gold = '#C99A2E', dark = '#1E293B', gray = '#64748B', lightGold = '#FFFBEB';
+  const pageW = doc.page.width;
+
+  // Header: logo top-left; PG name, address, phone stacked top-right
+  const logoW = 120, logoH = logoW * RECEIPT_LOGO_ASPECT;
+  try { doc.image(RECEIPT_LOGO_PATH, 30, 24, { width: logoW }); } catch (e) { /* logo missing — header still works without it */ }
+
+  let ry = 24;
+  doc.font('Helvetica-Bold').fontSize(13).fillColor(dark).text(pgName.toUpperCase(), pageW - 260, ry, { width: 230, align: 'right' });
+  ry += 18;
+  doc.font('Helvetica').fontSize(8.5).fillColor(gray);
+  pgAddress.split('\n').filter(Boolean).forEach(line => { doc.text(line, pageW - 260, ry, { width: 230, align: 'right' }); ry += 12; });
+  if (pgPhone) { doc.text('Mob: ' + pgPhone, pageW - 260, ry, { width: 230, align: 'right' }); ry += 12; }
+
+  const headerBottom = Math.max(24 + logoH, ry, 90);
+  doc.moveTo(30, headerBottom + 10).lineTo(pageW - 30, headerBottom + 10).lineWidth(2).strokeColor(gold).stroke();
+
+  let y = headerBottom + 24;
+  doc.font('Helvetica-Bold').fontSize(15).fillColor(dark).text('PAYMENT RECEIPT', 30, y, { width: pageW - 60, align: 'center' });
+  y += 30;
+
+  doc.fillColor(dark).font('Helvetica').fontSize(10);
+  doc.font('Helvetica-Bold').text('Receipt No:', 30, y); doc.font('Helvetica').text(receiptNo, 130, y);
+  doc.font('Helvetica-Bold').text('Date:', 280, y); doc.font('Helvetica').text(fmtD(c.collection_date), 320, y, { width: pageW - 30 - 320, align: 'left' });
+  y += 20;
+  doc.font('Helvetica-Bold').text('Received From:', 30, y); doc.font('Helvetica').text(guestName, 130, y);
+  y += 18;
+  if (c.room_number) { doc.font('Helvetica-Bold').text('Room / Bed:', 30, y); doc.font('Helvetica').text(`Room ${c.room_number}${c.bed_number?' / Bed '+c.bed_number:''}`, 130, y); }
+  if (c.guest_phone) { doc.font('Helvetica-Bold').text('Phone:', 280, y); doc.font('Helvetica').text(c.guest_phone, 320, y, { width: pageW - 30 - 320, align: 'left' }); }
+  y += 30;
+
+  doc.rect(30, y, pageW - 60, 90).lineWidth(1).stroke(gold);
+  let py = y + 12;
+  doc.font('Helvetica-Bold').fontSize(9).fillColor(gray).text('PARTICULARS', 42, py);
+  doc.text('AMOUNT', pageW - 130, py);
+  py += 16;
+  doc.moveTo(30, py).lineTo(pageW - 30, py).lineWidth(1).strokeColor('#E2E8F0').stroke();
+  py += 10;
+  doc.font('Helvetica').fontSize(10).fillColor(dark);
+  const label = `${(c.collection_type||'Payment').replace(/^\w/, ch=>ch.toUpperCase())}${c.collection_month?' — '+c.collection_month:''}${c.description?' ('+c.description+')':''}`;
+  doc.text(label, 42, py, { width: pageW - 200 });
+  doc.text(fmtMoney(c.amount), pageW - 130, py, { width: 90, align: 'right' });
+  py += 20;
+  doc.font('Helvetica-Bold').text('Payment Mode:', 42, py); doc.font('Helvetica').text(c.payment_mode || '—', 130, py);
+
+  y += 105;
+  doc.rect(30, y, pageW - 60, 34).fill(lightGold);
+  doc.fillColor(gold).font('Helvetica-Bold').fontSize(13).text('Total Received: ' + fmtMoney(c.amount), 42, y + 10);
+  y += 46;
+  doc.fillColor(gray).font('Helvetica-Oblique').fontSize(9).text('(' + amountInWords(c.amount) + ')', 30, y, { width: pageW - 60 });
+
+  y += 40;
+  doc.moveTo(30, y).lineTo(pageW - 30, y).lineWidth(1).strokeColor('#E2E8F0').stroke();
+  y += 14;
+  doc.fillColor(gray).fontSize(8).font('Helvetica').text('This is a system-generated receipt.', 30, y);
+  y += 40;
+  doc.moveTo(pageW - 160, y).lineTo(pageW - 30, y).lineWidth(1).strokeColor(dark).stroke();
+  doc.fontSize(8).fillColor(gray).text('Authorized Signature', pageW - 160, y + 4, { width: 130, align: 'center' });
+}
+
+async function fetchPgReceiptSettings() {
+  const r = await pool.query(`SELECT key, value FROM app_settings WHERE key IN ('pg_name','pg_address','pg_phone')`);
+  const settings = {};
+  r.rows.forEach(row => { settings[row.key] = row.value; });
+  return settings;
+}
+
+// Single-payment receipt — printable/downloadable proof of one specific
+// payment, branded for the PG. Any logged-in user can print one (a staff
+// member handing a resident a receipt shouldn't need admin sign-in).
+router.get('/collections/:id/receipt/pdf', auth, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT c.*, g.name as guest_full_name, g.phone as guest_phone, g.bed_number, rm.room_number
+       FROM collections c
+       LEFT JOIN guests g ON c.guest_id = g.id
+       LEFT JOIN rooms rm ON g.room_id = rm.id
+       WHERE c.id=$1 AND c.is_deleted=false`,
+      [req.params.id]
+    );
+    const c = r.rows[0];
+    if (!c) return res.status(404).json({ error: 'Receipt not found' });
+    const settings = await fetchPgReceiptSettings();
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="receipt-SM-${String(c.id).padStart(5,'0')}.pdf"`);
+    const doc = new PDFDocument({ margin: 0, size: 'A5', layout: 'portrait' });
+    doc.pipe(res);
+    drawReceiptPdf(doc, c, settings);
+    doc.end();
+  } catch (err) { if (!res.headersSent) res.status(500).json({ error: err.message }); }
 });
 
 router.delete('/collections/:id', auth, requireAdmin, async (req, res) => {
@@ -1662,6 +1795,32 @@ router.get('/guest-complaints', guestAuth, async (req, res) => {
     const r = await pool.query('SELECT id,category,description,status,resolution_notes,created_at,resolved_at FROM complaints WHERE guest_id=$1 ORDER BY created_at DESC', [req.guest.id]);
     res.json(r.rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/guest-receipt/:id/pdf — resident downloads their own payment
+// receipt. Scoped to guest_id so a guest can't fetch someone else's by
+// guessing an id.
+router.get('/guest-receipt/:id/pdf', guestAuth, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT c.*, g.name as guest_full_name, g.phone as guest_phone, g.bed_number, rm.room_number
+       FROM collections c
+       LEFT JOIN guests g ON c.guest_id = g.id
+       LEFT JOIN rooms rm ON g.room_id = rm.id
+       WHERE c.id=$1 AND c.is_deleted=false AND c.guest_id=$2`,
+      [req.params.id, req.guest.id]
+    );
+    const c = r.rows[0];
+    if (!c) return res.status(404).json({ error: 'Receipt not found' });
+    const settings = await fetchPgReceiptSettings();
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="receipt-SM-${String(c.id).padStart(5,'0')}.pdf"`);
+    const doc = new PDFDocument({ margin: 0, size: 'A5', layout: 'portrait' });
+    doc.pipe(res);
+    drawReceiptPdf(doc, c, settings);
+    doc.end();
+  } catch (err) { if (!res.headersSent) res.status(500).json({ error: err.message }); }
 });
 
 // POST /api/guest-upi-claim — resident reports "I've paid" after using the
