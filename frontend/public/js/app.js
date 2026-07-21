@@ -434,6 +434,7 @@ async function guestModal(gData=null, id=null) {
           <div class="form-group"><label>Email</label><input id="gf-email" type="email" value="${g.email||''}" placeholder="Email"/></div>
           <div class="form-group"><label>Emergency Contact</label><input id="gf-emg" value="${g.emergency_contact||''}" placeholder="Emergency phone"/></div>
         </div>
+        <div class="form-group"><label>Home / Permanent Address</label><textarea id="gf-address" rows="2" placeholder="e.g. House no, street, city, state, pincode">${g.address||''}</textarea></div>
         <div class="form-row">
           <div class="form-group"><label>Room</label>
             <select id="gf-room" onchange="checkRentVariance()">
@@ -501,6 +502,7 @@ async function saveGuest(id) {
     name:document.getElementById('gf-name').value.trim(),
     phone:document.getElementById('gf-phone').value.trim(),
     email:document.getElementById('gf-email').value.trim(),
+    address:document.getElementById('gf-address').value.trim(),
     emergency_contact:document.getElementById('gf-emg').value.trim(),
     room_id:document.getElementById('gf-room').value||null,
     bed_number:document.getElementById('gf-bed').value||null,
@@ -533,7 +535,7 @@ async function viewGuest(id) {
         <div class="modal-header"><h3>👤 ${g.name}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
         <div class="modal-body">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px">
-            ${[['Phone',g.phone],['Email',g.email],['Room',g.room_number?'Room '+g.room_number:'—'],['Bed',g.bed_number||'—'],['Check-in',fmtDate(g.join_date)],['Rent',fmt(g.monthly_rent)+'/mo'],['Deposit',fmt(g.deposit_amount)],['Emergency',g.emergency_contact||'—']].map(([l,v])=>`
+            ${[['Phone',g.phone],['Email',g.email],['Room',g.room_number?'Room '+g.room_number:'—'],['Bed',g.bed_number||'—'],['Check-in',fmtDate(g.join_date)],['Rent',fmt(g.monthly_rent)+'/mo'],['Deposit',fmt(g.deposit_amount)],['Emergency',g.emergency_contact||'—'],['Address',g.address||'—']].map(([l,v])=>`
             <div style="background:#F8FAFC;padding:10px 12px;border-radius:8px;border:1px solid var(--border)">
               <div style="font-size:11px;color:var(--text-muted);font-weight:600">${l}</div>
               <div style="font-size:14px;font-weight:500;margin-top:2px">${v||'—'}</div>

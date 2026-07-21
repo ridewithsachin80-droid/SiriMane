@@ -305,7 +305,7 @@ router.get('/guests/:id', auth, async (req, res) => {
 });
 
 router.post('/guests', auth, async (req, res) => {
-  const { name,phone,email,emergency_contact,id_proof_type,id_proof_number,room_id,bed_number,join_date,monthly_rent,deposit_amount,notes } = req.body;
+  const { name,phone,email,address,emergency_contact,id_proof_type,id_proof_number,room_id,bed_number,join_date,monthly_rent,deposit_amount,notes } = req.body;
   if (!name || !join_date) return res.status(400).json({ error: 'Name and join date required' });
   try {
     // If this guest's rent doesn't match their room's standard per-bed rate,
@@ -320,8 +320,8 @@ router.post('/guests', auth, async (req, res) => {
     }
 
     const r = await pool.query(
-      `INSERT INTO guests(name,phone,email,emergency_contact,id_proof_type,id_proof_number,room_id,bed_number,join_date,monthly_rent,deposit_amount,notes,created_by,rent_variance_approved) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
-      [name,phone,email,emergency_contact,id_proof_type,id_proof_number,room_id||null,bed_number||null,join_date,monthly_rent||0,deposit_amount||0,notes,req.user.id,rentVarianceApproved]);
+      `INSERT INTO guests(name,phone,email,address,emergency_contact,id_proof_type,id_proof_number,room_id,bed_number,join_date,monthly_rent,deposit_amount,notes,created_by,rent_variance_approved) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+      [name,phone,email,address||null,emergency_contact,id_proof_type,id_proof_number,room_id||null,bed_number||null,join_date,monthly_rent||0,deposit_amount||0,notes,req.user.id,rentVarianceApproved]);
     if (parseFloat(monthly_rent) > 0) {
       await pool.query(
         `INSERT INTO guest_rent_history(guest_id, monthly_rent, effective_from, changed_by, note) VALUES($1,$2,$3,$4,$5)`,
@@ -345,7 +345,7 @@ router.post('/guests', auth, async (req, res) => {
 });
 
 router.put('/guests/:id', auth, async (req, res) => {
-  const { name,phone,email,emergency_contact,room_id,bed_number,monthly_rent,deposit_amount,notes,leave_date,is_active,rent_effective_from } = req.body;
+  const { name,phone,email,address,emergency_contact,room_id,bed_number,monthly_rent,deposit_amount,notes,leave_date,is_active,rent_effective_from } = req.body;
   try {
     const existing = await pool.query('SELECT monthly_rent,deposit_amount FROM guests WHERE id=$1', [req.params.id]);
     if (!existing.rows[0]) return res.status(404).json({ error: 'Not found' });
@@ -366,8 +366,8 @@ router.put('/guests/:id', auth, async (req, res) => {
     }
 
     const r = await pool.query(
-      `UPDATE guests SET name=COALESCE($1,name),phone=COALESCE($2,phone),email=COALESCE($3,email),emergency_contact=COALESCE($4,emergency_contact),room_id=$5,bed_number=$6,monthly_rent=COALESCE($7,monthly_rent),deposit_amount=COALESCE($8,deposit_amount),notes=COALESCE($9,notes),leave_date=$10,is_active=COALESCE($11,is_active),rent_variance_approved=$12 WHERE id=$13 RETURNING *`,
-      [name,phone,email,emergency_contact,room_id||null,bed_number||null,monthly_rent,deposit_amount,notes,leave_date||null,is_active,rentVarianceApproved,req.params.id]);
+      `UPDATE guests SET name=COALESCE($1,name),phone=COALESCE($2,phone),email=COALESCE($3,email),address=COALESCE($4,address),emergency_contact=COALESCE($5,emergency_contact),room_id=$6,bed_number=$7,monthly_rent=COALESCE($8,monthly_rent),deposit_amount=COALESCE($9,deposit_amount),notes=COALESCE($10,notes),leave_date=$11,is_active=COALESCE($12,is_active),rent_variance_approved=$13 WHERE id=$14 RETURNING *`,
+      [name,phone,email,address,emergency_contact,room_id||null,bed_number||null,monthly_rent,deposit_amount,notes,leave_date||null,is_active,rentVarianceApproved,req.params.id]);
     if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
 
     if (newRent !== oldRent && newRent > 0) {

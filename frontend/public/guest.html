@@ -183,6 +183,7 @@
           <div class="info-row"><span class="lbl">Monthly Rent</span><span class="val text-green" id="p-rent"></span></div>
           <div class="info-row"><span class="lbl">Deposit Paid</span><span class="val" id="p-dep"></span></div>
           <div class="info-row"><span class="lbl">Emergency Contact</span><span class="val" id="p-emg"></span></div>
+          <div class="info-row"><span class="lbl">Address</span><span class="val" id="p-address"></span></div>
         </div>
       </div>
       <div class="card">
@@ -461,6 +462,7 @@ function renderDetails(g) {
   document.getElementById('p-rent').textContent = fmt(g.monthly_rent) + '/month';
   document.getElementById('p-dep').textContent = fmt(g.deposit_amount);
   document.getElementById('p-emg').textContent = g.emergency_contact || '—';
+  document.getElementById('p-address').textContent = g.address || '—';
 
   const pays = g.payments || [];
   const pc = document.getElementById('p-payments');
