@@ -305,7 +305,7 @@ router.get('/guests/:id', auth, async (req, res) => {
 });
 
 router.post('/guests', auth, async (req, res) => {
-  const { name,phone,email,address,emergency_contact,id_proof_type,id_proof_number,room_id,bed_number,join_date,monthly_rent,deposit_amount,notes } = req.body;
+  const { name,phone,email,address,emergency_contact,id_proof_type,id_proof_number,room_id,bed_number,join_date,monthly_rent,deposit_amount,advance_required,notes } = req.body;
   if (!name || !join_date) return res.status(400).json({ error: 'Name and join date required' });
   try {
     // If this guest's rent doesn't match their room's standard per-bed rate,
@@ -320,8 +320,8 @@ router.post('/guests', auth, async (req, res) => {
     }
 
     const r = await pool.query(
-      `INSERT INTO guests(name,phone,email,address,emergency_contact,id_proof_type,id_proof_number,room_id,bed_number,join_date,monthly_rent,deposit_amount,notes,created_by,rent_variance_approved) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
-      [name,phone,email,address||null,emergency_contact,id_proof_type,id_proof_number,room_id||null,bed_number||null,join_date,monthly_rent||0,deposit_amount||0,notes,req.user.id,rentVarianceApproved]);
+      `INSERT INTO guests(name,phone,email,address,emergency_contact,id_proof_type,id_proof_number,room_id,bed_number,join_date,monthly_rent,deposit_amount,advance_required,notes,created_by,rent_variance_approved) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+      [name,phone,email,address||null,emergency_contact,id_proof_type,id_proof_number,room_id||null,bed_number||null,join_date,monthly_rent||0,deposit_amount||0,advance_required||0,notes,req.user.id,rentVarianceApproved]);
     if (parseFloat(monthly_rent) > 0) {
       await pool.query(
         `INSERT INTO guest_rent_history(guest_id, monthly_rent, effective_from, changed_by, note) VALUES($1,$2,$3,$4,$5)`,
@@ -345,7 +345,7 @@ router.post('/guests', auth, async (req, res) => {
 });
 
 router.put('/guests/:id', auth, async (req, res) => {
-  const { name,phone,email,address,emergency_contact,room_id,bed_number,monthly_rent,deposit_amount,notes,leave_date,is_active,rent_effective_from } = req.body;
+  const { name,phone,email,address,emergency_contact,room_id,bed_number,monthly_rent,deposit_amount,advance_required,notes,leave_date,is_active,rent_effective_from } = req.body;
   try {
     const existing = await pool.query('SELECT monthly_rent,deposit_amount FROM guests WHERE id=$1', [req.params.id]);
     if (!existing.rows[0]) return res.status(404).json({ error: 'Not found' });
@@ -366,8 +366,8 @@ router.put('/guests/:id', auth, async (req, res) => {
     }
 
     const r = await pool.query(
-      `UPDATE guests SET name=COALESCE($1,name),phone=COALESCE($2,phone),email=COALESCE($3,email),address=COALESCE($4,address),emergency_contact=COALESCE($5,emergency_contact),room_id=$6,bed_number=$7,monthly_rent=COALESCE($8,monthly_rent),deposit_amount=COALESCE($9,deposit_amount),notes=COALESCE($10,notes),leave_date=$11,is_active=COALESCE($12,is_active),rent_variance_approved=$13 WHERE id=$14 RETURNING *`,
-      [name,phone,email,address,emergency_contact,room_id||null,bed_number||null,monthly_rent,deposit_amount,notes,leave_date||null,is_active,rentVarianceApproved,req.params.id]);
+      `UPDATE guests SET name=COALESCE($1,name),phone=COALESCE($2,phone),email=COALESCE($3,email),address=COALESCE($4,address),emergency_contact=COALESCE($5,emergency_contact),room_id=$6,bed_number=$7,monthly_rent=COALESCE($8,monthly_rent),deposit_amount=COALESCE($9,deposit_amount),advance_required=COALESCE($10,advance_required),notes=COALESCE($11,notes),leave_date=$12,is_active=COALESCE($13,is_active),rent_variance_approved=$14 WHERE id=$15 RETURNING *`,
+      [name,phone,email,address,emergency_contact,room_id||null,bed_number||null,monthly_rent,deposit_amount,advance_required,notes,leave_date||null,is_active,rentVarianceApproved,req.params.id]);
     if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
 
     if (newRent !== oldRent && newRent > 0) {
@@ -1207,7 +1207,7 @@ router.post('/guest-message', async (req, res) => {
 // due this month, instead of resetting to a fresh month-only snapshot.
 async function computeRentDueList() {
   const guests = await pool.query(`
-    SELECT g.id, g.name, g.phone, g.join_date, g.leave_date, g.monthly_rent, r.room_number
+    SELECT g.id, g.name, g.phone, g.join_date, g.leave_date, g.monthly_rent, g.advance_required, r.room_number
     FROM guests g LEFT JOIN rooms r ON g.room_id = r.id
     WHERE g.is_active = true AND g.monthly_rent > 0
     ORDER BY g.name ASC
@@ -1215,6 +1215,16 @@ async function computeRentDueList() {
   const results = [];
   for (const guest of guests.rows) {
     const { currentBalance } = await computeGuestLedger(guest);
+    const advanceRequired = parseFloat(guest.advance_required) || 0;
+    let advancePending = 0;
+    if (advanceRequired > 0) {
+      const advancePaidR = await pool.query(
+        `SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE guest_id=$1 AND collection_type='advance' AND is_deleted=false AND status='confirmed'`,
+        [guest.id]
+      );
+      const advancePaid = parseFloat(advancePaidR.rows[0].total) || 0;
+      advancePending = Math.max(0, advanceRequired - advancePaid);
+    }
     results.push({
       id: guest.id,
       name: guest.name,
@@ -1223,10 +1233,12 @@ async function computeRentDueList() {
       monthly_rent: guest.monthly_rent,
       current_balance: currentBalance,
       amount_due: currentBalance < 0 ? Math.abs(currentBalance) : 0,
-      credit: currentBalance > 0 ? currentBalance : 0
+      credit: currentBalance > 0 ? currentBalance : 0,
+      advance_required: advanceRequired,
+      advance_pending: advancePending
     });
   }
-  results.sort((a, b) => b.amount_due - a.amount_due);
+  results.sort((a, b) => (b.amount_due + b.advance_pending) - (a.amount_due + a.advance_pending));
   return results;
 }
 
@@ -1254,12 +1266,13 @@ router.get('/rent-due/export/pdf', auth, requireAdmin, async (req, res) => {
     doc.moveDown(1);
 
     drawPdfTable(doc, [
-      { label: 'Name', x: 40, width: 110, get: r => r.name },
-      { label: 'Room', x: 155, width: 60, get: r => r.room_number ? 'Room '+r.room_number : '—' },
-      { label: 'Phone', x: 220, width: 90, get: r => r.phone },
-      { label: 'Monthly Rent', x: 315, width: 80, get: r => fmtMoney(r.monthly_rent) },
-      { label: 'Balance', x: 400, width: 90, get: r => parseFloat(r.amount_due) > 0 ? fmtMoney(r.amount_due) + ' due' : parseFloat(r.credit) > 0 ? fmtMoney(r.credit) + ' credit' : 'Settled', color: r => parseFloat(r.amount_due) > 0 ? '#b91c1c' : '#0a7a3e' },
-      { label: 'Status', x: 495, width: 60, get: r => parseFloat(r.amount_due) > 0 ? 'Pending' : 'OK' }
+      { label: 'Name', x: 40, width: 95, get: r => r.name },
+      { label: 'Room', x: 140, width: 50, get: r => r.room_number ? 'Room '+r.room_number : '—' },
+      { label: 'Phone', x: 195, width: 80, get: r => r.phone },
+      { label: 'Rent', x: 280, width: 65, get: r => fmtMoney(r.monthly_rent) },
+      { label: 'Balance', x: 350, width: 80, get: r => parseFloat(r.amount_due) > 0 ? fmtMoney(r.amount_due) + ' due' : parseFloat(r.credit) > 0 ? fmtMoney(r.credit) + ' credit' : 'Settled', color: r => parseFloat(r.amount_due) > 0 ? '#b91c1c' : '#0a7a3e' },
+      { label: 'Advance Pending', x: 435, width: 75, get: r => parseFloat(r.advance_pending) > 0 ? fmtMoney(r.advance_pending) : '—', color: r => parseFloat(r.advance_pending) > 0 ? '#b91c1c' : '#000' },
+      { label: 'Status', x: 515, width: 45, get: r => parseFloat(r.amount_due) > 0 ? 'Pending' : 'OK' }
     ], list);
 
     doc.end();

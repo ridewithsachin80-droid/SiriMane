@@ -456,9 +456,12 @@ async function guestModal(gData=null, id=null) {
         </div>` : ''}
         <div class="form-row">
           <div class="form-group"><label>Deposit (₹)</label><input id="gf-dep" type="number" value="${g.deposit_amount||''}" placeholder="e.g. 5000"/></div>
-          <div class="form-group"><label>ID Proof</label>
-            <select id="gf-idtype">${['','Aadhaar','PAN Card','Passport','Driving License','Voter ID'].map(t=>`<option value="${t}" ${g.id_proof_type===t?'selected':''}>${t||'— Select —'}</option>`).join('')}</select>
+          <div class="form-group"><label>Advance Required (₹)</label><input id="gf-adv" type="number" value="${g.advance_required||''}" placeholder="e.g. 7000"/>
+            <p class="text-muted" style="font-size:11px;margin-top:4px">Expected advance (e.g. 1 month rent at joining). Rent Due shows what's still pending against this.</p>
           </div>
+        </div>
+        <div class="form-group"><label>ID Proof</label>
+          <select id="gf-idtype">${['','Aadhaar','PAN Card','Passport','Driving License','Voter ID'].map(t=>`<option value="${t}" ${g.id_proof_type===t?'selected':''}>${t||'— Select —'}</option>`).join('')}</select>
         </div>
         <div class="form-group"><label>Notes</label><textarea id="gf-notes" rows="2">${g.notes||''}</textarea></div>
       </div>
@@ -509,6 +512,7 @@ async function saveGuest(id) {
     join_date:document.getElementById('gf-join').value,
     monthly_rent:document.getElementById('gf-rent').value||0,
     deposit_amount:document.getElementById('gf-dep').value||0,
+    advance_required:document.getElementById('gf-adv').value||0,
     id_proof_type:document.getElementById('gf-idtype').value,
     notes:document.getElementById('gf-notes').value,
     rent_effective_from: rentEffectiveEl ? rentEffectiveEl.value : null
@@ -535,7 +539,7 @@ async function viewGuest(id) {
         <div class="modal-header"><h3>👤 ${g.name}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
         <div class="modal-body">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px">
-            ${[['Phone',g.phone],['Email',g.email],['Room',g.room_number?'Room '+g.room_number:'—'],['Bed',g.bed_number||'—'],['Check-in',fmtDate(g.join_date)],['Rent',fmt(g.monthly_rent)+'/mo'],['Deposit',fmt(g.deposit_amount)],['Emergency',g.emergency_contact||'—'],['Address',g.address||'—']].map(([l,v])=>`
+            ${[['Phone',g.phone],['Email',g.email],['Room',g.room_number?'Room '+g.room_number:'—'],['Bed',g.bed_number||'—'],['Check-in',fmtDate(g.join_date)],['Rent',fmt(g.monthly_rent)+'/mo'],['Deposit',fmt(g.deposit_amount)],...(parseFloat(g.advance_required)>0?[['Advance Required',fmt(g.advance_required)]]:[]),['Emergency',g.emergency_contact||'—'],['Address',g.address||'—']].map(([l,v])=>`
             <div style="background:#F8FAFC;padding:10px 12px;border-radius:8px;border:1px solid var(--border)">
               <div style="font-size:11px;color:var(--text-muted);font-weight:600">${l}</div>
               <div style="font-size:14px;font-weight:500;margin-top:2px">${v||'—'}</div>
@@ -1908,8 +1912,9 @@ async function pgRentDue() {
     const list = await API.getRentDue();
     rentDueListCache = list;
     const totalDue = list.reduce((s,g) => s + parseFloat(g.amount_due), 0);
+    const totalAdvancePending = list.reduce((s,g) => s + parseFloat(g.advance_pending||0), 0);
     const fullyPaidCount = list.filter(g => parseFloat(g.amount_due) <= 0).length;
-    const pendingCount = list.filter(g => parseFloat(g.amount_due) > 0).length;
+    const pendingCount = list.filter(g => parseFloat(g.amount_due) > 0 || parseFloat(g.advance_pending||0) > 0).length;
     setContent(`
       <div class="page-header"><h1>📅 Rent Due</h1><p>Running balance for each guest, carried forward across months — not just this month's snapshot</p></div>
       <div class="flex gap-2 mb-5" style="flex-wrap:wrap">
@@ -1919,6 +1924,7 @@ async function pgRentDue() {
       </div>
       <div class="stat-grid mb-5">
         <div class="stat-card red"><div class="s-label">Total Outstanding</div><div class="s-value">${fmt(totalDue)}</div><div class="s-sub">Across all guests</div></div>
+        ${totalAdvancePending>0?`<div class="stat-card"><div class="s-label">Advance Pending</div><div class="s-value">${fmt(totalAdvancePending)}</div><div class="s-sub" style="color:var(--amber)">Not yet collected</div></div>`:''}
         <div class="stat-card"><div class="s-label">Settled or Ahead</div><div class="s-value">${fullyPaidCount} / ${list.length}</div><div class="s-sub" style="color:var(--green)">Guests</div></div>
       </div>
       <div class="card">
@@ -1928,21 +1934,24 @@ async function pgRentDue() {
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>NAME</th><th>ROOM</th><th>PHONE</th><th>MONTHLY RENT</th><th>BALANCE</th><th>STATUS</th><th>REMIND</th></tr></thead>
+            <thead><tr><th>NAME</th><th>ROOM</th><th>PHONE</th><th>MONTHLY RENT</th><th>BALANCE</th><th>ADVANCE PENDING</th><th>STATUS</th><th>REMIND</th></tr></thead>
             <tbody id="rentdue-tb">
               ${list.length===0
-                ? `<tr class="empty-row"><td colspan="7">No guests with rent configured.</td></tr>`
+                ? `<tr class="empty-row"><td colspan="8">No guests with rent configured.</td></tr>`
                 : list.map(g=>{
                   const due = parseFloat(g.amount_due);
                   const credit = parseFloat(g.credit);
+                  const advPending = parseFloat(g.advance_pending||0);
+                  const anyPending = due>0 || advPending>0;
                   return `<tr data-search="${g.name.toLowerCase()} ${(g.room_number||'').toLowerCase()} ${(g.phone||'').toLowerCase()}">
                   <td><strong>${g.name}</strong></td>
                   <td>${g.room_number?'Room '+g.room_number:'—'}</td>
                   <td>${g.phone||'—'}</td>
                   <td>${fmt(g.monthly_rent)}</td>
                   <td class="${due>0?'text-red fw-600':credit>0?'text-green fw-600':''}">${due>0?fmt(due)+' due':credit>0?fmt(credit)+' credit':'Settled'}</td>
-                  <td><span class="badge ${due>0?'badge-red':'badge-green'}">${due>0?'Pending':credit>0?'Ahead':'Settled'}</span></td>
-                  <td>${due>0
+                  <td class="${advPending>0?'text-red fw-600':''}">${advPending>0?fmt(advPending):'—'}</td>
+                  <td><span class="badge ${anyPending?'badge-red':'badge-green'}">${anyPending?'Pending':credit>0?'Ahead':'Settled'}</span></td>
+                  <td>${anyPending
                     ? (g.phone
                         ? `<button class="btn btn-outline btn-sm" onclick="sendOneRentReminder(${g.id})" title="Send WhatsApp reminder">💬</button>`
                         : `<span style="font-size:11px;color:var(--text-muted,#999)">No phone</span>`)
@@ -1973,41 +1982,48 @@ function buildWhatsappUrl(phone, message) {
   return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
 }
 
-const RENT_REMINDER_DEFAULT_TEMPLATE = `Hi {name}, this is a reminder from Siri Mane PG that your rent balance is currently pending.
+const RENT_REMINDER_DEFAULT_TEMPLATE = `Hi {name}, this is a reminder from Siri Mane PG that your account currently shows a pending balance.
 
 Room: {room}
-Amount Due: {amount}
+{pending_lines}
 
 Please make the payment at your earliest convenience. Thank you!`;
 
 function fillRentReminderTemplate(tpl, g) {
+  const due = parseFloat(g.amount_due) || 0;
+  const advPending = parseFloat(g.advance_pending) || 0;
+  const lines = [];
+  if (due > 0) lines.push(`Rent Due: ${fmt(due)}`);
+  if (advPending > 0) lines.push(`Advance Pending: ${fmt(advPending)}`);
   return tpl
     .replace(/\{name\}/g, g.name)
     .replace(/\{room\}/g, g.room_number ? ('Room '+g.room_number) : '—')
-    .replace(/\{amount\}/g, fmt(parseFloat(g.amount_due)));
+    .replace(/\{amount\}/g, fmt(due))
+    .replace(/\{pending_lines\}/g, lines.join('\n'));
 }
 
 // Bulk reminders modal — browsers block firing off several wa.me tabs at
 // once without a click each, so this lists every pending resident with
 // their own "send" button rather than pretending to auto-blast them all.
 function openRentRemindersModal() {
-  const pending = rentDueListCache.filter(g => parseFloat(g.amount_due) > 0);
-  if (pending.length === 0) { alert('No residents currently have rent due.'); return; }
+  const pending = rentDueListCache.filter(g => parseFloat(g.amount_due) > 0 || parseFloat(g.advance_pending||0) > 0);
+  if (pending.length === 0) { alert('No residents currently have rent or advance pending.'); return; }
   const noPhoneCount = pending.filter(g => !g.phone).length;
   openModal(`
     <div class="modal" style="max-width:660px">
-      <div class="modal-header"><h3>💬 Send Rent Reminders</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+      <div class="modal-header"><h3>💬 Send Reminders</h3><button class="modal-close" onclick="closeModal()">×</button></div>
       <div class="modal-body">
-        <p style="font-size:13px;color:var(--text-muted,#666);margin-bottom:10px">${pending.length} resident${pending.length>1?'s':''} with rent pending${noPhoneCount?` (${noPhoneCount} missing a phone number)`:''}. Each button opens WhatsApp with the message ready — you just hit send there. Placeholders: {name}, {room}, {amount}.</p>
-        <div class="form-group"><label>Message template</label><textarea id="rr-template" rows="6">${RENT_REMINDER_DEFAULT_TEMPLATE}</textarea></div>
+        <p style="font-size:13px;color:var(--text-muted,#666);margin-bottom:10px">${pending.length} resident${pending.length>1?'s':''} with rent and/or advance pending${noPhoneCount?` (${noPhoneCount} missing a phone number)`:''}. Each button opens WhatsApp with the message ready — you just hit send there. Placeholders: {name}, {room}, {amount}, {pending_lines}.</p>
+        <div class="form-group"><label>Message template</label><textarea id="rr-template" rows="7">${RENT_REMINDER_DEFAULT_TEMPLATE}</textarea></div>
         <div class="table-wrap" style="max-height:300px;overflow:auto;border:1px solid var(--border);border-radius:8px">
           <table>
-            <thead><tr><th>Name</th><th>Room</th><th>Due</th><th>Phone</th><th></th></tr></thead>
+            <thead><tr><th>Name</th><th>Room</th><th>Rent Due</th><th>Advance Pending</th><th>Phone</th><th></th></tr></thead>
             <tbody>
               ${pending.map(g => `<tr>
                   <td>${g.name}</td>
                   <td>${g.room_number?'Room '+g.room_number:'—'}</td>
-                  <td class="text-red fw-600">${fmt(g.amount_due)}</td>
+                  <td class="${parseFloat(g.amount_due)>0?'text-red fw-600':''}">${parseFloat(g.amount_due)>0?fmt(g.amount_due):'—'}</td>
+                  <td class="${parseFloat(g.advance_pending||0)>0?'text-red fw-600':''}">${parseFloat(g.advance_pending||0)>0?fmt(g.advance_pending):'—'}</td>
                   <td>${g.phone||'—'}</td>
                   <td>${g.phone
                     ? `<button class="btn btn-outline btn-sm" onclick="sendOneRentReminder(${g.id})">💬 WhatsApp</button>`
@@ -2042,7 +2058,8 @@ function exportRentDueCsv() {
       { label: 'Phone', get: g => g.phone },
       { label: 'Monthly Rent', get: g => g.monthly_rent },
       { label: 'Amount Due', get: g => g.amount_due },
-      { label: 'Credit', get: g => g.credit }
+      { label: 'Credit', get: g => g.credit },
+      { label: 'Advance Pending', get: g => g.advance_pending || 0 }
     ],
     rentDueListCache
   );
