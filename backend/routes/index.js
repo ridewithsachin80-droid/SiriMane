@@ -455,10 +455,11 @@ router.post('/guests/:id/checkout', auth, requireAdmin, async (req, res) => {
 // ── COLLECTIONS (Income) ─────────────────────────
 router.get('/collections', auth, async (req, res) => {
   try {
-    const { month, year } = req.query;
+    const { month, year, from, to } = req.query;
     let q = `SELECT c.*,g.name as guest_name,r.room_number FROM collections c LEFT JOIN guests g ON c.guest_id=g.id LEFT JOIN rooms r ON g.room_id=r.id WHERE c.is_deleted=false`;
     const p = [];
-    if (month && year) { p.push(month,year); q += ` AND EXTRACT(MONTH FROM c.collection_date)=$${p.length-1} AND EXTRACT(YEAR FROM c.collection_date)=$${p.length}`; }
+    if (from && to) { p.push(from,to); q += ` AND c.collection_date BETWEEN $${p.length-1} AND $${p.length}`; }
+    else if (month && year) { p.push(month,year); q += ` AND EXTRACT(MONTH FROM c.collection_date)=$${p.length-1} AND EXTRACT(YEAR FROM c.collection_date)=$${p.length}`; }
     q += ' ORDER BY c.collection_date DESC';
     const r = await pool.query(q, p);
     res.json(r.rows);
@@ -467,22 +468,31 @@ router.get('/collections', auth, async (req, res) => {
 
 router.get('/collections/export/pdf', auth, requireAdmin, async (req, res) => {
   try {
-    const { month, year } = req.query;
+    const { month, year, from, to, type } = req.query;
     let q = `SELECT c.*,g.name as guest_name,r.room_number FROM collections c LEFT JOIN guests g ON c.guest_id=g.id LEFT JOIN rooms r ON g.room_id=r.id WHERE c.is_deleted=false AND c.status='confirmed'`;
     const p = [];
-    if (month && year) { p.push(month,year); q += ` AND EXTRACT(MONTH FROM c.collection_date)=$${p.length-1} AND EXTRACT(YEAR FROM c.collection_date)=$${p.length}`; }
+    const hasRange = from && to;
+    if (hasRange) { p.push(from,to); q += ` AND c.collection_date BETWEEN $${p.length-1} AND $${p.length}`; }
+    else if (month && year) { p.push(month,year); q += ` AND EXTRACT(MONTH FROM c.collection_date)=$${p.length-1} AND EXTRACT(YEAR FROM c.collection_date)=$${p.length}`; }
+    if (type) { p.push(type); q += ` AND c.collection_type=$${p.length}`; }
     q += ' ORDER BY c.collection_date ASC';
     const r = await pool.query(q, p);
     const total = r.rows.reduce((s,x) => s + parseFloat(x.amount), 0);
 
+    const periodLabel = hasRange
+      ? `${fmtD(from)} \u2013 ${fmtD(to)}`
+      : (month && year ? new Date(year, month-1, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' }) : 'All time');
+    const typeLabel = type ? type.charAt(0).toUpperCase()+type.slice(1) : 'All Types';
+    const fileSuffix = hasRange ? `${from}_to_${to}` : `${month||'all'}-${year||'all'}`;
+
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="sirimane-collections-${month||'all'}-${year||'all'}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="sirimane-collections-${type||'all'}-${fileSuffix}.pdf"`);
     const doc = new PDFDocument({ margin: 40, size: 'A4' });
     doc.pipe(res);
 
     doc.fontSize(18).font('Helvetica-Bold').text('Siri Mane PG', { align: 'center' });
     doc.fontSize(11).font('Helvetica').text('Collections', { align: 'center' });
-    if (month && year) doc.fontSize(9).fillColor('#666').text(new Date(year, month-1, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' }), { align: 'center' }).fillColor('#000');
+    doc.fontSize(9).fillColor('#666').text(`${periodLabel} \u00b7 ${typeLabel}`, { align: 'center' }).fillColor('#000');
     doc.moveDown(1);
     doc.fontSize(11).font('Helvetica-Bold').text(`Total: ${fmtMoney(total)}`);
     doc.moveDown(1);

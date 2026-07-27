@@ -1661,17 +1661,31 @@ function parsePurchaseVoiceText(rawText) {
 let collectionsListCache = [];
 let collectionsCurrentMonth = null;
 let collectionsCurrentYear = null;
+let collectionsFromDate = null;
+let collectionsToDate = null;
 
-async function pgCollections(month, year) {
+async function pgCollections(month, year, from, to) {
   loading();
   document.getElementById('topbar-actions').innerHTML = `<button class="btn btn-primary btn-sm" onclick="collectionModal()">+ Add Collection</button>`;
   try {
-    const now = new Date();
-    const m = month || (now.getMonth()+1);
-    const y = year || now.getFullYear();
-    collectionsCurrentMonth = m;
-    collectionsCurrentYear = y;
-    const list = await API.getCollections(`?month=${m}&year=${y}`);
+    const useRange = !!(from && to);
+    let m = null, y = null;
+    if (useRange) {
+      collectionsFromDate = from;
+      collectionsToDate = to;
+      collectionsCurrentMonth = null;
+      collectionsCurrentYear = null;
+    } else {
+      const now = new Date();
+      m = month || (now.getMonth()+1);
+      y = year || now.getFullYear();
+      collectionsCurrentMonth = m;
+      collectionsCurrentYear = y;
+      collectionsFromDate = null;
+      collectionsToDate = null;
+    }
+    const query = useRange ? `?from=${from}&to=${to}` : `?month=${m}&year=${y}`;
+    const list = await API.getCollections(query);
     collectionsListCache = list;
     const confirmedList = list.filter(c => c.status === 'confirmed' || !c.status);
     const total = confirmedList.reduce((s,c)=>s+parseFloat(c.amount),0);
@@ -1679,6 +1693,9 @@ async function pgCollections(month, year) {
     confirmedList.forEach(c => { byType[c.collection_type]=(byType[c.collection_type]||0)+parseFloat(c.amount); });
     const pendingVerificationCount = list.filter(c => c.status === 'pending_verification').length;
     const pendingApprovalCount = list.filter(c => c.status === 'pending_approval').length;
+    const periodLabel = useRange
+      ? `${fmtDate(from)} – ${fmtDate(to)}`
+      : new Date(y,m-1,1).toLocaleString('en-IN',{month:'long',year:'numeric'});
     setContent(`
       <div class="page-header"><h1>💵 Collections</h1><p>Track all income — rent, deposits, and extra charges</p></div>
       ${pendingVerificationCount>0?`<div class="alert" style="background:var(--amber-light,#FFFBEB);border:1px solid var(--amber,#F59E0B);color:#92400E;margin-bottom:10px">⏳ ${pendingVerificationCount} resident-reported UPI payment${pendingVerificationCount>1?'s':''} awaiting your confirmation below — check your bank/UPI app, then confirm or reject.</div>`:''}
@@ -1688,7 +1705,7 @@ async function pgCollections(month, year) {
         <button class="btn btn-outline btn-sm" onclick="exportCollectionsPdf()">⬇ Export PDF</button>
       </div>`:''}
       <div class="stat-grid mb-5">
-        <div class="stat-card green"><div class="s-label">This Month (Confirmed)</div><div class="s-value">${fmt(total)}</div><div class="s-sub">${new Date(y,m-1,1).toLocaleString('en-IN',{month:'long',year:'numeric'})}</div></div>
+        <div class="stat-card green"><div class="s-label">This Period (Confirmed)</div><div class="s-value">${fmt(total)}</div><div class="s-sub">${periodLabel}</div></div>
         <div class="stat-card"><div class="s-label">Rent</div><div class="s-value">${fmt(byType['rent']||0)}</div><div class="s-sub" style="color:var(--green)">Monthly rent</div></div>
         <div class="stat-card"><div class="s-label">Deposits</div><div class="s-value">${fmt(byType['deposit']||0)}</div><div class="s-sub" style="color:var(--blue)">Security deposits</div></div>
         <div class="stat-card"><div class="s-label">Extra Charges</div><div class="s-value">${fmt(byType['extra']||byType['other']||0)}</div><div class="s-sub" style="color:var(--amber)">Laundry, food, etc.</div></div>
@@ -1696,8 +1713,13 @@ async function pgCollections(month, year) {
       <div class="card">
         <div class="card-header">
           <h3>All Collections</h3>
-          <div class="flex gap-2 items-center">
+          <div class="flex gap-2 items-center" style="flex-wrap:wrap">
             ${monthPicker(m, y, 'onCollectionsMonthChange')}
+            <span style="color:var(--text-muted,#888);font-size:13px">or</span>
+            <input type="date" id="coll-from" value="${from||''}" onchange="onCollectionsRangeChange()" style="margin:0" title="From date" />
+            <span style="color:var(--text-muted,#888);font-size:13px">to</span>
+            <input type="date" id="coll-to" value="${to||''}" onchange="onCollectionsRangeChange()" style="margin:0" title="To date" />
+            ${useRange?`<button class="btn btn-outline btn-sm" onclick="clearCollectionsRange()">✕ Clear range</button>`:''}
             <select id="coll-type-filter" style="margin:0" onchange="filterCollections()">
               <option value="">All Types</option>
               <option value="rent">Rent</option><option value="deposit">Deposit</option><option value="extra">Extra</option>
@@ -1714,6 +1736,19 @@ async function pgCollections(month, year) {
         </div>
       </div>`);
   } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+}
+
+// Triggered when either the From or To date input changes. Only applies the
+// range once both ends are filled in — a single date on its own isn't a
+// usable range, so we just wait for the second one instead of erroring.
+function onCollectionsRangeChange() {
+  const from = document.getElementById('coll-from')?.value;
+  const to = document.getElementById('coll-to')?.value;
+  if (from && to) pgCollections(null, null, from, to);
+}
+
+function clearCollectionsRange() {
+  pgCollections();
 }
 
 function renderCollectionRows(list) {
@@ -1755,8 +1790,13 @@ function filterCollections() {
 }
 
 function exportCollectionsCsv() {
+  const type = document.getElementById('coll-type-filter')?.value || '';
+  const rows = type ? collectionsListCache.filter(c => c.collection_type === type) : collectionsListCache;
+  const periodSuffix = collectionsFromDate && collectionsToDate
+    ? `${collectionsFromDate}_to_${collectionsToDate}`
+    : `${collectionsCurrentMonth}-${collectionsCurrentYear}`;
   exportArrayToCsv(
-    `sirimane-collections-${collectionsCurrentMonth}-${collectionsCurrentYear}.csv`,
+    `sirimane-collections-${type||'all'}-${periodSuffix}.csv`,
     [
       { label: 'Date', get: c => fmtDate(c.collection_date) },
       { label: 'Type', get: c => c.collection_type },
@@ -1766,12 +1806,20 @@ function exportCollectionsCsv() {
       { label: 'Mode', get: c => c.payment_mode },
       { label: 'Status', get: c => c.status }
     ],
-    collectionsListCache
+    rows
   );
 }
 
 async function exportCollectionsPdf() {
-  try { await API.downloadExport(`/collections/export/pdf?month=${collectionsCurrentMonth}&year=${collectionsCurrentYear}`, `sirimane-collections-${collectionsCurrentMonth}-${collectionsCurrentYear}.pdf`); }
+  const type = document.getElementById('coll-type-filter')?.value || '';
+  const periodSuffix = collectionsFromDate && collectionsToDate
+    ? `${collectionsFromDate}_to_${collectionsToDate}`
+    : `${collectionsCurrentMonth}-${collectionsCurrentYear}`;
+  const periodQuery = collectionsFromDate && collectionsToDate
+    ? `from=${collectionsFromDate}&to=${collectionsToDate}`
+    : `month=${collectionsCurrentMonth}&year=${collectionsCurrentYear}`;
+  const typeQuery = type ? `&type=${type}` : '';
+  try { await API.downloadExport(`/collections/export/pdf?${periodQuery}${typeQuery}`, `sirimane-collections-${type||'all'}-${periodSuffix}.pdf`); }
   catch(e) { alert('Export failed: ' + e.message); }
 }
 
