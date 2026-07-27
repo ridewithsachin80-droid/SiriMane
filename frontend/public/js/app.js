@@ -1909,12 +1909,14 @@ async function pgRentDue() {
     rentDueListCache = list;
     const totalDue = list.reduce((s,g) => s + parseFloat(g.amount_due), 0);
     const fullyPaidCount = list.filter(g => parseFloat(g.amount_due) <= 0).length;
+    const pendingCount = list.filter(g => parseFloat(g.amount_due) > 0).length;
     setContent(`
       <div class="page-header"><h1>📅 Rent Due</h1><p>Running balance for each guest, carried forward across months — not just this month's snapshot</p></div>
-      ${isAdmin()?`<div class="flex gap-2 mb-5">
-        <button class="btn btn-outline btn-sm" onclick="exportRentDueCsv()">⬇ Export CSV</button>
-        <button class="btn btn-outline btn-sm" onclick="exportRentDuePdf()">⬇ Export PDF</button>
-      </div>`:''}
+      <div class="flex gap-2 mb-5" style="flex-wrap:wrap">
+        ${isAdmin()?`<button class="btn btn-outline btn-sm" onclick="exportRentDueCsv()">⬇ Export CSV</button>
+        <button class="btn btn-outline btn-sm" onclick="exportRentDuePdf()">⬇ Export PDF</button>`:''}
+        ${pendingCount>0?`<button class="btn btn-primary btn-sm" onclick="openRentRemindersModal()">💬 Send Reminders (${pendingCount})</button>`:''}
+      </div>
       <div class="stat-grid mb-5">
         <div class="stat-card red"><div class="s-label">Total Outstanding</div><div class="s-value">${fmt(totalDue)}</div><div class="s-sub">Across all guests</div></div>
         <div class="stat-card"><div class="s-label">Settled or Ahead</div><div class="s-value">${fullyPaidCount} / ${list.length}</div><div class="s-sub" style="color:var(--green)">Guests</div></div>
@@ -1926,10 +1928,10 @@ async function pgRentDue() {
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>NAME</th><th>ROOM</th><th>PHONE</th><th>MONTHLY RENT</th><th>BALANCE</th><th>STATUS</th></tr></thead>
+            <thead><tr><th>NAME</th><th>ROOM</th><th>PHONE</th><th>MONTHLY RENT</th><th>BALANCE</th><th>STATUS</th><th>REMIND</th></tr></thead>
             <tbody id="rentdue-tb">
               ${list.length===0
-                ? `<tr class="empty-row"><td colspan="6">No guests with rent configured.</td></tr>`
+                ? `<tr class="empty-row"><td colspan="7">No guests with rent configured.</td></tr>`
                 : list.map(g=>{
                   const due = parseFloat(g.amount_due);
                   const credit = parseFloat(g.credit);
@@ -1940,12 +1942,95 @@ async function pgRentDue() {
                   <td>${fmt(g.monthly_rent)}</td>
                   <td class="${due>0?'text-red fw-600':credit>0?'text-green fw-600':''}">${due>0?fmt(due)+' due':credit>0?fmt(credit)+' credit':'Settled'}</td>
                   <td><span class="badge ${due>0?'badge-red':'badge-green'}">${due>0?'Pending':credit>0?'Ahead':'Settled'}</span></td>
+                  <td>${due>0
+                    ? (g.phone
+                        ? `<button class="btn btn-outline btn-sm" onclick="sendOneRentReminder(${g.id})" title="Send WhatsApp reminder">💬</button>`
+                        : `<span style="font-size:11px;color:var(--text-muted,#999)">No phone</span>`)
+                    : ''}</td>
                 </tr>`;}).join('')}
             </tbody>
           </table>
         </div>
       </div>`);
   } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+}
+
+// Turns a phone number into WhatsApp's expected format: digits only, with
+// the 91 country code prepended for bare 10-digit Indian numbers. Returns
+// null when there's nothing usable, so callers can skip/alert instead of
+// opening a broken wa.me link.
+function cleanPhoneForWhatsapp(phone) {
+  if (!phone) return null;
+  let digits = String(phone).replace(/\D/g, '');
+  if (digits.length === 10) digits = '91' + digits;
+  else if (digits.length === 11 && digits.startsWith('0')) digits = '91' + digits.slice(1);
+  return digits.length >= 11 ? digits : null;
+}
+
+function buildWhatsappUrl(phone, message) {
+  const digits = cleanPhoneForWhatsapp(phone);
+  if (!digits) return null;
+  return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
+}
+
+const RENT_REMINDER_DEFAULT_TEMPLATE = `Hi {name}, this is a reminder from Siri Mane PG that your rent balance is currently pending.
+
+Room: {room}
+Amount Due: {amount}
+
+Please make the payment at your earliest convenience. Thank you!`;
+
+function fillRentReminderTemplate(tpl, g) {
+  return tpl
+    .replace(/\{name\}/g, g.name)
+    .replace(/\{room\}/g, g.room_number ? ('Room '+g.room_number) : '—')
+    .replace(/\{amount\}/g, fmt(parseFloat(g.amount_due)));
+}
+
+// Bulk reminders modal — browsers block firing off several wa.me tabs at
+// once without a click each, so this lists every pending resident with
+// their own "send" button rather than pretending to auto-blast them all.
+function openRentRemindersModal() {
+  const pending = rentDueListCache.filter(g => parseFloat(g.amount_due) > 0);
+  if (pending.length === 0) { alert('No residents currently have rent due.'); return; }
+  const noPhoneCount = pending.filter(g => !g.phone).length;
+  openModal(`
+    <div class="modal" style="max-width:660px">
+      <div class="modal-header"><h3>💬 Send Rent Reminders</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+      <div class="modal-body">
+        <p style="font-size:13px;color:var(--text-muted,#666);margin-bottom:10px">${pending.length} resident${pending.length>1?'s':''} with rent pending${noPhoneCount?` (${noPhoneCount} missing a phone number)`:''}. Each button opens WhatsApp with the message ready — you just hit send there. Placeholders: {name}, {room}, {amount}.</p>
+        <div class="form-group"><label>Message template</label><textarea id="rr-template" rows="6">${RENT_REMINDER_DEFAULT_TEMPLATE}</textarea></div>
+        <div class="table-wrap" style="max-height:300px;overflow:auto;border:1px solid var(--border);border-radius:8px">
+          <table>
+            <thead><tr><th>Name</th><th>Room</th><th>Due</th><th>Phone</th><th></th></tr></thead>
+            <tbody>
+              ${pending.map(g => `<tr>
+                  <td>${g.name}</td>
+                  <td>${g.room_number?'Room '+g.room_number:'—'}</td>
+                  <td class="text-red fw-600">${fmt(g.amount_due)}</td>
+                  <td>${g.phone||'—'}</td>
+                  <td>${g.phone
+                    ? `<button class="btn btn-outline btn-sm" onclick="sendOneRentReminder(${g.id})">💬 WhatsApp</button>`
+                    : `<span style="font-size:12px;color:var(--text-muted,#999)">No phone</span>`}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeModal()">Close</button>
+      </div>
+    </div>`);
+}
+
+function sendOneRentReminder(guestId) {
+  const g = rentDueListCache.find(x => x.id === guestId);
+  if (!g) return;
+  const tpl = document.getElementById('rr-template')?.value || RENT_REMINDER_DEFAULT_TEMPLATE;
+  const message = fillRentReminderTemplate(tpl, g);
+  const url = buildWhatsappUrl(g.phone, message);
+  if (!url) { alert(`No valid phone number for ${g.name}.`); return; }
+  window.open(url, '_blank');
 }
 
 function exportRentDueCsv() {
