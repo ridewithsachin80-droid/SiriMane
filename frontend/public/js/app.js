@@ -1304,7 +1304,7 @@ async function delInboxMsg(id) {
 }
 
 // ── PURCHASES (Expenses) ──────────────────────────
-const PURCHASE_CATEGORIES = ['Groceries','Maintenance','Electricity','Water','Internet','Cleaning','Salary','Furniture','Repairs','Other'];
+const PURCHASE_CATEGORIES = ['Groceries','Maintenance','Electricity','Water','Internet','Cleaning','Salary','Building Rent','Furniture','Repairs','Other'];
 const PURCHASE_PAYMENT_MODES = ['Cash','UPI','Bank Transfer','Cheque'];
 
 // Extra spoken phrases that map to a category/mode beyond its own name.
@@ -1316,6 +1316,7 @@ const PURCHASE_CATEGORY_SYNONYMS = {
   Internet: ['wifi','wi-fi','broadband'],
   Cleaning: ['cleaning supplies','housekeeping','sweeper','detergent'],
   Salary: ['wages','staff pay','payroll'],
+  'Building Rent': ['building rent','shop rent','landlord rent','house rent','property rent'],
   Furniture: ['sofa','mattress'],
   Repairs: ['repair','plumber','plumbing','electrician']
 };
@@ -1369,7 +1370,7 @@ async function pgPurchases(month, year) {
             ${monthPicker(m, y, 'onPurchasesMonthChange')}
             <select id="cat-filter" style="margin:0" onchange="filterPurchases()">
               <option value="">All Categories</option>
-              ${['Groceries','Maintenance','Electricity','Water','Internet','Cleaning','Salary','Other'].map(c=>`<option>${c}</option>`).join('')}
+              ${PURCHASE_CATEGORIES.map(c=>`<option>${c}</option>`).join('')}
             </select>
             <input type="text" id="pu-search" placeholder="🔍 Search description, paid to..." style="width:200px;margin:0" oninput="filterPurchases()" />
             <button class="btn btn-primary btn-sm" onclick="purchaseModal()">+ Add Purchase</button>
@@ -1938,7 +1939,7 @@ async function pgRentDue() {
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>NAME</th><th>ROOM</th><th>PHONE</th><th>MONTHLY RENT</th><th>BALANCE</th><th>DEPOSIT PENDING</th><th>STATUS</th><th>REMIND</th></tr></thead>
+            <thead><tr><th>NAME</th><th>ROOM</th><th>PHONE</th><th>MONTHLY RENT</th><th>RENT PENDING</th><th>DEPOSIT PENDING</th><th>TOTAL PAYABLE</th><th>STATUS</th><th>REMIND</th></tr></thead>
             <tbody id="rentdue-tb">${renderRentDueRows(list)}</tbody>
           </table>
         </div>
@@ -1947,11 +1948,12 @@ async function pgRentDue() {
 }
 
 function renderRentDueRows(list) {
-  if (list.length === 0) return `<tr class="empty-row"><td colspan="8">No guests match.</td></tr>`;
+  if (list.length === 0) return `<tr class="empty-row"><td colspan="9">No guests match.</td></tr>`;
   return list.map(g=>{
     const due = parseFloat(g.amount_due);
     const credit = parseFloat(g.credit);
     const depPending = parseFloat(g.deposit_pending||0);
+    const totalPayable = due + depPending;
     const anyPending = due>0 || depPending>0;
     return `<tr data-search="${g.name.toLowerCase()} ${(g.room_number||'').toLowerCase()} ${(g.phone||'').toLowerCase()}">
       <td><strong>${g.name}</strong></td>
@@ -1960,6 +1962,7 @@ function renderRentDueRows(list) {
       <td>${fmt(g.monthly_rent)}</td>
       <td class="${due>0?'text-red fw-600':credit>0?'text-green fw-600':''}">${due>0?fmt(due)+' due':credit>0?fmt(credit)+' credit':'Settled'}</td>
       <td class="${depPending>0?'text-red fw-600':''}">${depPending>0?fmt(depPending):'—'}</td>
+      <td class="${totalPayable>0?'text-red fw-600':''}">${totalPayable>0?fmt(totalPayable):'—'}</td>
       <td><span class="badge ${anyPending?'badge-red':'badge-green'}">${anyPending?'Pending':credit>0?'Ahead':'Settled'}</span></td>
       <td>${anyPending
         ? (g.phone
@@ -2078,9 +2081,10 @@ function exportRentDueCsv() {
       { label: 'Room', get: g => g.room_number },
       { label: 'Phone', get: g => g.phone },
       { label: 'Monthly Rent', get: g => g.monthly_rent },
-      { label: 'Amount Due', get: g => g.amount_due },
+      { label: 'Rent Pending', get: g => g.amount_due },
       { label: 'Credit', get: g => g.credit },
-      { label: 'Deposit Pending', get: g => g.deposit_pending || 0 }
+      { label: 'Deposit Pending', get: g => g.deposit_pending || 0 },
+      { label: 'Total Payable', get: g => parseFloat(g.amount_due||0) + parseFloat(g.deposit_pending||0) }
     ],
     rentDueListCache
   );

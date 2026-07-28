@@ -1263,13 +1263,14 @@ router.get('/rent-due/export/pdf', auth, requireAdmin, async (req, res) => {
     doc.moveDown(1);
 
     drawPdfTable(doc, [
-      { label: 'Name', x: 40, width: 95, get: r => r.name },
-      { label: 'Room', x: 140, width: 50, get: r => r.room_number ? 'Room '+r.room_number : '—' },
-      { label: 'Phone', x: 195, width: 80, get: r => r.phone },
-      { label: 'Rent', x: 280, width: 65, get: r => fmtMoney(r.monthly_rent) },
-      { label: 'Balance', x: 350, width: 80, get: r => parseFloat(r.amount_due) > 0 ? fmtMoney(r.amount_due) + ' due' : parseFloat(r.credit) > 0 ? fmtMoney(r.credit) + ' credit' : 'Settled', color: r => parseFloat(r.amount_due) > 0 ? '#b91c1c' : '#0a7a3e' },
-      { label: 'Deposit Pending', x: 435, width: 75, get: r => parseFloat(r.deposit_pending) > 0 ? fmtMoney(r.deposit_pending) : '—', color: r => parseFloat(r.deposit_pending) > 0 ? '#b91c1c' : '#000' },
-      { label: 'Status', x: 515, width: 45, get: r => parseFloat(r.amount_due) > 0 ? 'Pending' : 'OK' }
+      { label: 'Name', x: 40, width: 80, get: r => r.name },
+      { label: 'Room', x: 120, width: 45, get: r => r.room_number ? 'Room '+r.room_number : '—' },
+      { label: 'Phone', x: 165, width: 70, get: r => r.phone },
+      { label: 'Rent', x: 235, width: 55, get: r => fmtMoney(r.monthly_rent) },
+      { label: 'Rent Pending', x: 290, width: 65, get: r => parseFloat(r.amount_due) > 0 ? fmtMoney(r.amount_due) : parseFloat(r.credit) > 0 ? fmtMoney(r.credit) + ' cr' : '—', color: r => parseFloat(r.amount_due) > 0 ? '#b91c1c' : '#0a7a3e' },
+      { label: 'Deposit Pending', x: 355, width: 65, get: r => parseFloat(r.deposit_pending) > 0 ? fmtMoney(r.deposit_pending) : '—', color: r => parseFloat(r.deposit_pending) > 0 ? '#b91c1c' : '#000' },
+      { label: 'Total Payable', x: 420, width: 65, get: r => (parseFloat(r.amount_due)+parseFloat(r.deposit_pending||0)) > 0 ? fmtMoney(parseFloat(r.amount_due)+parseFloat(r.deposit_pending||0)) : '—', color: r => (parseFloat(r.amount_due)+parseFloat(r.deposit_pending||0)) > 0 ? '#b91c1c' : '#000' },
+      { label: 'Status', x: 485, width: 40, get: r => parseFloat(r.amount_due) > 0 ? 'Pending' : 'OK' }
     ], list);
 
     doc.end();
