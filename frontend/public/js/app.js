@@ -1926,38 +1926,63 @@ async function pgRentDue() {
       <div class="card">
         <div class="card-header">
           <h3>All Active Guests</h3>
-          <input type="text" placeholder="🔍 Search name, room, phone..." style="width:200px;margin:0" oninput="filterTable(this.value,'rentdue-tb')" />
+          <div class="flex gap-2 items-center" style="flex-wrap:wrap">
+            <select id="rentdue-filter" style="margin:0" onchange="filterRentDueList()">
+              <option value="all">Show: All Guests</option>
+              <option value="rent">Rent Due Only</option>
+              <option value="deposit">Deposit Pending Only</option>
+              <option value="either">Rent Due or Deposit Pending</option>
+            </select>
+            <input type="text" id="rentdue-search" placeholder="🔍 Search name, room, phone..." style="width:200px;margin:0" oninput="filterRentDueList()" />
+          </div>
         </div>
         <div class="table-wrap">
           <table>
             <thead><tr><th>NAME</th><th>ROOM</th><th>PHONE</th><th>MONTHLY RENT</th><th>BALANCE</th><th>DEPOSIT PENDING</th><th>STATUS</th><th>REMIND</th></tr></thead>
-            <tbody id="rentdue-tb">
-              ${list.length===0
-                ? `<tr class="empty-row"><td colspan="8">No guests with rent configured.</td></tr>`
-                : list.map(g=>{
-                  const due = parseFloat(g.amount_due);
-                  const credit = parseFloat(g.credit);
-                  const depPending = parseFloat(g.deposit_pending||0);
-                  const anyPending = due>0 || depPending>0;
-                  return `<tr data-search="${g.name.toLowerCase()} ${(g.room_number||'').toLowerCase()} ${(g.phone||'').toLowerCase()}">
-                  <td><strong>${g.name}</strong></td>
-                  <td>${g.room_number?'Room '+g.room_number:'—'}</td>
-                  <td>${g.phone||'—'}</td>
-                  <td>${fmt(g.monthly_rent)}</td>
-                  <td class="${due>0?'text-red fw-600':credit>0?'text-green fw-600':''}">${due>0?fmt(due)+' due':credit>0?fmt(credit)+' credit':'Settled'}</td>
-                  <td class="${depPending>0?'text-red fw-600':''}">${depPending>0?fmt(depPending):'—'}</td>
-                  <td><span class="badge ${anyPending?'badge-red':'badge-green'}">${anyPending?'Pending':credit>0?'Ahead':'Settled'}</span></td>
-                  <td>${anyPending
-                    ? (g.phone
-                        ? `<button class="btn btn-outline btn-sm" onclick="sendOneRentReminder(${g.id})" title="Send WhatsApp reminder">💬</button>`
-                        : `<span style="font-size:11px;color:var(--text-muted,#999)">No phone</span>`)
-                    : ''}</td>
-                </tr>`;}).join('')}
-            </tbody>
+            <tbody id="rentdue-tb">${renderRentDueRows(list)}</tbody>
           </table>
         </div>
       </div>`);
   } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+}
+
+function renderRentDueRows(list) {
+  if (list.length === 0) return `<tr class="empty-row"><td colspan="8">No guests match.</td></tr>`;
+  return list.map(g=>{
+    const due = parseFloat(g.amount_due);
+    const credit = parseFloat(g.credit);
+    const depPending = parseFloat(g.deposit_pending||0);
+    const anyPending = due>0 || depPending>0;
+    return `<tr data-search="${g.name.toLowerCase()} ${(g.room_number||'').toLowerCase()} ${(g.phone||'').toLowerCase()}">
+      <td><strong>${g.name}</strong></td>
+      <td>${g.room_number?'Room '+g.room_number:'—'}</td>
+      <td>${g.phone||'—'}</td>
+      <td>${fmt(g.monthly_rent)}</td>
+      <td class="${due>0?'text-red fw-600':credit>0?'text-green fw-600':''}">${due>0?fmt(due)+' due':credit>0?fmt(credit)+' credit':'Settled'}</td>
+      <td class="${depPending>0?'text-red fw-600':''}">${depPending>0?fmt(depPending):'—'}</td>
+      <td><span class="badge ${anyPending?'badge-red':'badge-green'}">${anyPending?'Pending':credit>0?'Ahead':'Settled'}</span></td>
+      <td>${anyPending
+        ? (g.phone
+            ? `<button class="btn btn-outline btn-sm" onclick="sendOneRentReminder(${g.id})" title="Send WhatsApp reminder">💬</button>`
+            : `<span style="font-size:11px;color:var(--text-muted,#999)">No phone</span>`)
+        : ''}</td>
+    </tr>`;
+  }).join('');
+}
+
+function filterRentDueList() {
+  const mode = document.getElementById('rentdue-filter')?.value || 'all';
+  const search = (document.getElementById('rentdue-search')?.value || '').toLowerCase().trim();
+  let rows = rentDueListCache;
+  if (mode === 'rent') rows = rows.filter(g => parseFloat(g.amount_due) > 0);
+  else if (mode === 'deposit') rows = rows.filter(g => parseFloat(g.deposit_pending||0) > 0);
+  else if (mode === 'either') rows = rows.filter(g => parseFloat(g.amount_due) > 0 || parseFloat(g.deposit_pending||0) > 0);
+  if (search) rows = rows.filter(g =>
+    g.name.toLowerCase().includes(search) ||
+    (g.room_number||'').toLowerCase().includes(search) ||
+    (g.phone||'').toLowerCase().includes(search)
+  );
+  document.getElementById('rentdue-tb').innerHTML = renderRentDueRows(rows);
 }
 
 // Turns a phone number into WhatsApp's expected format: digits only, with
