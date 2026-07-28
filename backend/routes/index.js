@@ -1215,16 +1215,13 @@ async function computeRentDueList() {
   const results = [];
   for (const guest of guests.rows) {
     const { currentBalance } = await computeGuestLedger(guest);
-    const depositRequired = parseFloat(guest.deposit_amount) || 0;
-    let depositPending = 0;
-    if (depositRequired > 0) {
-      const depositPaidR = await pool.query(
-        `SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE guest_id=$1 AND collection_type='deposit' AND is_deleted=false AND status='confirmed'`,
-        [guest.id]
-      );
-      const depositPaid = parseFloat(depositPaidR.rows[0].total) || 0;
-      depositPending = Math.max(0, depositRequired - depositPaid);
-    }
+    // Standard expectation is one month's rent as deposit. The 'Deposit (₹)'
+    // field on the guest profile is how much of that has actually been
+    // collected so far (it's bumped as top-ups come in), so the shortfall
+    // against monthly rent — not against itself — is what's still pending.
+    const depositRequired = parseFloat(guest.monthly_rent) || 0;
+    const depositPaid = parseFloat(guest.deposit_amount) || 0;
+    const depositPending = Math.max(0, depositRequired - depositPaid);
     results.push({
       id: guest.id,
       name: guest.name,
