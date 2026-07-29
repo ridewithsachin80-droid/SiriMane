@@ -2207,7 +2207,14 @@ function renderReportsPage(r, controlsHtml) {
         </div>
       </div>
       <div class="card">
-        <div class="card-header"><h3>📈 Trend (Last 6 Months)</h3></div>
+        <div class="card-header">
+          <h3>📈 Trend</h3>
+          <select id="trend-range" style="margin:0" onchange="loadTrendChart(this.value)">
+            <option value="6">Last 6 Months</option>
+            <option value="12">Last 1 Year</option>
+            <option value="24">Last 2 Years</option>
+          </select>
+        </div>
         <div class="card-body" id="trend-chart-wrap"><div class="loading-center"><div class="spinner"></div></div></div>
       </div>`;
 }
@@ -2219,11 +2226,13 @@ async function exportReport(type, from, to) {
   } catch(e) { alert('Export failed: ' + e.message); }
 }
 
-async function loadTrendChart() {
+async function loadTrendChart(months) {
   const wrap = document.getElementById('trend-chart-wrap');
   if (!wrap) return;
+  months = parseInt(months) || parseInt(document.getElementById('trend-range')?.value) || 6;
+  wrap.innerHTML = `<div class="loading-center"><div class="spinner"></div></div>`;
   try {
-    const trend = await API.getReportsTrend(6);
+    const trend = await API.getReportsTrend(months);
     wrap.innerHTML = renderTrendChart(trend);
   } catch(e) {
     wrap.innerHTML = `<div class="alert alert-danger">${e.message}</div>`;
@@ -2237,17 +2246,20 @@ function renderTrendChart(trend) {
   const chartHeight = 180;
   const barMaxHeight = 130;
   const width = trend.length * groupWidth;
+  const showYear = trend.length > 12;
 
   const bars = trend.map((t, i) => {
     const x = i * groupWidth;
     const incH = (t.income / maxVal) * barMaxHeight;
     const expH = (t.expenses / maxVal) * barMaxHeight;
     const baseY = barMaxHeight + 10;
+    const parts = t.label.split(' '); // e.g. ["Jul","2026"]
+    const xLabel = showYear ? `${parts[0]} '${(parts[1]||'').slice(-2)}` : parts[0];
     return `
       <g>
         <rect x="${x+15}" y="${baseY-incH}" width="22" height="${incH}" fill="var(--green)" rx="2"><title>${t.label} Income: ${fmt(t.income)}</title></rect>
         <rect x="${x+45}" y="${baseY-expH}" width="22" height="${expH}" fill="var(--red)" rx="2"><title>${t.label} Expenses: ${fmt(t.expenses)}</title></rect>
-        <text x="${x+45}" y="${baseY+18}" text-anchor="middle" font-size="11" fill="var(--text-muted)">${t.label.split(' ')[0]}</text>
+        <text x="${x+45}" y="${baseY+18}" text-anchor="middle" font-size="11" fill="var(--text-muted)">${xLabel}</text>
       </g>`;
   }).join('');
 
