@@ -1939,12 +1939,42 @@ async function pgRentDue() {
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>NAME</th><th>ROOM</th><th>PHONE</th><th>MONTHLY RENT</th><th>RENT PENDING</th><th>DEPOSIT PENDING</th><th>TOTAL PAYABLE</th><th>STATUS</th><th>REMIND</th></tr></thead>
+            <thead><tr>
+              ${rentDueSortHeader('name','NAME')}
+              ${rentDueSortHeader('room_number','ROOM')}
+              <th>PHONE</th>
+              ${rentDueSortHeader('monthly_rent','MONTHLY RENT')}
+              ${rentDueSortHeader('amount_due','RENT PENDING')}
+              ${rentDueSortHeader('deposit_pending','DEPOSIT PENDING')}
+              ${rentDueSortHeader('total_payable','TOTAL PAYABLE')}
+              <th>STATUS</th>
+              <th>REMIND</th>
+            </tr></thead>
             <tbody id="rentdue-tb">${renderRentDueRows(list)}</tbody>
           </table>
         </div>
       </div>`);
   } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+}
+
+let rentDueSort = { key: null, dir: 'asc' };
+
+function rentDueSortHeader(key, label) {
+  const active = rentDueSort.key === key;
+  const arrow = active ? (rentDueSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+  return `<th style="cursor:pointer;user-select:none;white-space:nowrap" onclick="sortRentDueList('${key}')" title="Click to sort">${label}${arrow}</th>`;
+}
+
+function sortRentDueList(key) {
+  if (rentDueSort.key === key) {
+    rentDueSort.dir = rentDueSort.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    // Text columns default to A-Z; numeric "pending" columns are more useful
+    // starting high-to-low, since that's who you'd chase first.
+    rentDueSort.key = key;
+    rentDueSort.dir = (key === 'name' || key === 'room_number') ? 'asc' : 'desc';
+  }
+  filterRentDueList();
 }
 
 function renderRentDueRows(list) {
@@ -1985,6 +2015,18 @@ function filterRentDueList() {
     (g.room_number||'').toLowerCase().includes(search) ||
     (g.phone||'').toLowerCase().includes(search)
   );
+  if (rentDueSort.key) {
+    const { key, dir } = rentDueSort;
+    rows = [...rows].sort((a,b) => {
+      let av, bv;
+      if (key === 'total_payable') { av = parseFloat(a.amount_due)+parseFloat(a.deposit_pending||0); bv = parseFloat(b.amount_due)+parseFloat(b.deposit_pending||0); }
+      else if (key === 'name' || key === 'room_number') { av = (a[key]||'').toString().toLowerCase(); bv = (b[key]||'').toString().toLowerCase(); }
+      else { av = parseFloat(a[key])||0; bv = parseFloat(b[key])||0; }
+      if (av < bv) return dir === 'asc' ? -1 : 1;
+      if (av > bv) return dir === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }
   document.getElementById('rentdue-tb').innerHTML = renderRentDueRows(rows);
 }
 
