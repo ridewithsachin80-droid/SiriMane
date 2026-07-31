@@ -654,10 +654,11 @@ router.put('/collections/:id/confirm', auth, requireAdmin, async (req, res) => {
 // ── PURCHASES (Expenses) ─────────────────────────
 router.get('/purchases', auth, async (req, res) => {
   try {
-    const { month, year } = req.query;
+    const { month, year, from, to } = req.query;
     let q = 'SELECT * FROM purchases WHERE is_deleted=false';
     const p = [];
-    if (month && year) { p.push(month,year); q += ` AND EXTRACT(MONTH FROM purchase_date)=$${p.length-1} AND EXTRACT(YEAR FROM purchase_date)=$${p.length}`; }
+    if (from && to) { p.push(from,to); q += ` AND purchase_date BETWEEN $${p.length-1} AND $${p.length}`; }
+    else if (month && year) { p.push(month,year); q += ` AND EXTRACT(MONTH FROM purchase_date)=$${p.length-1} AND EXTRACT(YEAR FROM purchase_date)=$${p.length}`; }
     q += ' ORDER BY purchase_date DESC';
     const r = await pool.query(q, p);
     res.json(r.rows);
@@ -666,22 +667,31 @@ router.get('/purchases', auth, async (req, res) => {
 
 router.get('/purchases/export/pdf', auth, requireAdmin, async (req, res) => {
   try {
-    const { month, year } = req.query;
+    const { month, year, from, to, category, mode } = req.query;
     let q = `SELECT * FROM purchases WHERE is_deleted=false AND status='confirmed'`;
     const p = [];
-    if (month && year) { p.push(month,year); q += ` AND EXTRACT(MONTH FROM purchase_date)=$${p.length-1} AND EXTRACT(YEAR FROM purchase_date)=$${p.length}`; }
+    const hasRange = from && to;
+    if (hasRange) { p.push(from,to); q += ` AND purchase_date BETWEEN $${p.length-1} AND $${p.length}`; }
+    else if (month && year) { p.push(month,year); q += ` AND EXTRACT(MONTH FROM purchase_date)=$${p.length-1} AND EXTRACT(YEAR FROM purchase_date)=$${p.length}`; }
+    if (category) { p.push(category); q += ` AND category=$${p.length}`; }
+    if (mode) { p.push(mode); q += ` AND LOWER(payment_mode)=LOWER($${p.length})`; }
     q += ' ORDER BY purchase_date ASC';
     const r = await pool.query(q, p);
     const total = r.rows.reduce((s,x) => s + parseFloat(x.amount), 0);
 
+    const periodLabel = hasRange
+      ? `${fmtD(from)} \u2013 ${fmtD(to)}`
+      : (month && year ? new Date(year, month-1, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' }) : 'All time');
+    const fileSuffix = hasRange ? `${from}_to_${to}` : `${month||'all'}-${year||'all'}`;
+
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="sirimane-purchases-${month||'all'}-${year||'all'}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="sirimane-purchases-${category||'all'}-${fileSuffix}.pdf"`);
     const doc = new PDFDocument({ margin: 40, size: 'A4' });
     doc.pipe(res);
 
     doc.fontSize(18).font('Helvetica-Bold').text('Siri Mane PG', { align: 'center' });
     doc.fontSize(11).font('Helvetica').text('Purchases', { align: 'center' });
-    if (month && year) doc.fontSize(9).fillColor('#666').text(new Date(year, month-1, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' }), { align: 'center' }).fillColor('#000');
+    doc.fontSize(9).fillColor('#666').text(`${periodLabel}${category ? ' \u00b7 '+category : ''}`, { align: 'center' }).fillColor('#000');
     doc.moveDown(1);
     doc.fontSize(11).font('Helvetica-Bold').text(`Total: ${fmtMoney(total)}`);
     doc.moveDown(1);

@@ -252,52 +252,83 @@ async function pgDashboard() {
 }
 
 // ── ROOMS ─────────────────────────────────────────
+let roomsListCache = [];
+
 async function pgRooms() {
   loading();
   document.getElementById('topbar-actions').innerHTML = `<button class="btn btn-primary btn-sm" onclick="roomModal()">+ Add Room</button>`;
   try {
     const list = await API.getRooms();
+    roomsListCache = list;
+    const floors = [...new Set(list.map(r => r.floor))].sort((a,b)=>a-b);
     setContent(`
       <div class="page-header"><h1>Rooms</h1><p>Manage rooms including bunk beds</p></div>
       <div class="card">
         <div class="card-header">
           <h3>All Rooms</h3>
-          <div class="flex gap-2">
-            <input type="text" placeholder="🔍 Search room, floor, type..." style="width:200px;margin:0" oninput="filterTable(this.value,'rooms-tb')" />
+          <div class="flex gap-2" style="flex-wrap:wrap">
+            <select id="room-floor-filter" style="margin:0" onchange="filterRooms()">
+              <option value="">All Floors</option>
+              ${floors.map(f=>`<option value="${f}">Floor ${f}</option>`).join('')}
+            </select>
+            <select id="room-status-filter" style="margin:0" onchange="filterRooms()">
+              <option value="">All Status</option>
+              <option value="available">Available</option>
+              <option value="partial">Partial</option>
+              <option value="full">Full</option>
+            </select>
+            <input type="text" id="room-search" placeholder="🔍 Search room, floor, type..." style="width:200px;margin:0" oninput="filterRooms()" />
             <button class="btn btn-primary btn-sm" onclick="roomModal()">+ Add Room</button>
           </div>
         </div>
         <div class="table-wrap">
           <table>
             <thead><tr><th>ROOM NO.</th><th>FLOOR</th><th>TYPE</th><th>CAPACITY</th><th>OCCUPIED</th><th>RENT</th><th>STATUS</th><th>ACTIONS</th></tr></thead>
-            <tbody id="rooms-tb">
-              ${list.length===0
-                ? `<tr class="empty-row"><td colspan="8">No rooms yet. Click Add Room to get started.</td></tr>`
-                : list.map(r=>{
-                  const occ = parseInt(r.occupied_beds)||0;
-                  const full = occ >= r.total_beds;
-                  return `<tr data-search="${r.room_number.toLowerCase()} floor ${r.floor} ${r.room_type.toLowerCase()}">
-                    <td><strong>${r.room_number}</strong></td>
-                    <td>Floor ${r.floor}</td>
-                    <td style="text-transform:capitalize">${r.room_type}</td>
-                    <td>${r.total_beds} beds</td>
-                    <td>${occ}/${r.total_beds}</td>
-                    <td>${fmt(r.monthly_rent)}/bed</td>
-                    <td><span class="badge ${full?'badge-red':occ>0?'badge-amber':'badge-green'}">${full?'Full':occ>0?'Partial':'Available'}</span></td>
-                    <td>
-                      <div class="flex gap-2">
-                        <button class="btn btn-outline btn-sm" onclick="roomModal(${JSON.stringify(r).replace(/"/g,'&quot;')})">Edit</button>
-                        ${isAdmin()?`<button class="btn btn-danger btn-sm" onclick="delRoom(${r.id},'${r.room_number}')">Delete</button>`:''}
-                      </div>
-                    </td>
-                  </tr>`;
-                }).join('')}
-            </tbody>
+            <tbody id="rooms-tb">${renderRoomRows(list)}</tbody>
           </table>
         </div>
       </div>
     `);
   } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+}
+
+function renderRoomRows(list) {
+  if (list.length === 0) return `<tr class="empty-row"><td colspan="8">No rooms match.</td></tr>`;
+  return list.map(r=>{
+    const occ = parseInt(r.occupied_beds)||0;
+    const full = occ >= r.total_beds;
+    return `<tr data-search="${r.room_number.toLowerCase()} floor ${r.floor} ${r.room_type.toLowerCase()}">
+      <td><strong>${r.room_number}</strong></td>
+      <td>Floor ${r.floor}</td>
+      <td style="text-transform:capitalize">${r.room_type}</td>
+      <td>${r.total_beds} beds</td>
+      <td>${occ}/${r.total_beds}</td>
+      <td>${fmt(r.monthly_rent)}/bed</td>
+      <td><span class="badge ${full?'badge-red':occ>0?'badge-amber':'badge-green'}">${full?'Full':occ>0?'Partial':'Available'}</span></td>
+      <td>
+        <div class="flex gap-2">
+          <button class="btn btn-outline btn-sm" onclick="roomModal(${JSON.stringify(r).replace(/"/g,'&quot;')})">Edit</button>
+          ${isAdmin()?`<button class="btn btn-danger btn-sm" onclick="delRoom(${r.id},'${r.room_number}')">Delete</button>`:''}
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function filterRooms() {
+  const floor = document.getElementById('room-floor-filter')?.value || '';
+  const status = document.getElementById('room-status-filter')?.value || '';
+  const q = (document.getElementById('room-search')?.value || '').toLowerCase().trim();
+  let rows = roomsListCache;
+  if (floor) rows = rows.filter(r => String(r.floor) === floor);
+  if (status) rows = rows.filter(r => {
+    const occ = parseInt(r.occupied_beds)||0;
+    const full = occ >= r.total_beds;
+    const s = full ? 'full' : occ>0 ? 'partial' : 'available';
+    return s === status;
+  });
+  if (q) rows = rows.filter(r => `${r.room_number} floor ${r.floor} ${r.room_type}`.toLowerCase().includes(q));
+  document.getElementById('rooms-tb').innerHTML = renderRoomRows(rows);
 }
 
 function roomModal(r={}) {
@@ -341,6 +372,7 @@ async function delRoom(id,num) {
 
 // ── GUESTS ────────────────────────────────────────
 let guestsCurrentFilter = 'active';
+let guestsListCache = [];
 
 async function pgGuests(filter) {
   loading();
@@ -349,10 +381,12 @@ async function pgGuests(filter) {
   document.getElementById('topbar-actions').innerHTML = `<button class="btn btn-primary btn-sm" onclick="guestModal()">+ Add Guest</button>`;
   try {
     const list = await API.getGuests('?active=all');
+    guestsListCache = list;
     const filtered = f === 'active' ? list.filter(g=>g.is_active) : f === 'left' ? list.filter(g=>!g.is_active) : list;
     const hasVariance = (g) => g.room_id && g.room_rent !== null && g.room_rent !== undefined && parseFloat(g.monthly_rent) !== parseFloat(g.room_rent);
     const pendingCount = list.filter(g => hasVariance(g) && !g.rent_variance_approved).length;
     const leftCount = list.filter(g=>!g.is_active).length;
+    const rooms = [...new Set(list.filter(g=>g.room_number).map(g => g.room_number))].sort();
     setContent(`
       <div class="page-header"><h1>Guests</h1><p>Register and manage PG residents</p></div>
       ${pendingCount>0?`<div class="alert" style="background:#FFFBEB;border:1px solid var(--amber);color:#92400E;margin-bottom:16px">⏳ ${pendingCount} guest${pendingCount>1?'s have':' has'} a rent that differs from their room's standard rate and ${pendingCount>1?'need':'needs'} your approval — look for the amber "Variance" badge below.</div>`:''}
@@ -364,45 +398,70 @@ async function pgGuests(filter) {
       <div class="card">
         <div class="card-header">
           <h3>All Guests</h3>
-          <div class="flex gap-2">
-            <input type="text" placeholder="🔍 Search..." style="width:200px;margin:0" oninput="filterTable(this.value,'guests-tb')" />
+          <div class="flex gap-2" style="flex-wrap:wrap">
+            <select id="guest-room-filter" style="margin:0" onchange="filterGuests()">
+              <option value="">All Rooms</option>
+              ${rooms.map(r=>`<option value="${r}">Room ${r}</option>`).join('')}
+            </select>
+            <select id="guest-docs-filter" style="margin:0" onchange="filterGuests()">
+              <option value="">All Docs</option>
+              <option value="present">Docs on File</option>
+              <option value="missing">Docs Missing</option>
+            </select>
+            <input type="text" id="guest-search" placeholder="🔍 Search..." style="width:200px;margin:0" oninput="filterGuests()" />
             <button class="btn btn-primary btn-sm" onclick="guestModal()">+ Add Guest</button>
           </div>
         </div>
         <div class="table-wrap">
           <table>
             <thead><tr><th>NAME</th><th>PHONE</th><th>ROOM / BERTH</th><th>CHECK-IN</th><th>RENT</th><th>DEPOSIT</th><th>STATUS</th><th>DOCS</th><th>ACTIONS</th></tr></thead>
-            <tbody id="guests-tb">
-              ${filtered.length===0
-                ? `<tr class="empty-row"><td colspan="9">${f==='left'?'No guests have checked out yet.':'No guests yet. Click Add Guest to register.'}</td></tr>`
-                : filtered.map(g=>{
-                  const variance = hasVariance(g);
-                  const needsApproval = variance && !g.rent_variance_approved;
-                  return `
-                <tr data-search="${g.name.toLowerCase()} ${g.phone||''}" style="${!g.is_active?'opacity:0.55':''}">
-                  <td><strong style="${!g.is_active?'text-decoration:line-through':''}">${g.name}</strong><br><span class="text-muted">${g.email||''}</span></td>
-                  <td style="${!g.is_active?'text-decoration:line-through':''}">${g.phone||'—'}</td>
-                  <td style="${!g.is_active?'text-decoration:line-through':''}">${g.room_number?'Room '+g.room_number+(g.bed_number?' / Bed '+g.bed_number:''):'-'}</td>
-                  <td>${fmtDate(g.join_date)}${!g.is_active && g.leave_date ? `<br><span class="text-muted" style="font-size:11px">→ ${fmtDate(g.leave_date)}</span>` : ''}</td>
-                  <td style="${!g.is_active?'text-decoration:line-through':''}">${fmt(g.monthly_rent)}/mo ${variance?`<span class="badge ${needsApproval?'badge-amber':'badge-blue'}" title="Room rate is ${fmt(g.room_rent)}">${needsApproval?'Pending Approval':'Variance'}</span>`:''}</td>
-                  <td style="${!g.is_active?'text-decoration:line-through':''}">${fmt(g.deposit_amount)}</td>
-                  <td><span class="badge ${g.is_active?'badge-green':'badge-red'}">${g.is_active?'Active':'Left'}</span></td>
-                  <td><span class="badge badge-gray">${g.id_proof_type||'—'}</span></td>
-                  <td>
-                    <div class="flex gap-2">
-                      <button class="btn btn-outline btn-sm" onclick="viewGuest(${g.id})">View</button>
-                      <button class="btn btn-primary btn-sm" onclick="guestModal(null,${g.id})">Edit</button>
-                      ${needsApproval && isAdmin()?`<button class="btn btn-success btn-sm" onclick="approveRentVariance(${g.id})">Approve Rent</button>`:''}
-                      ${g.is_active && isAdmin()?`<button class="btn btn-outline btn-sm" onclick="roomShiftModal(${g.id},'${g.name.replace(/'/g,"\\'")}')">Shift Room</button>`:''}
-                      ${g.is_active && isAdmin()?`<button class="btn btn-danger btn-sm" onclick="checkoutModal(${g.id})">Checkout</button>`:''}
-                    </div>
-                  </td>
-                </tr>`;}).join('')}
-            </tbody>
+            <tbody id="guests-tb">${renderGuestRows(filtered, f)}</tbody>
           </table>
         </div>
       </div>`);
   } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+}
+
+function renderGuestRows(filtered, f) {
+  if (filtered.length === 0) return `<tr class="empty-row"><td colspan="9">${f==='left'?'No guests have checked out yet.':'No guests match.'}</td></tr>`;
+  const hasVariance = (g) => g.room_id && g.room_rent !== null && g.room_rent !== undefined && parseFloat(g.monthly_rent) !== parseFloat(g.room_rent);
+  return filtered.map(g=>{
+    const variance = hasVariance(g);
+    const needsApproval = variance && !g.rent_variance_approved;
+    return `
+    <tr data-search="${g.name.toLowerCase()} ${g.phone||''}" style="${!g.is_active?'opacity:0.55':''}">
+      <td><strong style="${!g.is_active?'text-decoration:line-through':''}">${g.name}</strong><br><span class="text-muted">${g.email||''}</span></td>
+      <td style="${!g.is_active?'text-decoration:line-through':''}">${g.phone||'—'}</td>
+      <td style="${!g.is_active?'text-decoration:line-through':''}">${g.room_number?'Room '+g.room_number+(g.bed_number?' / Bed '+g.bed_number:''):'-'}</td>
+      <td>${fmtDate(g.join_date)}${!g.is_active && g.leave_date ? `<br><span class="text-muted" style="font-size:11px">→ ${fmtDate(g.leave_date)}</span>` : ''}</td>
+      <td style="${!g.is_active?'text-decoration:line-through':''}">${fmt(g.monthly_rent)}/mo ${variance?`<span class="badge ${needsApproval?'badge-amber':'badge-blue'}" title="Room rate is ${fmt(g.room_rent)}">${needsApproval?'Pending Approval':'Variance'}</span>`:''}</td>
+      <td style="${!g.is_active?'text-decoration:line-through':''}">${fmt(g.deposit_amount)}</td>
+      <td><span class="badge ${g.is_active?'badge-green':'badge-red'}">${g.is_active?'Active':'Left'}</span></td>
+      <td><span class="badge badge-gray">${g.id_proof_type||'—'}</span></td>
+      <td>
+        <div class="flex gap-2">
+          <button class="btn btn-outline btn-sm" onclick="viewGuest(${g.id})">View</button>
+          <button class="btn btn-primary btn-sm" onclick="guestModal(null,${g.id})">Edit</button>
+          ${needsApproval && isAdmin()?`<button class="btn btn-success btn-sm" onclick="approveRentVariance(${g.id})">Approve Rent</button>`:''}
+          ${g.is_active && isAdmin()?`<button class="btn btn-outline btn-sm" onclick="roomShiftModal(${g.id},'${g.name.replace(/'/g,"\\'")}')">Shift Room</button>`:''}
+          ${g.is_active && isAdmin()?`<button class="btn btn-danger btn-sm" onclick="checkoutModal(${g.id})">Checkout</button>`:''}
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function filterGuests() {
+  const room = document.getElementById('guest-room-filter')?.value || '';
+  const docs = document.getElementById('guest-docs-filter')?.value || '';
+  const q = (document.getElementById('guest-search')?.value || '').toLowerCase().trim();
+  const f = guestsCurrentFilter;
+  let rows = f === 'active' ? guestsListCache.filter(g=>g.is_active) : f === 'left' ? guestsListCache.filter(g=>!g.is_active) : guestsListCache;
+  if (room) rows = rows.filter(g => g.room_number === room);
+  if (docs === 'present') rows = rows.filter(g => !!g.id_proof_type);
+  else if (docs === 'missing') rows = rows.filter(g => !g.id_proof_type);
+  if (q) rows = rows.filter(g => `${g.name} ${g.phone||''}`.toLowerCase().includes(q));
+  document.getElementById('guests-tb').innerHTML = renderGuestRows(rows, f);
 }
 
 async function approveRentVariance(id, refresh) {
@@ -1092,6 +1151,7 @@ async function deleteComplaint(id) {
 // ── PAYMENTS (same as collections) ───────────────
 let paymentsCurrentMonth = null;
 let paymentsCurrentYear = null;
+let paymentsListCache = [];
 
 async function pgPayments(month, year) {
   loading();
@@ -1103,6 +1163,7 @@ async function pgPayments(month, year) {
     paymentsCurrentMonth = m;
     paymentsCurrentYear = y;
     const list = await API.getCollections(`?month=${m}&year=${y}`);
+    paymentsListCache = list;
     const total = list.reduce((s,c)=>s+parseFloat(c.amount),0);
     setContent(`
       <div class="page-header flex justify-between items-center">
@@ -1115,36 +1176,58 @@ async function pgPayments(month, year) {
       <div class="card">
         <div class="card-header">
           <h3>Payment Records — ${fmt(total)} total</h3>
-          <div class="flex gap-2">
-            <input type="text" placeholder="🔍 Search guest..." style="width:200px;margin:0" oninput="filterTable(this.value,'payments-tb')" />
+          <div class="flex gap-2" style="flex-wrap:wrap">
+            <select id="pay-mode-filter" style="margin:0" onchange="filterPayments()">
+              <option value="">All Modes</option>
+              ${PURCHASE_PAYMENT_MODES.map(m=>`<option>${m}</option>`).join('')}
+            </select>
+            <select id="pay-status-filter" style="margin:0" onchange="filterPayments()">
+              <option value="">All Status</option>
+              <option value="confirmed">Received</option>
+              <option value="pending_verification">Pending Verification</option>
+              <option value="pending_approval">Pending Approval</option>
+            </select>
+            <input type="text" id="pay-search" placeholder="🔍 Search guest..." style="width:200px;margin:0" oninput="filterPayments()" />
             <button class="btn btn-primary btn-sm" onclick="collectionModal()">+ Record Payment</button>
           </div>
         </div>
         <div class="table-wrap">
           <table>
             <thead><tr><th>GUEST</th><th>MONTH</th><th>AMOUNT</th><th>DATE</th><th>MODE</th><th>STATUS</th><th>ACTIONS</th></tr></thead>
-            <tbody id="payments-tb">
-              ${list.length===0
-                ? `<tr class="empty-row"><td colspan="7">No payments for this month.</td></tr>`
-                : list.map(c=>`<tr data-search="${(c.guest_name||'').toLowerCase()}">
-                  <td><strong>${c.guest_name||c.guest_name||'—'}</strong></td>
-                  <td>${c.collection_month||fmtMonth(c.collection_date)}</td>
-                  <td class="text-green fw-600">${fmt(c.amount)}</td>
-                  <td>${fmtDate(c.collection_date)}</td>
-                  <td><span class="badge badge-blue">${c.payment_mode}</span></td>
-                  <td><span class="badge ${c.status&&c.status.startsWith('pending')?'badge-amber':'badge-green'}">${c.status==='pending_verification'?'Pending Verification':c.status==='pending_approval'?'Pending Approval':'Received'}</span></td>
-                  <td>
-                    <div class="flex gap-2">
-                      <button class="btn btn-outline btn-sm" onclick="downloadReceipt(${c.id})" title="Download receipt">🧾</button>
-                      ${isAdmin()?`<button class="btn btn-danger btn-sm btn-icon" onclick="delCollectionFromPayments(${c.id})">✕</button>`:''}
-                    </div>
-                  </td>
-                </tr>`).join('')}
-            </tbody>
+            <tbody id="payments-tb">${renderPaymentRows(list)}</tbody>
           </table>
         </div>
       </div>`);
   } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+}
+
+function renderPaymentRows(list) {
+  if (list.length === 0) return `<tr class="empty-row"><td colspan="7">No payments match.</td></tr>`;
+  return list.map(c=>`<tr data-search="${(c.guest_name||'').toLowerCase()}">
+      <td><strong>${c.guest_name||'—'}</strong></td>
+      <td>${c.collection_month||fmtMonth(c.collection_date)}</td>
+      <td class="text-green fw-600">${fmt(c.amount)}</td>
+      <td>${fmtDate(c.collection_date)}</td>
+      <td><span class="badge badge-blue">${c.payment_mode}</span></td>
+      <td><span class="badge ${c.status&&c.status.startsWith('pending')?'badge-amber':'badge-green'}">${c.status==='pending_verification'?'Pending Verification':c.status==='pending_approval'?'Pending Approval':'Received'}</span></td>
+      <td>
+        <div class="flex gap-2">
+          <button class="btn btn-outline btn-sm" onclick="downloadReceipt(${c.id})" title="Download receipt">🧾</button>
+          ${isAdmin()?`<button class="btn btn-danger btn-sm btn-icon" onclick="delCollectionFromPayments(${c.id})">✕</button>`:''}
+        </div>
+      </td>
+    </tr>`).join('');
+}
+
+function filterPayments() {
+  const mode = document.getElementById('pay-mode-filter')?.value || '';
+  const status = document.getElementById('pay-status-filter')?.value || '';
+  const q = (document.getElementById('pay-search')?.value || '').toLowerCase().trim();
+  let rows = paymentsListCache;
+  if (mode) rows = rows.filter(c => (c.payment_mode||'').toLowerCase() === mode.toLowerCase());
+  if (status) rows = rows.filter(c => status === 'confirmed' ? (!c.status || c.status === 'confirmed') : c.status === status);
+  if (q) rows = rows.filter(c => (c.guest_name||'').toLowerCase().includes(q));
+  document.getElementById('payments-tb').innerHTML = renderPaymentRows(rows);
 }
 
 function onPaymentsMonthChange(value) {
@@ -1334,22 +1417,36 @@ let purchasesListCache = [];
 let purchasesCurrentMonth = null;
 let purchasesCurrentYear = null;
 
-async function pgPurchases(month, year) {
+let purchasesFromDate = null;
+let purchasesToDate = null;
+
+async function pgPurchases(month, year, from, to) {
   loading();
   document.getElementById('topbar-actions').innerHTML = `<button class="btn btn-primary btn-sm" onclick="purchaseModal()">+ Add Purchase</button>`;
   try {
-    const now = new Date();
-    const m = month || (now.getMonth()+1);
-    const y = year || now.getFullYear();
-    purchasesCurrentMonth = m;
-    purchasesCurrentYear = y;
-    const list = await API.getPurchases(`?month=${m}&year=${y}`);
+    const useRange = !!(from && to);
+    let m = null, y = null;
+    if (useRange) {
+      purchasesFromDate = from; purchasesToDate = to;
+      purchasesCurrentMonth = null; purchasesCurrentYear = null;
+    } else {
+      const now = new Date();
+      m = month || (now.getMonth()+1);
+      y = year || now.getFullYear();
+      purchasesCurrentMonth = m; purchasesCurrentYear = y;
+      purchasesFromDate = null; purchasesToDate = null;
+    }
+    const query = useRange ? `?from=${from}&to=${to}` : `?month=${m}&year=${y}`;
+    const list = await API.getPurchases(query);
     purchasesListCache = list;
     const confirmedList = list.filter(p => p.status !== 'pending_approval');
     const total = confirmedList.reduce((s,p)=>s+parseFloat(p.amount),0);
     const byCat = {};
     confirmedList.forEach(p => { byCat[p.category]=(byCat[p.category]||0)+parseFloat(p.amount); });
     const pendingCount = list.filter(p => p.status === 'pending_approval').length;
+    const periodLabel = useRange
+      ? `${fmtDate(from)} – ${fmtDate(to)}`
+      : new Date(y,m-1,1).toLocaleString('en-IN',{month:'long',year:'numeric'});
     setContent(`
       <div class="page-header"><h1>🛒 Purchases</h1><p>Track all PG expenses and purchases</p></div>
       ${pendingCount>0?`<div class="alert" style="background:#FFFBEB;border:1px solid var(--amber);color:#92400E;margin-bottom:16px">⏳ ${pendingCount} staff-entered purchase${pendingCount>1?'s':''} awaiting your approval below.</div>`:''}
@@ -1358,7 +1455,7 @@ async function pgPurchases(month, year) {
         <button class="btn btn-outline btn-sm" onclick="exportPurchasesPdf()">⬇ Export PDF</button>
       </div>`:''}
       <div class="stat-grid mb-5">
-        <div class="stat-card red"><div class="s-label">This Month (Confirmed)</div><div class="s-value">${fmt(total)}</div><div class="s-sub">${new Date(y,m-1,1).toLocaleString('en-IN',{month:'long',year:'numeric'})}</div></div>
+        <div class="stat-card red"><div class="s-label">This Period (Confirmed)</div><div class="s-value">${fmt(total)}</div><div class="s-sub">${periodLabel}</div></div>
         <div class="stat-card"><div class="s-label">Groceries</div><div class="s-value">${fmt(byCat['Groceries']||0)}</div><div class="s-sub" style="color:var(--green)">Food &amp; vegetables</div></div>
         <div class="stat-card"><div class="s-label">Maintenance</div><div class="s-value">${fmt(byCat['Maintenance']||0)}</div><div class="s-sub" style="color:var(--amber)">Repairs &amp; upkeep</div></div>
         <div class="stat-card"><div class="s-label">Utilities</div><div class="s-value">${fmt((byCat['Electricity']||0)+(byCat['Water']||0)+(byCat['Internet']||0))}</div><div class="s-sub" style="color:var(--blue)">Bills &amp; services</div></div>
@@ -1366,11 +1463,20 @@ async function pgPurchases(month, year) {
       <div class="card">
         <div class="card-header">
           <h3>All Purchases</h3>
-          <div class="flex gap-2 items-center">
+          <div class="flex gap-2 items-center" style="flex-wrap:wrap">
             ${monthPicker(m, y, 'onPurchasesMonthChange')}
+            <span style="color:var(--text-muted,#888);font-size:13px">or</span>
+            <input type="date" id="pu-from" value="${from||''}" onchange="onPurchasesRangeChange()" style="margin:0" title="From date" />
+            <span style="color:var(--text-muted,#888);font-size:13px">to</span>
+            <input type="date" id="pu-to" value="${to||''}" onchange="onPurchasesRangeChange()" style="margin:0" title="To date" />
+            ${useRange?`<button class="btn btn-outline btn-sm" onclick="pgPurchases()">✕ Clear range</button>`:''}
             <select id="cat-filter" style="margin:0" onchange="filterPurchases()">
               <option value="">All Categories</option>
               ${PURCHASE_CATEGORIES.map(c=>`<option>${c}</option>`).join('')}
+            </select>
+            <select id="mode-filter" style="margin:0" onchange="filterPurchases()">
+              <option value="">All Modes</option>
+              ${PURCHASE_PAYMENT_MODES.map(m=>`<option>${m}</option>`).join('')}
             </select>
             <input type="text" id="pu-search" placeholder="🔍 Search description, paid to..." style="width:200px;margin:0" oninput="filterPurchases()" />
             <button class="btn btn-primary btn-sm" onclick="purchaseModal()">+ Add Purchase</button>
@@ -1384,6 +1490,12 @@ async function pgPurchases(month, year) {
         </div>
       </div>`);
   } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+}
+
+function onPurchasesRangeChange() {
+  const from = document.getElementById('pu-from')?.value;
+  const to = document.getElementById('pu-to')?.value;
+  if (from && to) pgPurchases(null, null, from, to);
 }
 
 function purchaseModal() {
@@ -1446,15 +1558,25 @@ function renderPurchaseRows(list) {
 
 function filterPurchases() {
   const cat = document.getElementById('cat-filter').value;
+  const mode = document.getElementById('mode-filter')?.value || '';
   const q = (document.getElementById('pu-search')?.value || '').toLowerCase().trim();
   let filtered = cat ? purchasesListCache.filter(p => p.category === cat) : purchasesListCache;
+  if (mode) filtered = filtered.filter(p => (p.payment_mode||'').toLowerCase() === mode.toLowerCase());
   if (q) filtered = filtered.filter(p => `${p.description||''} ${p.paid_to||''} ${p.category||''}`.toLowerCase().includes(q));
   document.getElementById('purchases-tb').innerHTML = renderPurchaseRows(filtered);
 }
 
 function exportPurchasesCsv() {
+  const cat = document.getElementById('cat-filter')?.value || '';
+  const mode = document.getElementById('mode-filter')?.value || '';
+  let rows = purchasesListCache;
+  if (cat) rows = rows.filter(p => p.category === cat);
+  if (mode) rows = rows.filter(p => (p.payment_mode||'').toLowerCase() === mode.toLowerCase());
+  const periodSuffix = purchasesFromDate && purchasesToDate
+    ? `${purchasesFromDate}_to_${purchasesToDate}`
+    : `${purchasesCurrentMonth}-${purchasesCurrentYear}`;
   exportArrayToCsv(
-    `sirimane-purchases-${purchasesCurrentMonth}-${purchasesCurrentYear}.csv`,
+    `sirimane-purchases-${cat||'all'}-${periodSuffix}.csv`,
     [
       { label: 'Date', get: p => fmtDate(p.purchase_date) },
       { label: 'Category', get: p => p.category },
@@ -1464,12 +1586,22 @@ function exportPurchasesCsv() {
       { label: 'Mode', get: p => p.payment_mode },
       { label: 'Status', get: p => p.status }
     ],
-    purchasesListCache
+    rows
   );
 }
 
 async function exportPurchasesPdf() {
-  try { await API.downloadExport(`/purchases/export/pdf?month=${purchasesCurrentMonth}&year=${purchasesCurrentYear}`, `sirimane-purchases-${purchasesCurrentMonth}-${purchasesCurrentYear}.pdf`); }
+  const cat = document.getElementById('cat-filter')?.value || '';
+  const mode = document.getElementById('mode-filter')?.value || '';
+  const periodSuffix = purchasesFromDate && purchasesToDate
+    ? `${purchasesFromDate}_to_${purchasesToDate}`
+    : `${purchasesCurrentMonth}-${purchasesCurrentYear}`;
+  const periodQuery = purchasesFromDate && purchasesToDate
+    ? `from=${purchasesFromDate}&to=${purchasesToDate}`
+    : `month=${purchasesCurrentMonth}&year=${purchasesCurrentYear}`;
+  const catQuery = cat ? `&category=${encodeURIComponent(cat)}` : '';
+  const modeQuery = mode ? `&mode=${encodeURIComponent(mode)}` : '';
+  try { await API.downloadExport(`/purchases/export/pdf?${periodQuery}${catQuery}${modeQuery}`, `sirimane-purchases-${cat||'all'}-${periodSuffix}.pdf`); }
   catch(e) { alert('Export failed: ' + e.message); }
 }
 
@@ -1723,7 +1855,11 @@ async function pgCollections(month, year, from, to) {
             ${useRange?`<button class="btn btn-outline btn-sm" onclick="clearCollectionsRange()">✕ Clear range</button>`:''}
             <select id="coll-type-filter" style="margin:0" onchange="filterCollections()">
               <option value="">All Types</option>
-              <option value="rent">Rent</option><option value="deposit">Deposit</option><option value="extra">Extra</option>
+              <option value="rent">Rent</option><option value="deposit">Deposit</option><option value="advance">Advance</option><option value="extra">Extra</option>
+            </select>
+            <select id="coll-mode-filter" style="margin:0" onchange="filterCollections()">
+              <option value="">All Modes</option>
+              ${PURCHASE_PAYMENT_MODES.map(m=>`<option>${m}</option>`).join('')}
             </select>
             <input type="text" id="coll-search" placeholder="🔍 Search guest, description..." style="width:200px;margin:0" oninput="filterCollections()" />
             <button class="btn btn-primary btn-sm" onclick="collectionModal()">+ Add Collection</button>
@@ -1784,15 +1920,19 @@ function downloadReceipt(id) {
 
 function filterCollections() {
   const type = document.getElementById('coll-type-filter').value;
+  const mode = document.getElementById('coll-mode-filter')?.value || '';
   const q = (document.getElementById('coll-search')?.value || '').toLowerCase().trim();
   let filtered = type ? collectionsListCache.filter(c => c.collection_type === type) : collectionsListCache;
+  if (mode) filtered = filtered.filter(c => (c.payment_mode||'').toLowerCase() === mode.toLowerCase());
   if (q) filtered = filtered.filter(c => `${c.guest_name||''} ${c.description||''} ${c.collection_month||''}`.toLowerCase().includes(q));
   document.getElementById('collections-tb').innerHTML = renderCollectionRows(filtered);
 }
 
 function exportCollectionsCsv() {
   const type = document.getElementById('coll-type-filter')?.value || '';
-  const rows = type ? collectionsListCache.filter(c => c.collection_type === type) : collectionsListCache;
+  const mode = document.getElementById('coll-mode-filter')?.value || '';
+  let rows = type ? collectionsListCache.filter(c => c.collection_type === type) : collectionsListCache;
+  if (mode) rows = rows.filter(c => (c.payment_mode||'').toLowerCase() === mode.toLowerCase());
   const periodSuffix = collectionsFromDate && collectionsToDate
     ? `${collectionsFromDate}_to_${collectionsToDate}`
     : `${collectionsCurrentMonth}-${collectionsCurrentYear}`;
