@@ -3,7 +3,6 @@ const router = require('express').Router();
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const PDFDocument = require('pdfkit');
-const path = require('path');
 const pool = require('../db');
 const auth = require('../middleware/auth');
 const requireAdmin = auth.requireAdmin;
@@ -26,34 +25,6 @@ async function logActivity(req, action, details) {
 // per route (and potentially drifting out of sync / breaking inconsistently).
 function fmtMoney(n) { return 'Rs ' + parseFloat(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function fmtD(d) { return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }); }
-
-// Converts a rupee amount to words using Indian numbering (lakh/crore), for
-// the "Amount in words" line on printed receipts. Paise are dropped since a
-// receipt states the whole-rupee amount actually received.
-function amountInWords(amount) {
-  const ones = ['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
-  const tens = ['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
-  function twoDigits(n) {
-    if (n < 20) return ones[n];
-    return tens[Math.floor(n/10)] + (n%10 ? ' ' + ones[n%10] : '');
-  }
-  function threeDigits(n) {
-    if (n < 100) return twoDigits(n);
-    return ones[Math.floor(n/100)] + ' Hundred' + (n%100 ? ' ' + twoDigits(n%100) : '');
-  }
-  let n = Math.round(Math.abs(parseFloat(amount) || 0));
-  if (n === 0) return 'Zero Rupees Only';
-  const crore = Math.floor(n / 10000000); n %= 10000000;
-  const lakh = Math.floor(n / 100000); n %= 100000;
-  const thousand = Math.floor(n / 1000); n %= 1000;
-  const hundred = n;
-  let parts = [];
-  if (crore) parts.push(threeDigits(crore) + ' Crore');
-  if (lakh) parts.push(threeDigits(lakh) + ' Lakh');
-  if (thousand) parts.push(threeDigits(thousand) + ' Thousand');
-  if (hundred) parts.push(threeDigits(hundred));
-  return parts.join(' ') + ' Rupees Only';
-}
 
 // columns: [{ label, x, width, get: (row) => string, color?: (row) => string }]
 function drawPdfTable(doc, columns, rows) {
@@ -199,38 +170,26 @@ router.get('/auth/me', auth, (req, res) => res.json({ user: req.user }));
 // ── DASHBOARD ────────────────────────────────────
 router.get('/dashboard', auth, async (req, res) => {
   try {
-    const [guests, rooms, beds, income, expenses, recentGuests, recentPayments, checklistTotal, checklistToday, openComplaints, pendingVariance] = await Promise.all([
+    const [guests, rooms, beds, income, expenses, recentGuests, recentPayments] = await Promise.all([
       pool.query('SELECT COUNT(*) FROM guests WHERE is_active=true'),
       pool.query(`SELECT COUNT(*) as total_rooms, COALESCE(SUM(total_beds),0) as total_beds FROM rooms WHERE is_active=true`),
-      pool.query(`SELECT COALESCE(SUM(r.total_beds),0) - COUNT(g.id) as available FROM rooms r LEFT JOIN guests g ON r.id=g.room_id AND g.is_active=true WHERE r.is_active=true`),
+      pool.query(`SELECT COALESCE(SUM(r.total_beds - COALESCE(occ.occupied,0)),0) as available FROM rooms r LEFT JOIN (SELECT room_id, COUNT(*) as occupied FROM guests WHERE is_active=true AND room_id IS NOT NULL GROUP BY room_id) occ ON r.id=occ.room_id WHERE r.is_active=true`),
       pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND status='confirmed' AND DATE_TRUNC('month',collection_date)=DATE_TRUNC('month',NOW())`),
       pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM purchases WHERE is_deleted=false AND status='confirmed' AND DATE_TRUNC('month',purchase_date)=DATE_TRUNC('month',NOW())`),
       pool.query(`SELECT g.*,r.room_number FROM guests g LEFT JOIN rooms r ON g.room_id=r.id WHERE g.is_active=true ORDER BY g.created_at DESC LIMIT 5`),
-      pool.query(`SELECT c.*,g.name as guest_name FROM collections c LEFT JOIN guests g ON c.guest_id=g.id WHERE c.is_deleted=false AND c.status='confirmed' ORDER BY c.collection_date DESC LIMIT 5`),
-      pool.query('SELECT COUNT(*) FROM checklist_items WHERE is_active=true'),
-      pool.query(`SELECT COUNT(*) FILTER (WHERE is_checked) as checked FROM checklist_log WHERE log_date=CURRENT_DATE`),
-      pool.query(`SELECT COUNT(*) FROM complaints WHERE status != 'resolved'`),
-      pool.query(`SELECT g.id,g.name,g.monthly_rent,r.room_number,r.monthly_rent as room_rent
-                   FROM guests g JOIN rooms r ON g.room_id=r.id
-                   WHERE g.is_active=true AND g.rent_variance_approved=false AND g.monthly_rent != r.monthly_rent
-                   ORDER BY g.name`)
+      pool.query(`SELECT c.*,g.name as guest_name FROM collections c LEFT JOIN guests g ON c.guest_id=g.id WHERE c.is_deleted=false AND c.status='confirmed' ORDER BY c.collection_date DESC LIMIT 5`)
     ]);
     const totalBeds = parseInt(rooms.rows[0].total_beds) || 0;
     const availBeds = parseInt(beds.rows[0].available) || 0;
     const inc = parseFloat(income.rows[0].total);
     const exp = parseFloat(expenses.rows[0].total);
-    const checklistItemTotal = parseInt(checklistTotal.rows[0].count) || 0;
-    const checklistChecked = parseInt(checklistToday.rows[0].checked) || 0;
     res.json({
       totalGuests: parseInt(guests.rows[0].count),
       totalRooms: parseInt(rooms.rows[0].total_rooms),
       totalBeds, availableBeds: availBeds,
       occupancyPercent: totalBeds > 0 ? Math.round(((totalBeds - availBeds) / totalBeds) * 100) : 0,
       monthlyIncome: inc, monthlyExpenses: exp, netProfit: inc - exp,
-      recentGuests: recentGuests.rows, recentPayments: recentPayments.rows,
-      todayChecklist: { checked: checklistChecked, total: checklistItemTotal, percent: checklistItemTotal > 0 ? Math.round((checklistChecked / checklistItemTotal) * 100) : 0 },
-      openComplaints: parseInt(openComplaints.rows[0].count) || 0,
-      pendingVariance: pendingVariance.rows
+      recentGuests: recentGuests.rows, recentPayments: recentPayments.rows
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -305,7 +264,7 @@ router.get('/guests/:id', auth, async (req, res) => {
 });
 
 router.post('/guests', auth, async (req, res) => {
-  const { name,phone,email,address,emergency_contact,id_proof_type,id_proof_number,room_id,bed_number,join_date,monthly_rent,deposit_amount,notes } = req.body;
+  const { name,phone,email,emergency_contact,id_proof_type,id_proof_number,room_id,bed_number,join_date,monthly_rent,deposit_amount,notes } = req.body;
   if (!name || !join_date) return res.status(400).json({ error: 'Name and join date required' });
   try {
     // If this guest's rent doesn't match their room's standard per-bed rate,
@@ -320,8 +279,8 @@ router.post('/guests', auth, async (req, res) => {
     }
 
     const r = await pool.query(
-      `INSERT INTO guests(name,phone,email,address,emergency_contact,id_proof_type,id_proof_number,room_id,bed_number,join_date,monthly_rent,deposit_amount,notes,created_by,rent_variance_approved) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
-      [name,phone,email,address||null,emergency_contact,id_proof_type,id_proof_number,room_id||null,bed_number||null,join_date,monthly_rent||0,deposit_amount||0,notes,req.user.id,rentVarianceApproved]);
+      `INSERT INTO guests(name,phone,email,emergency_contact,id_proof_type,id_proof_number,room_id,bed_number,join_date,monthly_rent,deposit_amount,notes,created_by,rent_variance_approved) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+      [name,phone,email,emergency_contact,id_proof_type,id_proof_number,room_id||null,bed_number||null,join_date,monthly_rent||0,deposit_amount||0,notes,req.user.id,rentVarianceApproved]);
     if (parseFloat(monthly_rent) > 0) {
       await pool.query(
         `INSERT INTO guest_rent_history(guest_id, monthly_rent, effective_from, changed_by, note) VALUES($1,$2,$3,$4,$5)`,
@@ -345,7 +304,7 @@ router.post('/guests', auth, async (req, res) => {
 });
 
 router.put('/guests/:id', auth, async (req, res) => {
-  const { name,phone,email,address,emergency_contact,room_id,bed_number,monthly_rent,deposit_amount,notes,leave_date,is_active,rent_effective_from } = req.body;
+  const { name,phone,email,emergency_contact,room_id,bed_number,monthly_rent,deposit_amount,notes,leave_date,is_active,rent_effective_from } = req.body;
   try {
     const existing = await pool.query('SELECT monthly_rent,deposit_amount FROM guests WHERE id=$1', [req.params.id]);
     if (!existing.rows[0]) return res.status(404).json({ error: 'Not found' });
@@ -366,8 +325,8 @@ router.put('/guests/:id', auth, async (req, res) => {
     }
 
     const r = await pool.query(
-      `UPDATE guests SET name=COALESCE($1,name),phone=COALESCE($2,phone),email=COALESCE($3,email),address=COALESCE($4,address),emergency_contact=COALESCE($5,emergency_contact),room_id=$6,bed_number=$7,monthly_rent=COALESCE($8,monthly_rent),deposit_amount=COALESCE($9,deposit_amount),notes=COALESCE($10,notes),leave_date=$11,is_active=COALESCE($12,is_active),rent_variance_approved=$13 WHERE id=$14 RETURNING *`,
-      [name,phone,email,address,emergency_contact,room_id||null,bed_number||null,monthly_rent,deposit_amount,notes,leave_date||null,is_active,rentVarianceApproved,req.params.id]);
+      `UPDATE guests SET name=COALESCE($1,name),phone=COALESCE($2,phone),email=COALESCE($3,email),emergency_contact=COALESCE($4,emergency_contact),room_id=$5,bed_number=$6,monthly_rent=COALESCE($7,monthly_rent),deposit_amount=COALESCE($8,deposit_amount),notes=COALESCE($9,notes),leave_date=$10,is_active=COALESCE($11,is_active),rent_variance_approved=$12 WHERE id=$13 RETURNING *`,
+      [name,phone,email,emergency_contact,room_id||null,bed_number||null,monthly_rent,deposit_amount,notes,leave_date||null,is_active,rentVarianceApproved,req.params.id]);
     if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
 
     if (newRent !== oldRent && newRent > 0) {
@@ -408,8 +367,7 @@ router.put('/guests/:id/approve-rent', auth, requireAdmin, async (req, res) => {
 
 router.delete('/guests/:id', auth, requireAdmin, async (req, res) => {
   try {
-    const leaveDate = req.body?.leave_date || new Date().toISOString().split('T')[0];
-    await pool.query('UPDATE guests SET is_active=false,leave_date=$2 WHERE id=$1', [req.params.id, leaveDate]);
+    await pool.query('UPDATE guests SET is_active=false,leave_date=CURRENT_DATE WHERE id=$1', [req.params.id]);
     res.json({ message: 'Checked out' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -419,22 +377,12 @@ router.delete('/guests/:id', auth, requireAdmin, async (req, res) => {
 // in one step so the two can never get out of sync. Admin only, since it's
 // the final sign-off on a financial transaction.
 router.post('/guests/:id/checkout', auth, requireAdmin, async (req, res) => {
-  const { deductions, deduction_notes, refund_mode, leave_date } = req.body;
+  const { deductions, deduction_notes, refund_mode } = req.body;
   try {
     const g = await pool.query(`SELECT g.*,r.room_number FROM guests g LEFT JOIN rooms r ON g.room_id=r.id WHERE g.id=$1`, [req.params.id]);
     const guest = g.rows[0];
     if (!guest) return res.status(404).json({ error: 'Guest not found' });
     if (!guest.is_active) return res.status(400).json({ error: 'Guest is already checked out' });
-
-    // Default to today if not given; allow backdating (e.g. logging a
-    // checkout that actually happened a few days ago) but not future-dating
-    // beyond today.
-    const checkoutDate = leave_date || new Date().toISOString().split('T')[0];
-    const todayStr = new Date().toISOString().split('T')[0];
-    if (checkoutDate > todayStr) return res.status(400).json({ error: 'Checkout date cannot be in the future' });
-    if (guest.join_date && checkoutDate < new Date(guest.join_date).toISOString().split('T')[0]) {
-      return res.status(400).json({ error: 'Checkout date cannot be before the check-in date' });
-    }
 
     const deductionAmount = parseFloat(deductions) || 0;
     const depositAmount = parseFloat(guest.deposit_amount) || 0;
@@ -445,8 +393,8 @@ router.post('/guests/:id/checkout', auth, requireAdmin, async (req, res) => {
        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
       [guest.id, guest.name, guest.room_number, depositAmount, deductionAmount, deduction_notes || null, refundAmount, refund_mode || 'cash', req.user.id]
     );
-    await pool.query('UPDATE guests SET is_active=false,leave_date=$2 WHERE id=$1', [guest.id, checkoutDate]);
-    await logActivity(req, 'guest_checkout', `${guest.name} (room ${guest.room_number || '—'}) — refund ₹${refundAmount}, effective ${checkoutDate}`);
+    await pool.query('UPDATE guests SET is_active=false,leave_date=CURRENT_DATE WHERE id=$1', [guest.id]);
+    await logActivity(req, 'guest_checkout', `${guest.name} (room ${guest.room_number || '—'}) — refund ₹${refundAmount}`);
 
     res.status(201).json(refund.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -455,11 +403,10 @@ router.post('/guests/:id/checkout', auth, requireAdmin, async (req, res) => {
 // ── COLLECTIONS (Income) ─────────────────────────
 router.get('/collections', auth, async (req, res) => {
   try {
-    const { month, year, from, to } = req.query;
+    const { month, year } = req.query;
     let q = `SELECT c.*,g.name as guest_name,r.room_number FROM collections c LEFT JOIN guests g ON c.guest_id=g.id LEFT JOIN rooms r ON g.room_id=r.id WHERE c.is_deleted=false`;
     const p = [];
-    if (from && to) { p.push(from,to); q += ` AND c.collection_date BETWEEN $${p.length-1} AND $${p.length}`; }
-    else if (month && year) { p.push(month,year); q += ` AND EXTRACT(MONTH FROM c.collection_date)=$${p.length-1} AND EXTRACT(YEAR FROM c.collection_date)=$${p.length}`; }
+    if (month && year) { p.push(month,year); q += ` AND EXTRACT(MONTH FROM c.collection_date)=$${p.length-1} AND EXTRACT(YEAR FROM c.collection_date)=$${p.length}`; }
     q += ' ORDER BY c.collection_date DESC';
     const r = await pool.query(q, p);
     res.json(r.rows);
@@ -468,31 +415,22 @@ router.get('/collections', auth, async (req, res) => {
 
 router.get('/collections/export/pdf', auth, requireAdmin, async (req, res) => {
   try {
-    const { month, year, from, to, type } = req.query;
+    const { month, year } = req.query;
     let q = `SELECT c.*,g.name as guest_name,r.room_number FROM collections c LEFT JOIN guests g ON c.guest_id=g.id LEFT JOIN rooms r ON g.room_id=r.id WHERE c.is_deleted=false AND c.status='confirmed'`;
     const p = [];
-    const hasRange = from && to;
-    if (hasRange) { p.push(from,to); q += ` AND c.collection_date BETWEEN $${p.length-1} AND $${p.length}`; }
-    else if (month && year) { p.push(month,year); q += ` AND EXTRACT(MONTH FROM c.collection_date)=$${p.length-1} AND EXTRACT(YEAR FROM c.collection_date)=$${p.length}`; }
-    if (type) { p.push(type); q += ` AND c.collection_type=$${p.length}`; }
+    if (month && year) { p.push(month,year); q += ` AND EXTRACT(MONTH FROM c.collection_date)=$${p.length-1} AND EXTRACT(YEAR FROM c.collection_date)=$${p.length}`; }
     q += ' ORDER BY c.collection_date ASC';
     const r = await pool.query(q, p);
     const total = r.rows.reduce((s,x) => s + parseFloat(x.amount), 0);
 
-    const periodLabel = hasRange
-      ? `${fmtD(from)} \u2013 ${fmtD(to)}`
-      : (month && year ? new Date(year, month-1, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' }) : 'All time');
-    const typeLabel = type ? type.charAt(0).toUpperCase()+type.slice(1) : 'All Types';
-    const fileSuffix = hasRange ? `${from}_to_${to}` : `${month||'all'}-${year||'all'}`;
-
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="sirimane-collections-${type||'all'}-${fileSuffix}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="sirimane-collections-${month||'all'}-${year||'all'}.pdf"`);
     const doc = new PDFDocument({ margin: 40, size: 'A4' });
     doc.pipe(res);
 
     doc.fontSize(18).font('Helvetica-Bold').text('Siri Mane PG', { align: 'center' });
     doc.fontSize(11).font('Helvetica').text('Collections', { align: 'center' });
-    doc.fontSize(9).fillColor('#666').text(`${periodLabel} \u00b7 ${typeLabel}`, { align: 'center' }).fillColor('#000');
+    if (month && year) doc.fontSize(9).fillColor('#666').text(new Date(year, month-1, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' }), { align: 'center' }).fillColor('#000');
     doc.moveDown(1);
     doc.fontSize(11).font('Helvetica-Bold').text(`Total: ${fmtMoney(total)}`);
     doc.moveDown(1);
@@ -526,110 +464,6 @@ router.post('/collections', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Draws the actual receipt onto a PDFDocument — shared by the staff-facing
-// and guest-facing receipt routes so the design only lives in one place.
-const RECEIPT_LOGO_PATH = path.join(__dirname, '../assets/siri-mane-logo.jpg');
-const RECEIPT_LOGO_ASPECT = 577 / 1249; // height/width of the cropped logo asset
-
-function drawReceiptPdf(doc, c, settings) {
-  const pgName = settings.pg_name || 'Siri Mane';
-  const pgAddress = settings.pg_address || '5th cross, Gangothri Road,\nSIT Ext, Tumakuru.';
-  const pgPhone = settings.pg_phone || '9880217627';
-  const guestName = c.guest_full_name || c.guest_name || 'Guest';
-  const receiptNo = 'SM-' + String(c.id).padStart(5, '0');
-  const gold = '#C99A2E', dark = '#1E293B', gray = '#64748B', lightGold = '#FFFBEB';
-  const pageW = doc.page.width;
-
-  // Header: logo top-left; PG name, address, phone stacked top-right
-  const logoW = 120, logoH = logoW * RECEIPT_LOGO_ASPECT;
-  try { doc.image(RECEIPT_LOGO_PATH, 30, 24, { width: logoW }); } catch (e) { /* logo missing — header still works without it */ }
-
-  let ry = 24;
-  doc.font('Helvetica-Bold').fontSize(13).fillColor(dark).text(pgName.toUpperCase(), pageW - 260, ry, { width: 230, align: 'right' });
-  ry += 18;
-  doc.font('Helvetica').fontSize(8.5).fillColor(gray);
-  pgAddress.split('\n').filter(Boolean).forEach(line => { doc.text(line, pageW - 260, ry, { width: 230, align: 'right' }); ry += 12; });
-  if (pgPhone) { doc.text('Mob: ' + pgPhone, pageW - 260, ry, { width: 230, align: 'right' }); ry += 12; }
-
-  const headerBottom = Math.max(24 + logoH, ry, 90);
-  doc.moveTo(30, headerBottom + 10).lineTo(pageW - 30, headerBottom + 10).lineWidth(2).strokeColor(gold).stroke();
-
-  let y = headerBottom + 24;
-  doc.font('Helvetica-Bold').fontSize(15).fillColor(dark).text('PAYMENT RECEIPT', 30, y, { width: pageW - 60, align: 'center' });
-  y += 30;
-
-  doc.fillColor(dark).font('Helvetica').fontSize(10);
-  doc.font('Helvetica-Bold').text('Receipt No:', 30, y); doc.font('Helvetica').text(receiptNo, 130, y);
-  doc.font('Helvetica-Bold').text('Date:', 280, y); doc.font('Helvetica').text(fmtD(c.collection_date), 320, y, { width: pageW - 30 - 320, align: 'left' });
-  y += 20;
-  doc.font('Helvetica-Bold').text('Received From:', 30, y); doc.font('Helvetica').text(guestName, 130, y);
-  y += 18;
-  if (c.room_number) { doc.font('Helvetica-Bold').text('Room / Bed:', 30, y); doc.font('Helvetica').text(`Room ${c.room_number}${c.bed_number?' / Bed '+c.bed_number:''}`, 130, y); }
-  if (c.guest_phone) { doc.font('Helvetica-Bold').text('Phone:', 280, y); doc.font('Helvetica').text(c.guest_phone, 320, y, { width: pageW - 30 - 320, align: 'left' }); }
-  y += 30;
-
-  doc.rect(30, y, pageW - 60, 90).lineWidth(1).stroke(gold);
-  let py = y + 12;
-  doc.font('Helvetica-Bold').fontSize(9).fillColor(gray).text('PARTICULARS', 42, py);
-  doc.text('AMOUNT', pageW - 130, py);
-  py += 16;
-  doc.moveTo(30, py).lineTo(pageW - 30, py).lineWidth(1).strokeColor('#E2E8F0').stroke();
-  py += 10;
-  doc.font('Helvetica').fontSize(10).fillColor(dark);
-  const label = `${(c.collection_type||'Payment').replace(/^\w/, ch=>ch.toUpperCase())}${c.collection_month?' — '+c.collection_month:''}${c.description?' ('+c.description+')':''}`;
-  doc.text(label, 42, py, { width: pageW - 200 });
-  doc.text(fmtMoney(c.amount), pageW - 130, py, { width: 90, align: 'right' });
-  py += 20;
-  doc.font('Helvetica-Bold').text('Payment Mode:', 42, py); doc.font('Helvetica').text(c.payment_mode || '—', 130, py);
-
-  y += 105;
-  doc.rect(30, y, pageW - 60, 34).fill(lightGold);
-  doc.fillColor(gold).font('Helvetica-Bold').fontSize(13).text('Total Received: ' + fmtMoney(c.amount), 42, y + 10);
-  y += 46;
-  doc.fillColor(gray).font('Helvetica-Oblique').fontSize(9).text('(' + amountInWords(c.amount) + ')', 30, y, { width: pageW - 60 });
-
-  y += 40;
-  doc.moveTo(30, y).lineTo(pageW - 30, y).lineWidth(1).strokeColor('#E2E8F0').stroke();
-  y += 14;
-  doc.fillColor(gray).fontSize(8).font('Helvetica').text('This is a system-generated receipt.', 30, y);
-  y += 40;
-  doc.moveTo(pageW - 160, y).lineTo(pageW - 30, y).lineWidth(1).strokeColor(dark).stroke();
-  doc.fontSize(8).fillColor(gray).text('Authorized Signature', pageW - 160, y + 4, { width: 130, align: 'center' });
-}
-
-async function fetchPgReceiptSettings() {
-  const r = await pool.query(`SELECT key, value FROM app_settings WHERE key IN ('pg_name','pg_address','pg_phone')`);
-  const settings = {};
-  r.rows.forEach(row => { settings[row.key] = row.value; });
-  return settings;
-}
-
-// Single-payment receipt — printable/downloadable proof of one specific
-// payment, branded for the PG. Any logged-in user can print one (a staff
-// member handing a resident a receipt shouldn't need admin sign-in).
-router.get('/collections/:id/receipt/pdf', auth, async (req, res) => {
-  try {
-    const r = await pool.query(
-      `SELECT c.*, g.name as guest_full_name, g.phone as guest_phone, g.bed_number, rm.room_number
-       FROM collections c
-       LEFT JOIN guests g ON c.guest_id = g.id
-       LEFT JOIN rooms rm ON g.room_id = rm.id
-       WHERE c.id=$1 AND c.is_deleted=false`,
-      [req.params.id]
-    );
-    const c = r.rows[0];
-    if (!c) return res.status(404).json({ error: 'Receipt not found' });
-    const settings = await fetchPgReceiptSettings();
-
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="receipt-SM-${String(c.id).padStart(5,'0')}.pdf"`);
-    const doc = new PDFDocument({ margin: 0, size: 'A5', layout: 'portrait' });
-    doc.pipe(res);
-    drawReceiptPdf(doc, c, settings);
-    doc.end();
-  } catch (err) { if (!res.headersSent) res.status(500).json({ error: err.message }); }
-});
-
 router.delete('/collections/:id', auth, requireAdmin, async (req, res) => {
   try {
     const r = await pool.query('UPDATE collections SET is_deleted=true,deleted_by=$1,deleted_at=NOW() WHERE id=$2 AND is_deleted=false RETURNING *', [req.user.id, req.params.id]);
@@ -654,11 +488,10 @@ router.put('/collections/:id/confirm', auth, requireAdmin, async (req, res) => {
 // ── PURCHASES (Expenses) ─────────────────────────
 router.get('/purchases', auth, async (req, res) => {
   try {
-    const { month, year, from, to } = req.query;
+    const { month, year } = req.query;
     let q = 'SELECT * FROM purchases WHERE is_deleted=false';
     const p = [];
-    if (from && to) { p.push(from,to); q += ` AND purchase_date BETWEEN $${p.length-1} AND $${p.length}`; }
-    else if (month && year) { p.push(month,year); q += ` AND EXTRACT(MONTH FROM purchase_date)=$${p.length-1} AND EXTRACT(YEAR FROM purchase_date)=$${p.length}`; }
+    if (month && year) { p.push(month,year); q += ` AND EXTRACT(MONTH FROM purchase_date)=$${p.length-1} AND EXTRACT(YEAR FROM purchase_date)=$${p.length}`; }
     q += ' ORDER BY purchase_date DESC';
     const r = await pool.query(q, p);
     res.json(r.rows);
@@ -667,31 +500,22 @@ router.get('/purchases', auth, async (req, res) => {
 
 router.get('/purchases/export/pdf', auth, requireAdmin, async (req, res) => {
   try {
-    const { month, year, from, to, category, mode } = req.query;
+    const { month, year } = req.query;
     let q = `SELECT * FROM purchases WHERE is_deleted=false AND status='confirmed'`;
     const p = [];
-    const hasRange = from && to;
-    if (hasRange) { p.push(from,to); q += ` AND purchase_date BETWEEN $${p.length-1} AND $${p.length}`; }
-    else if (month && year) { p.push(month,year); q += ` AND EXTRACT(MONTH FROM purchase_date)=$${p.length-1} AND EXTRACT(YEAR FROM purchase_date)=$${p.length}`; }
-    if (category) { p.push(category); q += ` AND category=$${p.length}`; }
-    if (mode) { p.push(mode); q += ` AND LOWER(payment_mode)=LOWER($${p.length})`; }
+    if (month && year) { p.push(month,year); q += ` AND EXTRACT(MONTH FROM purchase_date)=$${p.length-1} AND EXTRACT(YEAR FROM purchase_date)=$${p.length}`; }
     q += ' ORDER BY purchase_date ASC';
     const r = await pool.query(q, p);
     const total = r.rows.reduce((s,x) => s + parseFloat(x.amount), 0);
 
-    const periodLabel = hasRange
-      ? `${fmtD(from)} \u2013 ${fmtD(to)}`
-      : (month && year ? new Date(year, month-1, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' }) : 'All time');
-    const fileSuffix = hasRange ? `${from}_to_${to}` : `${month||'all'}-${year||'all'}`;
-
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="sirimane-purchases-${category||'all'}-${fileSuffix}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="sirimane-purchases-${month||'all'}-${year||'all'}.pdf"`);
     const doc = new PDFDocument({ margin: 40, size: 'A4' });
     doc.pipe(res);
 
     doc.fontSize(18).font('Helvetica-Bold').text('Siri Mane PG', { align: 'center' });
     doc.fontSize(11).font('Helvetica').text('Purchases', { align: 'center' });
-    doc.fontSize(9).fillColor('#666').text(`${periodLabel}${category ? ' \u00b7 '+category : ''}`, { align: 'center' }).fillColor('#000');
+    if (month && year) doc.fontSize(9).fillColor('#666').text(new Date(year, month-1, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' }), { align: 'center' }).fillColor('#000');
     doc.moveDown(1);
     doc.fontSize(11).font('Helvetica-Bold').text(`Total: ${fmtMoney(total)}`);
     doc.moveDown(1);
@@ -1217,7 +1041,7 @@ router.post('/guest-message', async (req, res) => {
 // due this month, instead of resetting to a fresh month-only snapshot.
 async function computeRentDueList() {
   const guests = await pool.query(`
-    SELECT g.id, g.name, g.phone, g.join_date, g.leave_date, g.monthly_rent, g.deposit_amount, r.room_number
+    SELECT g.id, g.name, g.phone, g.join_date, g.leave_date, g.monthly_rent, r.room_number
     FROM guests g LEFT JOIN rooms r ON g.room_id = r.id
     WHERE g.is_active = true AND g.monthly_rent > 0
     ORDER BY g.name ASC
@@ -1225,13 +1049,6 @@ async function computeRentDueList() {
   const results = [];
   for (const guest of guests.rows) {
     const { currentBalance } = await computeGuestLedger(guest);
-    // Standard expectation is one month's rent as deposit. The 'Deposit (₹)'
-    // field on the guest profile is how much of that has actually been
-    // collected so far (it's bumped as top-ups come in), so the shortfall
-    // against monthly rent — not against itself — is what's still pending.
-    const depositRequired = parseFloat(guest.monthly_rent) || 0;
-    const depositPaid = parseFloat(guest.deposit_amount) || 0;
-    const depositPending = Math.max(0, depositRequired - depositPaid);
     results.push({
       id: guest.id,
       name: guest.name,
@@ -1240,12 +1057,10 @@ async function computeRentDueList() {
       monthly_rent: guest.monthly_rent,
       current_balance: currentBalance,
       amount_due: currentBalance < 0 ? Math.abs(currentBalance) : 0,
-      credit: currentBalance > 0 ? currentBalance : 0,
-      deposit_required: depositRequired,
-      deposit_pending: depositPending
+      credit: currentBalance > 0 ? currentBalance : 0
     });
   }
-  results.sort((a, b) => (b.amount_due + b.deposit_pending) - (a.amount_due + a.deposit_pending));
+  results.sort((a, b) => b.amount_due - a.amount_due);
   return results;
 }
 
@@ -1273,14 +1088,12 @@ router.get('/rent-due/export/pdf', auth, requireAdmin, async (req, res) => {
     doc.moveDown(1);
 
     drawPdfTable(doc, [
-      { label: 'Name', x: 40, width: 80, get: r => r.name },
-      { label: 'Room', x: 120, width: 45, get: r => r.room_number ? 'Room '+r.room_number : '—' },
-      { label: 'Phone', x: 165, width: 70, get: r => r.phone },
-      { label: 'Rent', x: 235, width: 55, get: r => fmtMoney(r.monthly_rent) },
-      { label: 'Rent Pending', x: 290, width: 65, get: r => parseFloat(r.amount_due) > 0 ? fmtMoney(r.amount_due) : parseFloat(r.credit) > 0 ? fmtMoney(r.credit) + ' cr' : '—', color: r => parseFloat(r.amount_due) > 0 ? '#b91c1c' : '#0a7a3e' },
-      { label: 'Deposit Pending', x: 355, width: 65, get: r => parseFloat(r.deposit_pending) > 0 ? fmtMoney(r.deposit_pending) : '—', color: r => parseFloat(r.deposit_pending) > 0 ? '#b91c1c' : '#000' },
-      { label: 'Total Payable', x: 420, width: 65, get: r => (parseFloat(r.amount_due)+parseFloat(r.deposit_pending||0)) > 0 ? fmtMoney(parseFloat(r.amount_due)+parseFloat(r.deposit_pending||0)) : '—', color: r => (parseFloat(r.amount_due)+parseFloat(r.deposit_pending||0)) > 0 ? '#b91c1c' : '#000' },
-      { label: 'Status', x: 485, width: 40, get: r => parseFloat(r.amount_due) > 0 ? 'Pending' : 'OK' }
+      { label: 'Name', x: 40, width: 110, get: r => r.name },
+      { label: 'Room', x: 155, width: 60, get: r => r.room_number ? 'Room '+r.room_number : '—' },
+      { label: 'Phone', x: 220, width: 90, get: r => r.phone },
+      { label: 'Monthly Rent', x: 315, width: 80, get: r => fmtMoney(r.monthly_rent) },
+      { label: 'Balance', x: 400, width: 90, get: r => parseFloat(r.amount_due) > 0 ? fmtMoney(r.amount_due) + ' due' : parseFloat(r.credit) > 0 ? fmtMoney(r.credit) + ' credit' : 'Settled', color: r => parseFloat(r.amount_due) > 0 ? '#b91c1c' : '#0a7a3e' },
+      { label: 'Status', x: 495, width: 60, get: r => parseFloat(r.amount_due) > 0 ? 'Pending' : 'OK' }
     ], list);
 
     doc.end();
@@ -1327,50 +1140,6 @@ router.post('/guests/:id/rent-history', auth, requireAdmin, async (req, res) => 
     );
     await logActivity(req, 'rent_history_backfill', `${g.rows[0].name}: ₹${monthly_rent} effective ${effective_from}`);
     res.status(201).json(r.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-router.get('/guests/:id/room-history', auth, async (req, res) => {
-  try {
-    const r = await pool.query(
-      `SELECT h.*, u.username FROM guest_room_history h LEFT JOIN users u ON h.changed_by=u.id WHERE h.guest_id=$1 ORDER BY h.effective_from ASC, h.id ASC`,
-      [req.params.id]
-    );
-    res.json(r.rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// Internal room/bed shift — moves the guest to a different room within the
-// PG (not a checkout). Admin only, and the effective date can be backdated
-// (e.g. logging a shift that actually happened a few days ago), same rule
-// as rent-history backfill: can't be before check-in, can't be in the future.
-router.post('/guests/:id/shift-room', auth, requireAdmin, async (req, res) => {
-  const { room_id, bed_number, effective_from, note } = req.body;
-  if (!room_id) return res.status(400).json({ error: 'New room is required' });
-  if (!effective_from) return res.status(400).json({ error: 'Effective date is required' });
-  try {
-    const g = await pool.query(`SELECT g.*,r.room_number FROM guests g LEFT JOIN rooms r ON g.room_id=r.id WHERE g.id=$1`, [req.params.id]);
-    const guest = g.rows[0];
-    if (!guest) return res.status(404).json({ error: 'Guest not found' });
-
-    const todayStr = new Date().toISOString().split('T')[0];
-    if (effective_from > todayStr) return res.status(400).json({ error: 'Effective date cannot be in the future' });
-    if (guest.join_date && effective_from < new Date(guest.join_date).toISOString().split('T')[0]) {
-      return res.status(400).json({ error: 'Effective date cannot be before the check-in date' });
-    }
-
-    const newRoom = await pool.query('SELECT room_number FROM rooms WHERE id=$1', [room_id]);
-    if (!newRoom.rows[0]) return res.status(404).json({ error: 'Room not found' });
-
-    const hist = await pool.query(
-      `INSERT INTO guest_room_history(guest_id,from_room_number,from_bed_number,to_room_id,to_room_number,to_bed_number,effective_from,changed_by,note)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-      [guest.id, guest.room_number || null, guest.bed_number || null, room_id, newRoom.rows[0].room_number, bed_number || null, effective_from, req.user.id, note || null]
-    );
-    await pool.query('UPDATE guests SET room_id=$1,bed_number=$2 WHERE id=$3', [room_id, bed_number || null, guest.id]);
-    await logActivity(req, 'guest_room_shift', `${guest.name}: ${guest.room_number||'—'} → ${newRoom.rows[0].room_number}, effective ${effective_from}`);
-
-    res.status(201).json(hist.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1469,229 +1238,6 @@ router.delete('/deposit-refunds/:id', auth, requireAdmin, async (req, res) => {
     if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
     await logActivity(req, 'deposit_refund_delete', `${r.rows[0].guest_name} — ₹${r.rows[0].refund_amount} (id ${req.params.id})`);
     res.json({ message: 'Deleted' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ── COMPLAINT / MAINTENANCE REGISTER ─────────────
-// Feeds the checklist tasks "Log any new issues in Complaint/Maintenance
-// Register" and "Update status on yesterday's complaints" with a real,
-// trackable register instead of just a to-do line. Guests can raise their
-// own (via /guest-complaint below); staff/admin can log ones found on
-// rounds. Any logged-in user can view/update status — this is the warden's
-// day-to-day tool, not an admin-only report.
-router.get('/complaints', auth, async (req, res) => {
-  try {
-    const { status } = req.query;
-    let q = 'SELECT c.*, u.username as resolved_by_username FROM complaints c LEFT JOIN users u ON c.resolved_by = u.id WHERE 1=1';
-    const p = [];
-    if (status && status !== 'all') { p.push(status); q += ` AND c.status=$${p.length}`; }
-    q += ' ORDER BY (c.status=\'resolved\'), c.created_at DESC';
-    const r = await pool.query(q, p);
-    res.json(r.rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-router.post('/complaints', auth, async (req, res) => {
-  const { guest_id, guest_name, room_number, category, description } = req.body;
-  if (!description) return res.status(400).json({ error: 'Description is required' });
-  try {
-    const r = await pool.query(
-      `INSERT INTO complaints(guest_id,guest_name,room_number,category,description,status,raised_by,created_by)
-       VALUES($1,$2,$3,$4,$5,'open',$6,$7) RETURNING *`,
-      [guest_id || null, guest_name || null, room_number || null, category || 'other', description, req.user.role === 'admin' ? 'admin' : 'staff', req.user.id]
-    );
-    await logActivity(req, 'complaint_add', `${category || 'other'}: ${description.slice(0, 80)}`);
-    res.status(201).json(r.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-router.put('/complaints/:id', auth, async (req, res) => {
-  const { status, category, description, resolution_notes } = req.body;
-  try {
-    const existing = await pool.query('SELECT * FROM complaints WHERE id=$1', [req.params.id]);
-    if (!existing.rows[0]) return res.status(404).json({ error: 'Not found' });
-    const oldStatus = existing.rows[0].status;
-    const finalStatus = status || oldStatus;
-    const wasResolved = oldStatus === 'resolved';
-    const nowResolved = finalStatus === 'resolved';
-
-    let resolvedAt = existing.rows[0].resolved_at;
-    let resolvedBy = existing.rows[0].resolved_by;
-    if (nowResolved && !wasResolved) { resolvedAt = new Date(); resolvedBy = req.user.id; }
-    else if (!nowResolved) { resolvedAt = null; resolvedBy = null; }
-
-    const r = await pool.query(
-      `UPDATE complaints SET
-         status=$1, category=COALESCE($2,category), description=COALESCE($3,description),
-         resolution_notes=COALESCE($4,resolution_notes), updated_at=NOW(),
-         resolved_at=$5, resolved_by=$6
-       WHERE id=$7 RETURNING *`,
-      [finalStatus, category, description, resolution_notes, resolvedAt, resolvedBy, req.params.id]
-    );
-    await logActivity(req, 'complaint_update', `#${req.params.id} → ${r.rows[0].status}`);
-    res.json(r.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-router.delete('/complaints/:id', auth, requireAdmin, async (req, res) => {
-  try {
-    const r = await pool.query('DELETE FROM complaints WHERE id=$1 RETURNING *', [req.params.id]);
-    if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
-    await logActivity(req, 'complaint_delete', `#${req.params.id}`);
-    res.json({ message: 'Deleted' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ── DAILY WARDEN CHECKLIST ─────────────────────────
-// Canonical section order (matches the paper checklist), used everywhere
-// items need to be grouped/sorted since Postgres won't order VARCHAR that
-// way on its own.
-const CHECKLIST_SECTION_ORDER = ['Morning', 'Mid-Day', 'Evening', 'Night', 'Closing'];
-const CHECKLIST_SECTION_LABELS = { 'Morning': '🌅 Morning', 'Mid-Day': '☀️ Mid-Day', 'Evening': '🌇 Evening', 'Night': '🌙 Night / Gate Closing', 'Closing': '✅ Closing the Day' };
-
-function sectionCaseSql(col) {
-  return `CASE ${col} ${CHECKLIST_SECTION_ORDER.map((s, i) => `WHEN '${s}' THEN ${i}`).join(' ')} ELSE 99 END`;
-}
-
-// Warden's checklist for a single day — every active item, plus whether it's
-// been ticked yet today (and by whom), grouped by section in paper-checklist
-// order. Any logged-in user (staff or admin) can view and tick this; it's
-// the warden's own daily routine, not an admin-gated report.
-router.get('/checklist', auth, async (req, res) => {
-  try {
-    const date = req.query.date || new Date().toISOString().split('T')[0];
-    const r = await pool.query(
-      `SELECT i.id, i.section, i.time_label, i.task, i.sort_order,
-              l.is_checked, l.checked_at, u.username as checked_by_username
-       FROM checklist_items i
-       LEFT JOIN checklist_log l ON l.item_id = i.id AND l.log_date = $1
-       LEFT JOIN users u ON l.checked_by = u.id
-       WHERE i.is_active = true
-       ORDER BY ${sectionCaseSql('i.section')}, i.sort_order, i.id`,
-      [date]
-    );
-    const bySection = {};
-    CHECKLIST_SECTION_ORDER.forEach(s => { bySection[s] = []; });
-    r.rows.forEach(row => { (bySection[row.section] = bySection[row.section] || []).push(row); });
-    const sections = Object.keys(bySection)
-      .sort((a, b) => CHECKLIST_SECTION_ORDER.indexOf(a) - CHECKLIST_SECTION_ORDER.indexOf(b))
-      .map(section => ({ section, label: CHECKLIST_SECTION_LABELS[section] || section, items: bySection[section] }));
-    const total = r.rows.length;
-    const checked = r.rows.filter(row => row.is_checked).length;
-    res.json({ date, sections, summary: { total, checked, percent: total > 0 ? Math.round((checked / total) * 100) : 0 } });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// Tick/untick a single item for a given date. Upserts so ticking the same
-// item twice for the same date just updates who/when rather than erroring.
-router.put('/checklist/:itemId', auth, async (req, res) => {
-  const { date, checked } = req.body;
-  if (!date) return res.status(400).json({ error: 'date is required' });
-  try {
-    const r = await pool.query(
-      `INSERT INTO checklist_log(item_id, log_date, is_checked, checked_by, checked_at)
-       VALUES($1,$2,$3,$4,$5)
-       ON CONFLICT (item_id, log_date)
-       DO UPDATE SET is_checked=$3, checked_by=$4, checked_at=$5
-       RETURNING *`,
-      [req.params.itemId, date, !!checked, req.user.id, checked ? new Date() : null]
-    );
-    res.json(r.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// Admin-facing completion trend — either the last N days (legacy ?days=)
-// or a specific calendar month (?month=YYYY-MM), so the owner can look back
-// at any past month, not just a rolling 30-day window.
-router.get('/checklist/summary', auth, requireAdmin, async (req, res) => {
-  try {
-    const totalR = await pool.query('SELECT COUNT(*) FROM checklist_items WHERE is_active=true');
-    const total = parseInt(totalR.rows[0].count) || 0;
-
-    const today = new Date();
-    const todayUTC = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
-    let startDate, endDate;
-
-    if (req.query.month) {
-      const [y, m] = req.query.month.split('-').map(Number);
-      if (!y || !m) return res.status(400).json({ error: 'month must be YYYY-MM' });
-      startDate = new Date(Date.UTC(y, m - 1, 1));
-      endDate = new Date(Date.UTC(y, m, 0)); // last day of that month
-      if (endDate > todayUTC) endDate = todayUTC; // don't show future days of the current month
-    } else {
-      const days = Math.min(parseInt(req.query.days) || 30, 90);
-      endDate = todayUTC;
-      startDate = new Date(todayUTC);
-      startDate.setUTCDate(startDate.getUTCDate() - (days - 1));
-    }
-
-    if (endDate < startDate) return res.json([]); // a future month was requested
-
-    const startStr = startDate.toISOString().split('T')[0];
-    const endStr = endDate.toISOString().split('T')[0];
-    const r = await pool.query(
-      `SELECT log_date::date as date, COUNT(*) FILTER (WHERE is_checked) as checked
-       FROM checklist_log
-       WHERE log_date >= $1 AND log_date <= $2
-       GROUP BY log_date`,
-      [startStr, endStr]
-    );
-    const byDate = {};
-    r.rows.forEach(row => { byDate[row.date.toISOString().split('T')[0]] = parseInt(row.checked); });
-
-    const result = [];
-    for (let d = new Date(endDate); d >= startDate; d.setUTCDate(d.getUTCDate() - 1)) {
-      const key = d.toISOString().split('T')[0];
-      const checked = byDate[key] || 0;
-      result.push({ date: key, checked, total, percent: total > 0 ? Math.round((checked / total) * 100) : 0 });
-    }
-    res.json(result);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ── CHECKLIST ITEMS (admin manages the master task list) ──
-router.get('/checklist-items', auth, requireAdmin, async (req, res) => {
-  try {
-    const r = await pool.query(
-      `SELECT * FROM checklist_items WHERE is_active=true ORDER BY ${sectionCaseSql('section')}, sort_order, id`
-    );
-    res.json(r.rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-router.post('/checklist-items', auth, requireAdmin, async (req, res) => {
-  const { section, time_label, task, sort_order } = req.body;
-  if (!section || !task) return res.status(400).json({ error: 'Section and task are required' });
-  try {
-    const r = await pool.query(
-      `INSERT INTO checklist_items(section, time_label, task, sort_order) VALUES($1,$2,$3,$4) RETURNING *`,
-      [section, time_label || '—', task, sort_order || 0]
-    );
-    await logActivity(req, 'checklist_item_add', `${section}: ${task}`);
-    res.status(201).json(r.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-router.put('/checklist-items/:id', auth, requireAdmin, async (req, res) => {
-  const { section, time_label, task, sort_order } = req.body;
-  try {
-    const r = await pool.query(
-      `UPDATE checklist_items SET section=COALESCE($1,section),time_label=COALESCE($2,time_label),task=COALESCE($3,task),sort_order=COALESCE($4,sort_order) WHERE id=$5 RETURNING *`,
-      [section, time_label, task, sort_order, req.params.id]
-    );
-    if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
-    res.json(r.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// Soft delete — keeps historical checklist_log rows (and past completion %)
-// intact for dates before this item was retired.
-router.delete('/checklist-items/:id', auth, requireAdmin, async (req, res) => {
-  try {
-    const r = await pool.query('UPDATE checklist_items SET is_active=false WHERE id=$1 RETURNING *', [req.params.id]);
-    if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
-    await logActivity(req, 'checklist_item_remove', `${r.rows[0].section}: ${r.rows[0].task}`);
-    res.json({ message: 'Removed' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1798,60 +1344,6 @@ router.post('/guest-change-password', guestAuth, async (req, res) => {
     await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [hash, g.id]);
     res.json({ message: 'Password changed successfully' });
   } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// POST /api/guest-complaint — resident raises an issue directly into the
-// Complaint/Maintenance Register (separate from the general "Message Us"
-// inbox, so it shows up with a trackable Open/In Progress/Resolved status
-// the warden and admin both work from).
-router.post('/guest-complaint', guestAuth, async (req, res) => {
-  const { category, description } = req.body;
-  if (!description || !description.trim()) return res.status(400).json({ error: 'Description is required' });
-  try {
-    const g = req.guest;
-    const room = g.room_id ? await pool.query('SELECT room_number FROM rooms WHERE id=$1', [g.room_id]) : { rows: [{}] };
-    const r = await pool.query(
-      `INSERT INTO complaints(guest_id,guest_name,room_number,category,description,status,raised_by)
-       VALUES($1,$2,$3,$4,$5,'open','guest') RETURNING *`,
-      [g.id, g.name, room.rows[0]?.room_number || null, category || 'other', description.trim()]
-    );
-    res.status(201).json(r.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// GET /api/guest-complaints — resident's own complaint history + status,
-// so they can see whether management has acted on what they raised.
-router.get('/guest-complaints', guestAuth, async (req, res) => {
-  try {
-    const r = await pool.query('SELECT id,category,description,status,resolution_notes,created_at,resolved_at FROM complaints WHERE guest_id=$1 ORDER BY created_at DESC', [req.guest.id]);
-    res.json(r.rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// GET /api/guest-receipt/:id/pdf — resident downloads their own payment
-// receipt. Scoped to guest_id so a guest can't fetch someone else's by
-// guessing an id.
-router.get('/guest-receipt/:id/pdf', guestAuth, async (req, res) => {
-  try {
-    const r = await pool.query(
-      `SELECT c.*, g.name as guest_full_name, g.phone as guest_phone, g.bed_number, rm.room_number
-       FROM collections c
-       LEFT JOIN guests g ON c.guest_id = g.id
-       LEFT JOIN rooms rm ON g.room_id = rm.id
-       WHERE c.id=$1 AND c.is_deleted=false AND c.guest_id=$2`,
-      [req.params.id, req.guest.id]
-    );
-    const c = r.rows[0];
-    if (!c) return res.status(404).json({ error: 'Receipt not found' });
-    const settings = await fetchPgReceiptSettings();
-
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="receipt-SM-${String(c.id).padStart(5,'0')}.pdf"`);
-    const doc = new PDFDocument({ margin: 0, size: 'A5', layout: 'portrait' });
-    doc.pipe(res);
-    drawReceiptPdf(doc, c, settings);
-    doc.end();
-  } catch (err) { if (!res.headersSent) res.status(500).json({ error: err.message }); }
 });
 
 // POST /api/guest-upi-claim — resident reports "I've paid" after using the
