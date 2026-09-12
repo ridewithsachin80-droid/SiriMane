@@ -170,26 +170,37 @@ router.get('/auth/me', auth, (req, res) => res.json({ user: req.user }));
 // ── DASHBOARD ────────────────────────────────────
 router.get('/dashboard', auth, async (req, res) => {
   try {
-    const [guests, rooms, beds, income, expenses, recentGuests, recentPayments] = await Promise.all([
+    const today = new Date().toISOString().split('T')[0];
+    const [guests, rooms, beds, income, expenses, recentGuests, recentPayments,
+           pendingVariance, checklistTotal, checklistDone, openComplaints] = await Promise.all([
       pool.query('SELECT COUNT(*) FROM guests WHERE is_active=true'),
       pool.query(`SELECT COUNT(*) as total_rooms, COALESCE(SUM(total_beds),0) as total_beds FROM rooms WHERE is_active=true`),
       pool.query(`SELECT COALESCE(SUM(r.total_beds - COALESCE(occ.occupied,0)),0) as available FROM rooms r LEFT JOIN (SELECT room_id, COUNT(*) as occupied FROM guests WHERE is_active=true AND room_id IS NOT NULL GROUP BY room_id) occ ON r.id=occ.room_id WHERE r.is_active=true`),
       pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND status='confirmed' AND DATE_TRUNC('month',collection_date)=DATE_TRUNC('month',NOW())`),
       pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM purchases WHERE is_deleted=false AND status='confirmed' AND DATE_TRUNC('month',purchase_date)=DATE_TRUNC('month',NOW())`),
       pool.query(`SELECT g.*,r.room_number FROM guests g LEFT JOIN rooms r ON g.room_id=r.id WHERE g.is_active=true ORDER BY g.created_at DESC LIMIT 5`),
-      pool.query(`SELECT c.*,g.name as guest_name FROM collections c LEFT JOIN guests g ON c.guest_id=g.id WHERE c.is_deleted=false AND c.status='confirmed' ORDER BY c.collection_date DESC LIMIT 5`)
+      pool.query(`SELECT c.*,g.name as guest_name FROM collections c LEFT JOIN guests g ON c.guest_id=g.id WHERE c.is_deleted=false AND c.status='confirmed' ORDER BY c.collection_date DESC LIMIT 5`),
+      pool.query(`SELECT g.id, g.name, g.monthly_rent, r.room_number, r.monthly_rent as room_rent FROM guests g LEFT JOIN rooms r ON g.room_id=r.id WHERE g.is_active=true AND g.rent_variance_approved=false`),
+      pool.query(`SELECT COUNT(*) as total FROM checklist_items WHERE is_active=true`),
+      pool.query(`SELECT COUNT(*) as done FROM checklist_log WHERE log_date=$1 AND checked=true`, [today]),
+      pool.query(`SELECT COUNT(*) as open FROM complaints WHERE status != 'resolved'`)
     ]);
     const totalBeds = parseInt(rooms.rows[0].total_beds) || 0;
     const availBeds = parseInt(beds.rows[0].available) || 0;
     const inc = parseFloat(income.rows[0].total);
     const exp = parseFloat(expenses.rows[0].total);
+    const total = parseInt(checklistTotal.rows[0].total) || 0;
+    const done = parseInt(checklistDone.rows[0].done) || 0;
     res.json({
       totalGuests: parseInt(guests.rows[0].count),
       totalRooms: parseInt(rooms.rows[0].total_rooms),
       totalBeds, availableBeds: availBeds,
       occupancyPercent: totalBeds > 0 ? Math.round(((totalBeds - availBeds) / totalBeds) * 100) : 0,
       monthlyIncome: inc, monthlyExpenses: exp, netProfit: inc - exp,
-      recentGuests: recentGuests.rows, recentPayments: recentPayments.rows
+      recentGuests: recentGuests.rows, recentPayments: recentPayments.rows,
+      pendingVariance: pendingVariance.rows,
+      todayChecklist: { total, checked: done, percent: total > 0 ? Math.round((done/total)*100) : 0 },
+      openComplaints: parseInt(openComplaints.rows[0].open) || 0
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
