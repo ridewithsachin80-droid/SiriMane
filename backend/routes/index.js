@@ -182,7 +182,7 @@ router.get('/dashboard', auth, async (req, res) => {
       pool.query(`SELECT c.*,g.name as guest_name FROM collections c LEFT JOIN guests g ON c.guest_id=g.id WHERE c.is_deleted=false AND c.status='confirmed' ORDER BY c.collection_date DESC LIMIT 5`),
       pool.query(`SELECT g.id, g.name, g.monthly_rent, r.room_number, r.monthly_rent as room_rent FROM guests g LEFT JOIN rooms r ON g.room_id=r.id WHERE g.is_active=true AND g.rent_variance_approved=false`),
       pool.query(`SELECT COUNT(*) as total FROM checklist_items WHERE is_active=true`),
-      pool.query(`SELECT COUNT(*) as done FROM checklist_log WHERE log_date=$1 AND checked=true`, [today]),
+      pool.query(`SELECT COUNT(*) as done FROM checklist_log WHERE log_date=$1 AND is_checked=true`, [today]),
       pool.query(`SELECT COUNT(*) as open FROM complaints WHERE status != 'resolved'`)
     ]);
     const totalBeds = parseInt(rooms.rows[0].total_beds) || 0;
