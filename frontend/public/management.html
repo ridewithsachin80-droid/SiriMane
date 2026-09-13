@@ -1,6 +1,14 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <script>
+    // Runs before the stylesheet paints: no flash of the wrong theme.
+    (function () {
+      var t = localStorage.getItem('sm_theme');
+      if (!t) t = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Management Portal – Siri Mane Ladies PG, Tumakuru</title>
@@ -72,6 +80,7 @@
       <div class="flex items-center gap-2" id="topbar-right">
         <span id="topbar-user" style="font-size:13px;color:#64748B"></span>
         <span id="today-chip" class="text-muted"></span>
+        <button id="theme-toggle" aria-label="Switch theme" title="Light / dark"><svg class="ic ic-lg"><use href="#i-moon"/></svg></button>
         <button id="topbar-search" aria-label="Search" title="Search (Ctrl+K)" style="background:none;border:none;cursor:pointer;padding:8px;border-radius:8px;line-height:0"><svg class="ic ic-lg"><use href="#i-search"/></svg></button>
         <button id="topbar-add" aria-label="Quick add" title="Quick add" class="btn btn-primary btn-sm" style="padding:9px 11px;line-height:0"><svg class="ic"><use href="#i-plus"/></svg></button>
         <div id="topbar-actions"></div>

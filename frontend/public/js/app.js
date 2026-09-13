@@ -59,6 +59,17 @@ function navigate(page) {
   if (typeof syncChrome === 'function') syncChrome(page);
   highlightNav(page);
   if (typeof smSetContext === 'function') smSetContext({ page, resident_id: null, resident_name: null, room_number: null });
+  // An answer belongs to the screen it was asked on; leaving the screen clears
+  // it (a stale "48 reminders drafted" was riding along to every page). The one
+  // exception is the refresh that follows a confirmed action — the result of
+  // that action must stay on screen.
+  if (window.__copilotKeep) { window.__copilotKeep = false; }
+  else {
+    const cOut = document.getElementById('copilot-out');
+    if (cOut) { cOut.classList.add('hidden'); cOut.innerHTML = ''; }
+    const cQ = document.getElementById('copilot-q');
+    if (cQ) cQ.value = '';
+  }
   const pages = { dashboard:pgHome, rooms:pgRooms, guests:pgGuests, 'daily-menu':pgMenu, 'daily-checklist':pgChecklist, complaints:pgComplaints, payments:pgPayments, 'guest-messages':pgAnnouncements, inbox:pgInbox, purchases:pgPurchases, collections:pgCollections, 'rent-due':pgRentDue, reports:pgReports, 'balance-sheet':pgBalanceSheet, admin:pgAdmin, collect:pgCollect, reminders:pgReminders, finance:pgFinance, operations:pgOperations };
   if(!pages[page]) return;
   // Error boundary: a thrown error inside any screen shows a retry card
@@ -266,7 +277,7 @@ async function pgDashboard() {
         </div>
         <div style="padding:4px 20px 16px">
           ${d.pendingVariance.map(g => `
-            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #F1F5F9">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--surface-2)">
               <span style="font-size:13px"><strong>${g.name}</strong>${g.room_number?' · Room '+g.room_number:''} — charging ${fmt(g.monthly_rent)}/mo (room rate ${fmt(g.room_rent)}/mo)</span>
               <button class="btn btn-success btn-sm" onclick="approveRentVariance(${g.id}, pgDashboard)">Approve</button>
             </div>`).join('')}
@@ -278,7 +289,7 @@ async function pgDashboard() {
           <span class="text-muted" style="font-size:13px">${d.todayChecklist.checked} / ${d.todayChecklist.total} done</span>
         </div>
         <div style="padding:0 20px 16px">
-          <div style="background:var(--border,#E2E8F0);border-radius:8px;height:10px;overflow:hidden">
+          <div style="background:var(--border,var(--border));border-radius:8px;height:10px;overflow:hidden">
             <div style="background:${d.todayChecklist.percent>=100?'var(--green,#16A34A)':'var(--blue,#4F46E5)'};height:100%;width:${d.todayChecklist.percent}%;transition:width .3s"></div>
           </div>
           <div style="margin-top:6px;font-size:13px;color:var(--text-muted)">${d.todayChecklist.percent}% complete for today — tap to open</div>
@@ -445,7 +456,7 @@ async function pgGuests(filter) {
   loading();
   const f = filter || guestsCurrentFilter;
   guestsCurrentFilter = f;
-  document.getElementById('topbar-actions').innerHTML = `<button class="btn btn-primary btn-sm" onclick="guestModal()">+ Add Guest</button>`;
+  document.getElementById('topbar-actions').innerHTML = `<button class="btn btn-primary btn-sm" onclick="guestModal()">+ Add resident</button>`;
   try {
     const list = await API.getGuests('?active=all');
     guestsListCache = list;
@@ -455,7 +466,7 @@ async function pgGuests(filter) {
     const leftCount = list.filter(g=>!g.is_active).length;
     const rooms = [...new Set(list.filter(g=>g.room_number).map(g => g.room_number))].sort();
     setContent(`
-      <div class="page-header"><h1>Guests</h1><p>Register and manage PG residents</p></div>
+      <div class="page-header"><h1>Residents</h1><p>Register and manage the people living here</p></div>
       ${pendingCount>0?`<div class="alert" style="background:#FFFBEB;border:1px solid var(--amber);color:#92400E;margin-bottom:16px">⏳ ${pendingCount} guest${pendingCount>1?'s have':' has'} a rent that differs from their room's standard rate and ${pendingCount>1?'need':'needs'} your approval — look for the amber "Variance" badge below.</div>`:''}
       <div class="flex gap-2 mb-4" style="flex-wrap:wrap">
         <button class="btn ${f==='active'?'btn-primary':'btn-outline'} btn-sm" onclick="pgGuests('active')">Active</button>
@@ -464,7 +475,7 @@ async function pgGuests(filter) {
       </div>
       <div class="card">
         <div class="card-header">
-          <h3>All Guests</h3>
+          <h3>All residents</h3>
           <div class="flex gap-2" style="flex-wrap:wrap">
             <select id="guest-room-filter" style="margin:0" onchange="filterGuests()">
               <option value="">All Rooms</option>
@@ -476,7 +487,7 @@ async function pgGuests(filter) {
               <option value="missing">Docs Missing</option>
             </select>
             <input type="text" id="guest-search" placeholder="🔍 Search..." style="width:200px;margin:0" oninput="filterGuests()" />
-            <button class="btn btn-primary btn-sm" onclick="guestModal()">+ Add Guest</button>
+            <button class="btn btn-primary btn-sm" onclick="guestModal()">+ Add resident</button>
           </div>
         </div>
         <div class="table-wrap">
@@ -596,7 +607,7 @@ async function guestModal(gData=null, id=null) {
       </div>
       <div class="modal-footer">
         <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="saveGuest(${g.id||'null'})">${g.id?'Save Changes':'Add Guest'}</button>
+        <button class="btn btn-primary" onclick="saveGuest(${g.id||'null'})">${g.id?'Save changes':'Add resident'}</button>
       </div>
     </div>`);
   checkRentVariance();
@@ -671,7 +682,7 @@ async function viewGuest(id) {
         <div class="modal-body">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px">
             ${[['Phone',g.phone],['Email',g.email],['Room',g.room_number?'Room '+g.room_number:'—'],['Bed',g.bed_number||'—'],['Check-in',fmtDate(g.join_date)],['Rent',fmt(g.monthly_rent)+'/mo'],['Deposit',fmt(g.deposit_amount)],['Emergency',g.emergency_contact||'—'],['Address',g.address||'—']].map(([l,v])=>`
-            <div style="background:#F8FAFC;padding:10px 12px;border-radius:8px;border:1px solid var(--border)">
+            <div style="background:var(--surface-2);padding:10px 12px;border-radius:8px;border:1px solid var(--border)">
               <div style="font-size:11px;color:var(--text-muted);font-weight:600">${l}</div>
               <div style="font-size:14px;font-weight:500;margin-top:2px">${v||'—'}</div>
             </div>`).join('')}
@@ -772,7 +783,7 @@ async function roomShiftModal(guestId, guestName) {
       <div class="modal-body">
         <div id="rs-alert" class="alert alert-danger hidden"></div>
         <p class="text-muted" style="font-size:12px;margin-bottom:14px">Moves this guest to a different room/bed within the PG. Not a checkout — their rent, deposit, and ledger stay attached to them.</p>
-        <div style="background:#F8FAFC;padding:8px 12px;border-radius:8px;border:1px solid var(--border);margin-bottom:14px;font-size:13px">
+        <div style="background:var(--surface-2);padding:8px 12px;border-radius:8px;border:1px solid var(--border);margin-bottom:14px;font-size:13px">
           <strong>Current:</strong> ${g.room_number?'Room '+g.room_number+(g.bed_number?' / Bed '+g.bed_number:''):'No room assigned'}
         </div>
         <div class="form-row">
@@ -820,7 +831,7 @@ async function checkoutModal(id) {
       <div class="modal-header"><h3>🚪 Checkout ${g.name}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
       <div class="modal-body">
         <div id="co-alert" class="alert alert-danger hidden"></div>
-        <div style="background:#F8FAFC;padding:10px 12px;border-radius:8px;border:1px solid var(--border);margin-bottom:14px">
+        <div style="background:var(--surface-2);padding:10px 12px;border-radius:8px;border:1px solid var(--border);margin-bottom:14px">
           <div style="font-size:11px;color:var(--text-muted);font-weight:600">DEPOSIT PAID</div>
           <div style="font-size:18px;font-weight:600">${fmt(deposit)}</div>
         </div>
@@ -967,7 +978,7 @@ async function pgChecklist(date) {
           <span style="font-weight:600">${data.summary.checked} / ${data.summary.total} done (${data.summary.percent}%)</span>
         </div>
         <div style="padding:0 20px 16px">
-          <div style="background:#E2E8F0;border-radius:8px;height:10px;overflow:hidden">
+          <div style="background:var(--border);border-radius:8px;height:10px;overflow:hidden">
             <div style="background:${data.summary.percent>=100?'#16A34A':'#4F46E5'};height:100%;width:${data.summary.percent}%;transition:width .3s"></div>
           </div>
         </div>
@@ -977,7 +988,7 @@ async function pgChecklist(date) {
           <div class="card-header"><h3>${sec.label}</h3></div>
           <div style="padding:4px 20px 16px">
             ${sec.items.length===0 ? '<div class="text-muted" style="padding:12px 0">No tasks in this section</div>' : sec.items.map(item => `
-              <label style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid #F1F5F9;cursor:pointer">
+              <label style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--surface-2);cursor:pointer">
                 <input type="checkbox" ${item.is_checked?'checked':''} onchange="toggleChecklistItem(${item.id}, this.checked)" style="margin-top:3px;width:18px;height:18px;flex-shrink:0"/>
                 <span style="flex:1">
                   <span style="${item.is_checked?'text-decoration:line-through;color:var(--text-muted)':''}">${item.time_label && item.time_label!=='—' ? `<strong>${item.time_label}</strong> — `:''}${item.task}</span>
@@ -1058,7 +1069,7 @@ async function renderChecklistManage(editItem) {
       <div id="cl-manage-alert" class="alert alert-danger hidden"></div>
       <div style="max-height:300px;overflow-y:auto;margin-bottom:14px">
         ${items.length===0 ? '<div class="text-muted">No tasks yet</div>' : items.map(i => `
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #F1F5F9;gap:8px">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--surface-2);gap:8px">
             <span style="font-size:13px"><strong>${i.section}</strong>${i.time_label && i.time_label!=='—' ? ' · '+i.time_label:''} — ${i.task}</span>
             <span style="flex-shrink:0;display:flex;gap:6px">
               <button class="btn btn-outline btn-sm" onclick='renderChecklistManage(${JSON.stringify(i).replace(/'/g,"&#39;")})'>Edit</button>
@@ -1271,7 +1282,7 @@ async function pgPayments(month, year) {
               <option value="pending_verification">Pending Verification</option>
               <option value="pending_approval">Pending Approval</option>
             </select>
-            <input type="text" id="pay-search" placeholder="🔍 Search guest..." style="width:200px;margin:0" oninput="filterPayments()" />
+            <input type="text" id="pay-search" placeholder="🔍 Search resident…" style="width:200px;margin:0" oninput="filterPayments()" />
             <button class="btn btn-primary btn-sm" onclick="collectionModal()">+ Record Payment</button>
           </div>
         </div>
@@ -1442,7 +1453,7 @@ async function viewInboxMsg(m) {
     <div class="modal">
       <div class="modal-header"><h3>💬 Message from ${m.guest_name}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
       <div class="modal-body">
-        <div style="background:#F8FAFC;padding:14px;border-radius:8px;margin-bottom:16px">
+        <div style="background:var(--surface-2);padding:14px;border-radius:8px;margin-bottom:16px">
           <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">${fmtDate(m.created_at)} · ${m.guest_phone||''} · ${m.room_number?'Room '+m.room_number:''}</div>
           <strong style="font-size:14px">${m.subject||'No subject'}</strong>
           <p style="margin-top:8px;font-size:14px">${m.message}</p>
@@ -2158,7 +2169,7 @@ async function pgRentDue() {
           <h3>All Active Guests</h3>
           <div class="flex gap-2 items-center" style="flex-wrap:wrap">
             <select id="rentdue-filter" style="margin:0" onchange="filterRentDueList()">
-              <option value="all">Show: All Guests</option>
+              <option value="all">Show: all residents</option>
               <option value="rent">Rent Due Only</option>
               <option value="deposit">Deposit Pending Only</option>
               <option value="either">Rent Due or Deposit Pending</option>
@@ -2448,7 +2459,7 @@ function renderReportsPage(r, controlsHtml) {
         </div>
         <div style="padding:14px 16px">
           <pre id="owner-summary" style="white-space:pre-wrap;font-family:inherit;font-size:14px;line-height:1.55;margin:0 0 12px">Loading…</pre>
-          <div id="owner-forecast" style="font-size:13px;color:var(--text-muted,#64748B);margin-bottom:12px"></div>
+          <div id="owner-forecast" style="font-size:13px;color:var(--text-muted,var(--text-muted));margin-bottom:12px"></div>
           <div class="flex gap-2" style="flex-wrap:wrap">
             <button class="btn btn-primary btn-sm" onclick="downloadOwnerPdf()">${icon('receipt')} Download PDF</button>
             <button class="btn btn-outline btn-sm" onclick="shareOwnerSummary()">${icon('whatsapp')} WhatsApp summary</button>
@@ -2845,7 +2856,7 @@ async function renderAdminSettingsTab() {
       <div class="card mb-6">
         <div class="card-header"><h3>AI inputs</h3></div>
         <div style="padding:16px 20px">
-          <p style="font-size:13px;color:var(--text-muted,#64748B);margin-bottom:10px">
+          <p style="font-size:13px;color:var(--text-muted,var(--text-muted));margin-bottom:10px">
             Photo scanning (bills, ID proof): <strong>${aiStatus.vision ? 'enabled' : 'not enabled — set GEMINI_API_KEY on Railway'}</strong> ·
             Voice fallback: <strong>${aiStatus.text ? 'enabled' : 'not enabled — set GROQ_API_KEY on Railway'}</strong>
           </p>
@@ -3058,7 +3069,20 @@ function initPhoneChrome() {
   loadAiStatus();
 }
 
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('sm_theme', theme);
+  const btn = document.getElementById('theme-toggle');
+  if (btn) { btn.innerHTML = icon(theme === 'dark' ? 'sun' : 'moon', 'ic ic-lg'); btn.title = theme === 'dark' ? 'Switch to light' : 'Switch to dark'; }
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', theme === 'dark' ? '#0F1115' : '#F7F7F5');
+}
+function toggleTheme() { applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); }
+
 function initTopbarTools() {
+  const themeBtn = document.getElementById('theme-toggle');
+  if (themeBtn && !themeBtn.dataset.wired) { themeBtn.dataset.wired = '1'; themeBtn.onclick = toggleTheme; }
+  applyTheme(document.documentElement.getAttribute('data-theme') || 'light');
   const search = document.getElementById('topbar-search');
   const add = document.getElementById('topbar-add');
   if (search && !search.dataset.wired) { search.dataset.wired = '1'; search.onclick = openSearch; }
@@ -3282,7 +3306,7 @@ function selectCollectGuest(id) {
     <div class="sm-collect-step" style="margin-top:20px">
       <h4>2 · How much? <span class="sm-kn">ಎಷ್ಟು</span></h4>
       <input type="number" inputmode="numeric" id="collect-amount" class="sm-amount-input" value="${prefill || ''}"/>
-      <div style="font-size:12px;color:var(--text-muted,#64748B);margin-top:6px">
+      <div style="font-size:12px;color:var(--text-muted,var(--text-muted));margin-top:6px">
         ${due > 0 ? `Rent pending <span class="sm-kn">ಬಾಕಿ</span>: <strong class="text-red">${fmt(due)}</strong>` : 'No rent pending'}
         ${dep > 0 ? ` · Deposit <span class="sm-kn">ಠೇವಣಿ</span>: <strong class="text-red">${fmt(dep)}</strong>` : ''}
       </div>
@@ -3502,8 +3526,8 @@ function showCollectPreview(text, p) {
   }
   const due = parseFloat(p.guest.amount_due) || 0;
   box.innerHTML = `
-    <div class="card" style="padding:14px;border:2px solid var(--primary);background:#F5F3FF">
-      <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted,#64748B)">AI heard — please check</div>
+    <div class="card" style="padding:14px;border:2px solid var(--primary);background:var(--accent-soft)">
+      <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted,var(--text-muted))">AI heard — please check</div>
       <div style="font-size:16px;font-weight:700;margin:6px 0 2px">${p.guest.name}${p.guest.room_number ? ' · Room ' + p.guest.room_number : ''}</div>
       <div style="font-size:14px">${p.amount ? '<strong>' + fmt(p.amount) + '</strong>' : '<span class="text-red">amount not heard</span>'} · ${p.mode || 'mode not heard'} · ${p.type}</div>
       ${p.amount && due > 0 && Math.abs(p.amount - due) > 0.5 ? `<div style="font-size:12px;color:var(--amber);margin-top:4px">Her running balance is ${fmt(due)} — different from what was said.</div>` : ''}
@@ -3540,8 +3564,8 @@ async function complaintApplyVoice(text) {
   const box = document.getElementById('cp-preview');
   box.classList.remove('hidden');
   box.innerHTML = `
-    <div class="card" style="padding:12px;border:2px solid var(--primary);background:#F5F3FF;margin-bottom:12px">
-      <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted,#64748B)">AI heard — please check</div>
+    <div class="card" style="padding:12px;border:2px solid var(--primary);background:var(--accent-soft);margin-bottom:12px">
+      <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted,var(--text-muted))">AI heard — please check</div>
       <div style="font-size:14px;margin:6px 0"><strong>${category}</strong>${p.room ? ' · Room ' + p.room : ''}<br>${description}</div>
       <div class="flex gap-2">
         <button class="btn btn-primary btn-sm" onclick="complaintUseVoice(${JSON.stringify({ category, description, room: p.room }).replace(/"/g, '&quot;')})">✓ Use this</button>
@@ -3568,8 +3592,8 @@ async function purchaseScanBill() {
     const box = document.getElementById('pu-preview');
     box.classList.remove('hidden');
     box.innerHTML = `
-      <div class="card" style="padding:12px;border:2px solid var(--primary);background:#F5F3FF;margin-bottom:12px">
-        <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted,#64748B)">Read from the bill (${f.confidence} confidence) — please check</div>
+      <div class="card" style="padding:12px;border:2px solid var(--primary);background:var(--accent-soft);margin-bottom:12px">
+        <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted,var(--text-muted))">Read from the bill (${f.confidence} confidence) — please check</div>
         <div style="font-size:14px;margin:6px 0">
           <strong>${f.amount ? fmt(f.amount) : 'amount not found'}</strong>${f.paid_to ? ' · ' + f.paid_to : ''}${f.purchase_date ? ' · ' + fmtDate(f.purchase_date) : ''}<br>
           ${f.category || 'category?'}${f.description ? ' — ' + f.description : ''}${f.payment_mode ? ' · ' + f.payment_mode : ''}
@@ -3606,11 +3630,11 @@ async function guestScanId() {
     const box = document.getElementById('gf-preview');
     box.classList.remove('hidden');
     box.innerHTML = `
-      <div class="card" style="padding:12px;border:2px solid var(--primary);background:#F5F3FF;margin-bottom:12px">
-        <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted,#64748B)">Read from the ID (${f.confidence} confidence) — please check</div>
+      <div class="card" style="padding:12px;border:2px solid var(--primary);background:var(--accent-soft);margin-bottom:12px">
+        <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted,var(--text-muted))">Read from the ID (${f.confidence} confidence) — please check</div>
         <div style="font-size:14px;margin:6px 0">
           <strong>${f.name || 'name not found'}</strong>${f.id_proof_type ? ' · ' + f.id_proof_type : ''}${f.id_proof_number ? ' · ' + f.id_proof_number.replace(/.(?=.{4})/g, '•') : ''}<br>
-          <span style="font-size:13px;color:var(--text-muted,#64748B)">${f.address || 'address not found'}</span>
+          <span style="font-size:13px;color:var(--text-muted,var(--text-muted))">${f.address || 'address not found'}</span>
         </div>
         <div class="flex gap-2">
           <button class="btn btn-primary btn-sm" onclick='guestUseScan(${JSON.stringify(f).replace(/'/g, "&#39;")})'>✓ Use this</button>
@@ -3662,13 +3686,13 @@ async function loadAttention() {
   try {
     const flags = await apiFetch('/owner/anomalies');
     if (!flags.length) { card.classList.add('hidden'); return; }
-    const color = { high: 'var(--red)', medium: 'var(--amber)', low: 'var(--text-muted,#64748B)' };
+    const color = { high: 'var(--red)', medium: 'var(--amber)', low: 'var(--text-muted,var(--text-muted))' };
     document.getElementById('attention-list').innerHTML = flags.slice(0, 6).map(f => `
       <div style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--border)">
         <span style="flex:0 0 8px;height:8px;border-radius:50%;background:${color[f.level]};margin-top:6px"></span>
         <div style="flex:1;min-width:0">
           <div style="font-size:14px;font-weight:600">${f.title}</div>
-          <div style="font-size:12px;color:var(--text-muted,#64748B)">${f.detail}</div>
+          <div style="font-size:12px;color:var(--text-muted,var(--text-muted))">${f.detail}</div>
         </div>
         ${f.action ? `<button class="btn btn-outline btn-sm" style="min-height:36px" onclick="navigate('${f.action}')">Open</button>` : ''}
       </div>`).join('') + (flags.length > 6 ? `<div class="text-muted" style="font-size:12px;padding-top:8px">…and ${flags.length - 6} more in the owner report</div>` : '');
@@ -3706,7 +3730,7 @@ async function loadBrief(force) {
 function showHealthDetail(h) {
   const rows = Object.entries(h.components).map(([k, c]) => `
     <div style="display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--border)">
-      <div><div style="font-weight:600;text-transform:capitalize">${k}</div><div style="font-size:12px;color:var(--text-muted,#64748B)">${c.why}</div></div>
+      <div><div style="font-weight:600;text-transform:capitalize">${k}</div><div style="font-size:12px;color:var(--text-muted,var(--text-muted))">${c.why}</div></div>
       <div style="font-size:18px;font-weight:700;white-space:nowrap">${c.score == null ? '—' : c.score}</div>
     </div>`).join('');
   openModal(`<div class="modal"><div class="modal-header"><h3>Property health · ${h.overall}/100</h3><button class="modal-close" onclick="closeModal()">×</button></div>
@@ -3941,9 +3965,11 @@ async function copilotConfirm(id, btn) {
   try {
     const r = await apiFetch('/copilot/confirm', { method: 'POST', body: { proposal_id: id } });
     toast(r.answer, 'ok');
-    renderCopilotResult({ answer: '✅ ' + r.answer, actions: r.actions || [], confidence: 'high' });
-    // Refresh whatever screen is showing so the new record appears.
+    // Refresh whatever screen is showing so the new record appears, keeping
+    // the confirmation visible through that one refresh.
+    window.__copilotKeep = true;
     if (typeof currentPage !== 'undefined' && currentPage) navigate(currentPage);
+    renderCopilotResult({ answer: '✅ ' + r.answer, actions: r.actions || [], confidence: 'high' });
   } catch (e) { btn.disabled = false; btn.textContent = 'Try again'; toast(e.message); }
 }
 function copilotDismiss() { document.getElementById('copilot-out').classList.add('hidden'); }

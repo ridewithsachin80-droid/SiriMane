@@ -184,6 +184,37 @@ async function runAtWidth(browser, BASE, width, fixtures) {
   ok(await page.$eval('#portal-section', e => e.classList.contains('hidden')), `${tag} expired session lands back on login`);
   eq(await page.evaluate(() => localStorage.getItem('guest_token')), null, `${tag} expired session is cleared`);
 
+  // ── Sprint 7.1: dark theme in the portal ──────────────────────────────
+  const lum = c => { const [r, g, b] = c.match(/\d+/g).map(Number).map(v => { v /= 255; return v <= .03928 ? v / 12.92 : Math.pow((v + .055) / 1.055, 2.4); }); return .2126 * r + .7152 * g + .0722 * b; };
+  const contrast = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((m, n) => n - m); return (x + .05) / (y + .05); };
+  await page.evaluate(() => showTab('pay'));
+  await page.waitForFunction(() => document.querySelector('.dues-hero') || document.querySelector('#p-pay-content'), { timeout: 10000 });
+  ok(await page.$('#p-theme'), `${tag} portal has a theme toggle`);
+  await page.evaluate(() => togglePortalTheme());
+  await sleep(200);
+  const d = await page.evaluate(() => {
+    const b = getComputedStyle(document.body), c = getComputedStyle(document.querySelector('.card'));
+    return { theme: document.documentElement.getAttribute('data-theme'), bg: b.backgroundColor, text: b.color, card: c.backgroundColor };
+  });
+  eq(d.theme, 'dark', `${tag} portal toggles to dark`);
+  ok(lum(d.bg) < 0.12 && lum(d.card) < 0.15, `${tag} portal surfaces go dark`);
+  ok(contrast(d.card, d.text) >= 7, `${tag} portal dark contrast ${contrast(d.card, d.text).toFixed(1)}:1`);
+  if (await page.$('.dues-amount')) {
+    const dues = await page.$eval('.dues-amount', e => { const c = getComputedStyle(e); return { color: c.color, bg: getComputedStyle(e.closest('.card')).backgroundColor }; });
+    ok(contrast(dues.bg, dues.color) >= 3, `${tag} the dues figure stays legible in dark (${contrast(dues.bg, dues.color).toFixed(1)}:1)`);
+  }
+  if (await page.$('.dues-actions .btn')) {
+    const payBtn = await page.$eval('.dues-actions .btn', e => { const c = getComputedStyle(e); return { bg: c.backgroundColor, color: c.color }; });
+    ok(contrast(payBtn.bg, payBtn.color) >= 4.5, `${tag} Pay via UPI button contrast ${contrast(payBtn.bg, payBtn.color).toFixed(1)}:1`);
+  }
+  await page.screenshot({ path: path.join(SHOTS, `portal-dark-${width}.png`) });
+  await page.reload({ waitUntil: 'networkidle0' });
+  await sleep(400);
+  eq(await page.evaluate(() => document.documentElement.getAttribute('data-theme')), 'dark', `${tag} portal theme persists`);
+  await page.evaluate(() => togglePortalTheme());
+  await sleep(150);
+  eq(await page.evaluate(() => document.documentElement.getAttribute('data-theme')), 'light', `${tag} portal toggles back`);
+
   eq(jsErrors.length, 0, `${tag} no uncaught JS errors (${jsErrors.join('; ')})`);
   await page.close(); await ctx.close();
 }

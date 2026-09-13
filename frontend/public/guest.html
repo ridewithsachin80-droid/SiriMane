@@ -1,6 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <script>
+    (function () {
+      var t = localStorage.getItem('sm_theme');
+      if (!t) t = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Resident Portal – Siri Mane Ladies PG, Tumakuru</title>
@@ -10,7 +17,7 @@
   <link rel="canonical" href="https://sirimane.in/guest.html"/>
   <meta property="og:title" content="Resident Portal – Siri Mane Ladies PG"/>
   <meta property="og:image" content="https://sirimane.in/images/logo.png"/>
-  <meta name="theme-color" content="#F59E0B"/>
+  <meta name="theme-color" content="var(--p-accent)"/>
   <meta name="apple-mobile-web-app-capable" content="yes"/>
   <meta name="mobile-web-app-capable" content="yes"/>
   <meta name="apple-mobile-web-app-title" content="Siri Mane"/>
@@ -18,118 +25,141 @@
   <link rel="manifest" href="/manifest-guest.json"/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300;1,400&display=swap" rel="stylesheet"/>
   <style>
+    :root {
+      --p-bg:#FEF3C7; --p-card:#FFFFFF; --p-surface-2:#F1F5F9; --p-border:#E2E8F0;
+      --p-text:#1E293B; --p-text-soft:#475569; --p-text-muted:#64748B; --p-text-light:#94A3B8;
+      --p-accent:#F59E0B; --p-accent-soft:#FFFBEB; --p-accent-border:#FDE68A; --p-accent-ink:#92400E;
+      --p-green:#10B981; --p-green-soft:#ECFDF5; --p-green-ink:#065F46;
+      --p-red:#EF4444; --p-red-soft:#FEF2F2; --p-on-solid:#FFFFFF;
+    }
+    /* Dark theme: same layout, night-safe surfaces. Residents often open this
+       in bed; a full-white card at 11pm is unkind. */
+    [data-theme="dark"] {
+      --p-bg:#0F1115; --p-card:#14161A; --p-surface-2:#1B1E24; --p-border:#2A2E36;
+      --p-text:#E8EAED; --p-text-soft:#C3C8D0; --p-text-muted:#9AA1AC; --p-text-light:#6E7682;
+      --p-accent:#E0A93F; --p-accent-soft:#241F18; --p-accent-border:#4A3E2A; --p-accent-ink:#F0C878;
+      --p-green:#4ADE80; --p-green-soft:#11251A; --p-green-ink:#8BE5AC;
+      --p-red:#F87171; --p-red-soft:#2A1517; --p-on-solid:#0F1115;
+    }
+    [data-theme="dark"] input, [data-theme="dark"] select, [data-theme="dark"] textarea {
+      background: var(--p-surface-2); color: var(--p-text); border-color: var(--p-border);
+    }
+    [data-theme="dark"] input::placeholder, [data-theme="dark"] textarea::placeholder { color: var(--p-text-light); }
+    [data-theme="dark"] .btn-amber, [data-theme="dark"] .btn-primary { color: var(--p-on-solid); }
+    #p-theme { background:none; border:none; cursor:pointer; font-size:18px; padding:6px 8px; border-radius:8px; line-height:1; }
+
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Inter', sans-serif; background: #FEF3C7; min-height: 100vh; }
+    body { font-family: 'Inter', sans-serif; background: var(--p-bg); color: var(--p-text); min-height: 100vh; }
     .wrap { max-width: 480px; margin: 0 auto; padding: 20px 16px 40px; }
 
     /* Header */
-    .header { text-align: center; background: white; border-radius: 16px; padding: 24px 20px; margin-bottom: 16px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
-    .header h1 { font-size: 22px; font-weight: 700; color: #1E293B; margin-top: 10px; }
-    .header p { color: #64748B; font-size: 13px; margin-top: 3px; }
+    .header { text-align: center; background: var(--p-card); border-radius: 16px; padding: 24px 20px; margin-bottom: 16px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
+    .header h1 { font-size: 22px; font-weight: 700; color: var(--p-text); margin-top: 10px; }
+    .header p { color: var(--p-text-muted); font-size: 13px; margin-top: 3px; }
 
     /* Cards */
-    .card { background: white; border-radius: 14px; margin-bottom: 16px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); overflow: hidden; }
-    .card-h { padding: 14px 18px; border-bottom: 1px solid #E2E8F0; font-size: 14px; font-weight: 600; color: #1E293B; display: flex; justify-content: space-between; align-items: center; }
+    .card { background: var(--p-card); border-radius: 14px; margin-bottom: 16px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); overflow: hidden; }
+    .card-h { padding: 14px 18px; border-bottom: 1px solid var(--p-border); font-size: 14px; font-weight: 600; color: var(--p-text); display: flex; justify-content: space-between; align-items: center; }
     .card-b { padding: 18px; }
 
     /* Forms */
-    label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px; color: #475569; }
-    input { width: 100%; padding: 11px 14px; border: 1.5px solid #E2E8F0; border-radius: 10px; font-size: 14px; font-family: inherit; outline: none; transition: border-color 0.2s; }
-    input:focus { border-color: #F59E0B; box-shadow: 0 0 0 3px rgba(245,158,11,0.15); }
+    label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px; color: var(--p-text-soft); }
+    input { width: 100%; padding: 11px 14px; border: 1.5px solid var(--p-border); border-radius: 10px; font-size: 14px; font-family: inherit; outline: none; transition: border-color 0.2s; }
+    input:focus { border-color: var(--p-accent); box-shadow: 0 0 0 3px rgba(245,158,11,0.15); }
 
     /* Buttons */
     .btn { display: block; width: 100%; padding: 12px; border-radius: 10px; font-size: 14px; font-weight: 600; text-align: center; cursor: pointer; border: none; font-family: inherit; transition: all 0.2s; }
-    .btn-amber { background: #F59E0B; color: white; }
+    .btn-amber { background: var(--p-accent); color: white; }
     .btn-amber:hover { background: #D97706; }
-    .btn-outline { background: white; border: 1.5px solid #E2E8F0; color: #475569; margin-top: 8px; font-size: 13px; padding: 9px; }
-    .btn-outline:hover { border-color: #F59E0B; color: #F59E0B; }
+    .btn-outline { background: var(--p-card); border: 1.5px solid var(--p-border); color: var(--p-text-soft); margin-top: 8px; font-size: 13px; padding: 9px; }
+    .btn-outline:hover { border-color: var(--p-accent); color: var(--p-accent); }
     .btn-sm { padding: 8px 14px; font-size: 12px; width: auto; display: inline-block; border-radius: 8px; }
-    .btn-danger { background: #EF4444; color: white; }
+    .btn-danger { background: var(--p-red); color: white; }
 
     /* Info rows */
-    .info-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #F1F5F9; font-size: 13px; }
+    .info-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--p-surface-2); font-size: 13px; }
     .info-row:last-child { border-bottom: none; }
-    .info-row .lbl { color: #64748B; }
+    .info-row .lbl { color: var(--p-text-muted); }
     .info-row .val { font-weight: 600; }
 
     /* Pay items */
-    .pay-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #F1F5F9; font-size: 13px; }
+    .pay-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--p-surface-2); font-size: 13px; }
     .pay-item:last-child { border-bottom: none; }
 
     /* Badges */
     .badge { display: inline-block; padding: 3px 9px; border-radius: 20px; font-size: 11px; font-weight: 600; }
-    .badge-green { background: #ECFDF5; color: #065F46; }
-    .badge-red { background: #FEF2F2; color: #991B1B; }
-    .badge-amber { background: #FFFBEB; color: #92400E; }
+    .badge-green { background: var(--p-green-soft); color: var(--p-green-ink); }
+    .badge-red { background: var(--p-red-soft); color: #991B1B; }
+    .badge-amber { background: var(--p-accent-soft); color: var(--p-accent-ink); }
     .badge-blue { background: #EFF6FF; color: #1E40AF; }
 
     /* Alerts */
     .alert { padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 14px; }
-    .alert-danger { background: #FEF2F2; color: #991B1B; border: 1px solid #FECACA; }
-    .alert-success { background: #ECFDF5; color: #065F46; border: 1px solid #A7F3D0; }
+    .alert-danger { background: var(--p-red-soft); color: #991B1B; border: 1px solid #FECACA; }
+    .alert-success { background: var(--p-green-soft); color: var(--p-green-ink); border: 1px solid #A7F3D0; }
 
     /* Tabs */
-    .tab-bar { display: flex; background: white; border-radius: 14px; padding: 4px; margin-bottom: 16px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); gap: 2px; }
-    .tab { flex: 1; padding: 8px 4px; text-align: center; font-size: 12px; font-weight: 500; color: #64748B; cursor: pointer; border-radius: 10px; border: none; background: none; font-family: inherit; }
-    .tab.active { background: #F59E0B; color: white; font-weight: 600; }
+    .tab-bar { display: flex; background: var(--p-card); border-radius: 14px; padding: 4px; margin-bottom: 16px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); gap: 2px; }
+    .tab { flex: 1; padding: 8px 4px; text-align: center; font-size: 12px; font-weight: 500; color: var(--p-text-muted); cursor: pointer; border-radius: 10px; border: none; background: none; font-family: inherit; }
+    .tab.active { background: var(--p-accent); color: white; font-weight: 600; }
 
     /* Menu table */
     .menu-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-    .menu-table th { background: #F8FAFC; padding: 8px 10px; font-size: 10px; font-weight: 700; color: #64748B; text-transform: uppercase; text-align: left; border-bottom: 1px solid #E2E8F0; }
-    .menu-table td { padding: 8px 10px; border-bottom: 1px solid #F1F5F9; vertical-align: top; }
+    .menu-table th { background: #F8FAFC; padding: 8px 10px; font-size: 10px; font-weight: 700; color: var(--p-text-muted); text-transform: uppercase; text-align: left; border-bottom: 1px solid var(--p-border); }
+    .menu-table td { padding: 8px 10px; border-bottom: 1px solid var(--p-surface-2); vertical-align: top; }
     .menu-table tr:last-child td { border-bottom: none; }
 
     /* User info bar */
-    .user-bar { background: white; border-radius: 12px; padding: 12px 16px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    .user-bar { background: var(--p-card); border-radius: 12px; padding: 12px 16px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
     .user-bar .name { font-weight: 600; font-size: 14px; }
-    .user-bar .room { font-size: 12px; color: #64748B; }
+    .user-bar .room { font-size: 12px; color: var(--p-text-muted); }
 
     /* Change password form */
-    .pwd-form { margin-top: 12px; padding-top: 12px; border-top: 1px solid #F1F5F9; }
+    .pwd-form { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--p-surface-2); }
 
     .hidden { display: none !important; }
-    .spinner { border: 3px solid #E2E8F0; border-top: 3px solid #F59E0B; border-radius: 50%; width: 18px; height: 18px; animation: spin 0.7s linear infinite; display: inline-block; vertical-align: middle; }
+    .spinner { border: 3px solid var(--p-border); border-top: 3px solid var(--p-accent); border-radius: 50%; width: 18px; height: 18px; animation: spin 0.7s linear infinite; display: inline-block; vertical-align: middle; }
     @keyframes spin { to { transform: rotate(360deg); } }
 
     .form-group { margin-bottom: 12px; }
-    .text-green { color: #10B981; font-weight: 700; }
-    .text-red { color: #EF4444; }
-    textarea { width: 100%; padding: 10px 12px; border: 1.5px solid #E2E8F0; border-radius: 10px; font-size: 13px; font-family: inherit; outline: none; resize: vertical; }
-    textarea:focus { border-color: #F59E0B; }
+    .text-green { color: var(--p-green); font-weight: 700; }
+    .text-red { color: var(--p-red); }
+    textarea { width: 100%; padding: 10px 12px; border: 1.5px solid var(--p-border); border-radius: 10px; font-size: 13px; font-family: inherit; outline: none; resize: vertical; }
+    textarea:focus { border-color: var(--p-accent); }
 
     /* ── Sprint 2 ─────────────────────────────────────────────── */
     .dues-hero { text-align:center; padding:22px 16px 18px; }
-    .dues-hero .dues-label { font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:#94A3B8; }
+    .dues-hero .dues-label { font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--p-text-light); }
     .dues-hero .dues-amount { font-size:40px; font-weight:800; line-height:1.1; margin:6px 0 2px; }
-    .dues-hero .dues-kn { font-size:13px; color:#64748B; }
+    .dues-hero .dues-kn { font-size:13px; color:var(--p-text-muted); }
     .dues-actions { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:16px; }
     .dues-actions .btn { margin:0; }
     @media (max-width:360px) { .dues-actions { grid-template-columns:1fr; } }
     .btn { min-height:46px; }
     input, select, textarea { font-size:16px; }
     .timeline { list-style:none; margin:8px 0 0; padding:0; }
-    .timeline li { position:relative; padding:0 0 14px 20px; border-left:2px solid #E2E8F0; }
+    .timeline li { position:relative; padding:0 0 14px 20px; border-left:2px solid var(--p-border); }
     .timeline li:last-child { border-left-color:transparent; padding-bottom:0; }
-    .timeline li::before { content:''; position:absolute; left:-6px; top:2px; width:10px; height:10px; border-radius:50%; background:#E2E8F0; }
-    .timeline li.done::before { background:#10B981; }
+    .timeline li::before { content:''; position:absolute; left:-6px; top:2px; width:10px; height:10px; border-radius:50%; background:var(--p-border); }
+    .timeline li.done::before { background:var(--p-green); }
     .timeline li.current::before { background:#4F46E5; box-shadow:0 0 0 3px rgba(79,70,229,.18); }
     .timeline .t-label { font-size:13px; font-weight:600; }
-    .timeline .t-sub { font-size:11px; color:#94A3B8; }
-    .notice-card { border:1px solid #E2E8F0; border-radius:12px; padding:14px; margin-bottom:10px; background:#fff; }
-    .menu-day { border:1px solid #E2E8F0; border-radius:12px; padding:12px 14px; margin-bottom:10px; background:#fff; }
-    .menu-day.today { border-color:#F59E0B; box-shadow:0 0 0 2px rgba(245,158,11,.16); }
+    .timeline .t-sub { font-size:11px; color:var(--p-text-light); }
+    .notice-card { border:1px solid var(--p-border); border-radius:12px; padding:14px; margin-bottom:10px; background:var(--p-card); }
+    .menu-day { border:1px solid var(--p-border); border-radius:12px; padding:12px 14px; margin-bottom:10px; background:var(--p-card); }
+    .menu-day.today { border-color:var(--p-accent); box-shadow:0 0 0 2px rgba(245,158,11,.16); }
     .menu-day h4 { font-size:13px; font-weight:700; margin-bottom:6px; display:flex; justify-content:space-between; }
-    .menu-meal { font-size:13px; color:#475569; padding:3px 0; display:flex; gap:10px; }
-    .menu-meal b { flex:0 0 82px; color:#94A3B8; font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; padding-top:2px; }
+    .menu-meal { font-size:13px; color:var(--p-text-soft); padding:3px 0; display:flex; gap:10px; }
+    .menu-meal b { flex:0 0 82px; color:var(--p-text-light); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; padding-top:2px; }
     .header.compact { padding:10px 14px; display:flex; align-items:center; gap:12px; text-align:left; }
     .header.compact img { height:40px !important; }
     .header.compact h1 { font-size:20px; margin:0; }
     .header.compact p { display:none; }
-    .install-bar { display:none; align-items:center; gap:10px; background:#FFFBEB; border:1px solid #FDE68A; border-radius:12px; padding:12px 14px; margin-bottom:14px; }
+    .install-bar { display:none; align-items:center; gap:10px; background:var(--p-accent-soft); border:1px solid var(--p-accent-border); border-radius:12px; padding:12px 14px; margin-bottom:14px; }
     .install-bar.show { display:flex; }
-    .install-bar p { flex:1; font-size:13px; color:#92400E; }
-    .receipt-line { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid #F1F5F9; }
+    .install-bar p { flex:1; font-size:13px; color:var(--p-accent-ink); }
+    .receipt-line { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--p-surface-2); }
     .receipt-line:last-child { border-bottom:none; }
   </style>
 </head>
@@ -156,15 +186,15 @@
         <div class="form-group">
           <label>Password</label>
           <input type="password" id="login-password" placeholder="Enter your password"/>
-          <p style="font-size:11px;color:#94A3B8;margin-top:4px">Default password is your mobile number</p>
+          <p style="font-size:11px;color:var(--p-text-light);margin-top:4px">Default password is your mobile number</p>
         </div>
-        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#475569;margin-bottom:12px">
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--p-text-soft);margin-bottom:12px">
           <input type="checkbox" id="login-remember" style="width:auto;min-height:auto;margin:0" checked/>
           Keep me signed in on this phone
         </label>
         <button class="btn btn-amber" id="login-btn" onclick="guestLogin()">🔐 Login</button>
         <div style="text-align:center;margin-top:14px">
-          <a href="/" style="font-size:12px;color:#64748B;text-decoration:none">← Back to Home</a>
+          <a href="/" style="font-size:12px;color:var(--p-text-muted);text-decoration:none">← Back to Home</a>
         </div>
       </div>
     </div>
@@ -179,6 +209,7 @@
         <div class="name" id="p-name"></div>
         <div class="room" id="p-room"></div>
       </div>
+      <button id="p-theme" type="button" title="Light / dark" onclick="togglePortalTheme()">🌙</button>
       <button class="btn btn-outline btn-sm" onclick="guestLogout()">Logout</button>
     </div>
 
@@ -205,7 +236,7 @@
       <div class="card">
         <div class="card-h">💳 Pay Rent</div>
         <div class="card-b" id="p-pay-content">
-          <p style="text-align:center;color:#94A3B8;font-size:13px">Loading...</p>
+          <p style="text-align:center;color:var(--p-text-light);font-size:13px">Loading...</p>
         </div>
       </div>
     </div>
@@ -228,7 +259,7 @@
       <div class="card">
         <div class="card-h">💰 Payment History</div>
         <div class="card-b" id="p-payments">
-          <p style="text-align:center;color:#94A3B8;font-size:13px">No payment records</p>
+          <p style="text-align:center;color:var(--p-text-light);font-size:13px">No payment records</p>
         </div>
       </div>
     </div>
@@ -242,7 +273,7 @@
     <div id="tab-notices" class="hidden">
       <div id="p-notices">
         <div class="card">
-          <div class="card-b" style="text-align:center;color:#94A3B8;padding:32px">📢 No notices at the moment</div>
+          <div class="card-b" style="text-align:center;color:var(--p-text-light);padding:32px">📢 No notices at the moment</div>
         </div>
       </div>
     </div>
@@ -266,13 +297,13 @@
             <textarea id="cpg-desc" rows="4" placeholder="e.g. Tube light not working in corridor near room 5"></textarea>
           </div>
           <button class="btn btn-amber" id="cpg-btn" onclick="sendComplaint()">🛠️ Submit Issue</button>
-          <p style="font-size:11px;color:#94A3B8;margin-top:10px;text-align:center">This goes straight into the warden's Complaint Register so it doesn't get missed</p>
+          <p style="font-size:11px;color:var(--p-text-light);margin-top:10px;text-align:center">This goes straight into the warden's Complaint Register so it doesn't get missed</p>
         </div>
       </div>
       <div class="card">
         <div class="card-h">📋 My Reported Issues</div>
         <div class="card-b" id="cpg-history">
-          <p style="text-align:center;color:#94A3B8;font-size:13px">No issues reported yet</p>
+          <p style="text-align:center;color:var(--p-text-light);font-size:13px">No issues reported yet</p>
         </div>
       </div>
     </div>
@@ -315,7 +346,7 @@
             <input type="password" id="pwd-confirm" placeholder="Re-enter new password"/>
           </div>
           <button class="btn btn-amber" onclick="changePassword()">🔐 Change Password</button>
-          <p style="font-size:11px;color:#94A3B8;margin-top:10px;text-align:center">After changing, use new password to login next time</p>
+          <p style="font-size:11px;color:var(--p-text-light);margin-top:10px;text-align:center">After changing, use new password to login next time</p>
         </div>
       </div>
     </div>
@@ -358,7 +389,18 @@ window.onload = () => {
 
 // ── PWA ───────────────────────────────────────────────────────────
 let deferredInstall = null;
+function applyPortalTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  localStorage.setItem('sm_theme', t);
+  const b = document.getElementById('p-theme');
+  if (b) b.textContent = t === 'dark' ? '☀️' : '🌙';
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', t === 'dark' ? '#0F1115' : '#F59E0B');
+}
+function togglePortalTheme() { applyPortalTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); }
+
 function registerPortalSW() {
+  applyPortalTheme(document.documentElement.getAttribute('data-theme') || 'light');
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw-guest.js', { scope: '/' }).catch(e => console.warn('SW failed', e));
   }
@@ -490,7 +532,7 @@ function renderPayTab(g) {
          </div>`;
 
   const pendingNote = pending.length
-    ? `<div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:10px;padding:10px 12px;font-size:12px;color:#92400E;margin-bottom:12px">
+    ? `<div style="background:var(--p-accent-soft);border:1px solid var(--p-accent-border);border-radius:10px;padding:10px 12px;font-size:12px;color:var(--p-accent-ink);margin-bottom:12px">
          ⏳ ${fmt(pending.reduce((t, p) => t + parseFloat(p.amount || 0), 0))} reported and waiting for the warden to confirm. It will show in your balance once verified.
        </div>` : '';
 
@@ -499,22 +541,22 @@ function renderPayTab(g) {
     actions = `
       <div class="dues-actions">
         <button class="btn btn-amber" onclick="payViaUpi(${due})">📱 Pay via UPI</button>
-        <button class="btn btn-outline" style="border-color:#10B981;color:#10B981" onclick="claimUpiPayment(${due})">✅ I've paid</button>
+        <button class="btn btn-outline" style="border-color:var(--p-green);color:var(--p-green)" onclick="claimUpiPayment(${due})">✅ I've paid</button>
       </div>
-      <p style="font-size:11px;color:#94A3B8;text-align:center;margin-top:8px">UPI opens Google Pay / PhonePe / Paytm with the amount filled in. Tap "I've paid" only after the payment succeeds.</p>
-      <div id="p-pay-claimed" class="hidden" style="text-align:center;margin-top:14px;padding:12px;background:#ECFDF5;border-radius:10px">
-        <p style="font-size:13px;color:#065F46;font-weight:600">Thanks! The warden will confirm it shortly.</p>
+      <p style="font-size:11px;color:var(--p-text-light);text-align:center;margin-top:8px">UPI opens Google Pay / PhonePe / Paytm with the amount filled in. Tap "I've paid" only after the payment succeeds.</p>
+      <div id="p-pay-claimed" class="hidden" style="text-align:center;margin-top:14px;padding:12px;background:var(--p-green-soft);border-radius:10px">
+        <p style="font-size:13px;color:var(--p-green-ink);font-weight:600">Thanks! The warden will confirm it shortly.</p>
       </div>`;
   } else if (due > 0) {
-    actions = `<p style="font-size:12px;color:#94A3B8;text-align:center;background:#F8FAFC;padding:10px;border-radius:8px">Online payment isn't set up yet — please pay by cash or bank transfer and tell the warden.</p>`;
+    actions = `<p style="font-size:12px;color:var(--p-text-light);text-align:center;background:#F8FAFC;padding:10px;border-radius:8px">Online payment isn't set up yet — please pay by cash or bank transfer and tell the warden.</p>`;
   }
 
   const receipt = lastConfirmed
-    ? `<div style="margin-top:18px;padding-top:14px;border-top:1px solid #F1F5F9">
+    ? `<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--p-surface-2)">
          <div class="receipt-line">
            <span>
              <strong style="font-size:13px">${fmt(lastConfirmed.amount)}</strong>
-             <span style="font-size:11px;color:#94A3B8"> · ${fmtDate(lastConfirmed.collection_date)}${lastConfirmed.collection_month ? ' · ' + lastConfirmed.collection_month : ''}</span>
+             <span style="font-size:11px;color:var(--p-text-light)"> · ${fmtDate(lastConfirmed.collection_date)}${lastConfirmed.collection_month ? ' · ' + lastConfirmed.collection_month : ''}</span>
            </span>
            <button class="btn btn-outline btn-sm" style="width:auto;margin:0" onclick="downloadGuestReceipt(${lastConfirmed.id})">🧾 Receipt</button>
          </div>
@@ -579,13 +621,13 @@ function renderDetails(g) {
   const pays = g.payments || [];
   const pc = document.getElementById('p-payments');
   pc.innerHTML = pays.length === 0
-    ? '<p style="text-align:center;color:#94A3B8;font-size:13px">No payment records</p>'
+    ? '<p style="text-align:center;color:var(--p-text-light);font-size:13px">No payment records</p>'
     : pays.map(p => `
       <div class="pay-item">
         <div>
           <div style="font-weight:600;text-transform:capitalize">${p.collection_type}</div>
-          <div style="color:#64748B;font-size:11px">${fmtDate(p.collection_date)} · ${p.payment_mode}</div>
-          ${p.collection_month ? `<div style="color:#94A3B8;font-size:11px">${p.collection_month}</div>` : ''}
+          <div style="color:var(--p-text-muted);font-size:11px">${fmtDate(p.collection_date)} · ${p.payment_mode}</div>
+          ${p.collection_month ? `<div style="color:var(--p-text-light);font-size:11px">${p.collection_month}</div>` : ''}
         </div>
         <div style="text-align:right">
           <div class="text-green">${fmt(p.amount)}</div>
@@ -625,13 +667,13 @@ function renderMenu(menu) {
   menu.forEach(m => { if(!byDay[m.day_of_week]) byDay[m.day_of_week]={}; byDay[m.day_of_week][m.meal_type]=m.items; });
   const host = document.getElementById('p-menu-host');
   if (!host) return;
-  if (!menu.length) { host.innerHTML = '<div class="card"><div class="card-b" style="text-align:center;color:#94A3B8;padding:28px">🍽️ No menu added yet</div></div>'; return; }
+  if (!menu.length) { host.innerHTML = '<div class="card"><div class="card-b" style="text-align:center;color:var(--p-text-light);padding:28px">🍽️ No menu added yet</div></div>'; return; }
   const today = istWeekday();
   // Today first, then the rest of the week in order.
   const ordered = [...days.slice(days.indexOf(today)), ...days.slice(0, days.indexOf(today))];
   host.innerHTML = ordered.map(d => `
     <div class="menu-day ${d === today ? 'today' : ''}">
-      <h4>${d}${d === today ? '<span style="color:#F59E0B">Today</span>' : ''}</h4>
+      <h4>${d}${d === today ? '<span style="color:var(--p-accent)">Today</span>' : ''}</h4>
       ${meals.map(ml => `<div class="menu-meal"><b>${ml}</b><span>${(byDay[d] && byDay[d][ml]) ? byDay[d][ml] : '—'}</span></div>`).join('')}
     </div>`).join('');
 }
@@ -640,15 +682,15 @@ function renderMenu(menu) {
 function renderNotices(notices) {
   const c = document.getElementById('p-notices');
   c.innerHTML = notices.length === 0
-    ? '<div class="card"><div class="card-b" style="text-align:center;color:#94A3B8;padding:32px">📢 No notices at the moment</div></div>'
+    ? '<div class="card"><div class="card-b" style="text-align:center;color:var(--p-text-light);padding:32px">📢 No notices at the moment</div></div>'
     : notices.map(a => `
       <div class="notice-card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
           <span class="badge ${a.priority==='urgent'?'badge-red':a.priority==='important'?'badge-amber':'badge-blue'}">${a.priority}</span>
-          <span style="font-size:11px;color:#94A3B8">${fmtDate(a.created_at)}</span>
+          <span style="font-size:11px;color:var(--p-text-light)">${fmtDate(a.created_at)}</span>
         </div>
         <strong style="font-size:14px">${a.title}</strong>
-        <p style="margin-top:6px;font-size:13px;color:#475569">${a.message}</p>
+        <p style="margin-top:6px;font-size:13px;color:var(--p-text-soft)">${a.message}</p>
       </div>`).join('');
 }
 
@@ -683,14 +725,14 @@ async function loadComplaintHistory() {
   try {
     const res = await fetch('/api/guest-complaints', { headers: { 'Authorization': 'Bearer ' + guestToken } });
     const list = await res.json();
-    if (!res.ok || !list.length) { el.innerHTML = '<p style="text-align:center;color:#94A3B8;font-size:13px">No issues reported yet</p>'; return; }
+    if (!res.ok || !list.length) { el.innerHTML = '<p style="text-align:center;color:var(--p-text-light);font-size:13px">No issues reported yet</p>'; return; }
     el.innerHTML = list.map(c => `
-      <div style="padding:12px 0;border-bottom:1px solid #F1F5F9">
+      <div style="padding:12px 0;border-bottom:1px solid var(--p-surface-2)">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
           <strong style="font-size:13px">${c.category}</strong>
-          <span style="font-size:11px;color:#94A3B8">${fmtDate(c.created_at)}</span>
+          <span style="font-size:11px;color:var(--p-text-light)">${fmtDate(c.created_at)}</span>
         </div>
-        <div style="font-size:13px;color:#475569;margin:4px 0 10px">${c.description}</div>
+        <div style="font-size:13px;color:var(--p-text-soft);margin:4px 0 10px">${c.description}</div>
         ${complaintTimeline(c)}
       </div>`).join('');
   } catch(e) { /* silent */ }

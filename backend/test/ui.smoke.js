@@ -570,6 +570,75 @@ async function runAtWidth(browser, BASE, width) {
   ok(true, `${tag} quick action navigates`);
   ok(!(await page.$('#qa-sheet')), `${tag} quick action sheet closes after use`);
 
+  // ── Sprint 7.1: dark theme, and the two gaps found on the live app ──────
+  await page.evaluate(() => navigate('dashboard'));
+  await page.waitForSelector('.home-greeting', { timeout: 15000 });
+  const readTheme = () => page.evaluate(() => {
+    const cs = getComputedStyle(document.body);
+    const card = getComputedStyle(document.querySelector('.card'));
+    return { theme: document.documentElement.getAttribute('data-theme'), bg: cs.backgroundColor, text: cs.color, card: card.backgroundColor };
+  });
+  const lum = c => { const [r, g, b] = c.match(/\d+/g).map(Number).map(v => { v /= 255; return v <= .03928 ? v / 12.92 : Math.pow((v + .055) / 1.055, 2.4); }); return .2126 * r + .7152 * g + .0722 * b; };
+  const contrast = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((m, n) => n - m); return (x + .05) / (y + .05); };
+  const light = await readTheme();
+  eq(light.theme, 'light', `${tag} starts in light`);
+  ok(contrast(light.bg, light.text) >= 7, `${tag} light text contrast ${contrast(light.bg, light.text).toFixed(1)}:1`);
+  await page.evaluate(() => toggleTheme());
+  await sleep(200);
+  const dark = await readTheme();
+  eq(dark.theme, 'dark', `${tag} toggles to dark`);
+  ok(lum(dark.bg) < 0.12, `${tag} dark background is actually dark`);
+  ok(contrast(dark.bg, dark.text) >= 7, `${tag} dark text contrast ${contrast(dark.bg, dark.text).toFixed(1)}:1`);
+  ok(lum(dark.card) < 0.15, `${tag} cards are dark too (no white slabs)`);
+  // Every surface on the page must follow the theme — a hardcoded #fff shows up here.
+  const lightSurfaces = await page.evaluate(() => {
+    const out = [];
+    document.querySelectorAll('#page-content *, .topbar, .sidebar, .sm-tabbar, #copilot-bar *').forEach(e => {
+      const bg = getComputedStyle(e).backgroundColor;
+      const m = bg.match(/\d+/g);
+      if (!m || bg.includes('rgba(0, 0, 0, 0)')) return;
+      const [r, g, b] = m.map(Number);
+      if (r > 235 && g > 235 && b > 235) out.push((e.id || e.className || e.tagName).toString().slice(0, 40));
+    });
+    return [...new Set(out)].slice(0, 8);
+  });
+  eq(lightSurfaces.length, 0, `${tag} no light surfaces left in dark mode (${lightSurfaces.join(', ')})`);
+  // Inputs must be readable, not white-on-white
+  await page.evaluate(() => navigate('collect'));
+  await page.waitForSelector('#collect-search', { timeout: 10000 });
+  const inputCs = await page.$eval('#collect-search', e => { const c = getComputedStyle(e); return { bg: c.backgroundColor, color: c.color }; });
+  ok(contrast(inputCs.bg, inputCs.color) >= 4.5, `${tag} dark input contrast ${contrast(inputCs.bg, inputCs.color).toFixed(1)}:1`);
+  // Solid green/red/amber fills must keep readable text in both themes —
+  // a blanket white→token sweep once made toast text dark-on-green.
+  await page.evaluate(() => toast('contrast probe', 'ok'));
+  await sleep(150);
+  const toastCs = await page.$eval('#sm-toast', e => { const c = getComputedStyle(e); return { bg: c.backgroundColor, color: c.color }; });
+  ok(contrast(toastCs.bg, toastCs.color) >= 4.5, `${tag} toast text contrast ${contrast(toastCs.bg, toastCs.color).toFixed(1)}:1`);
+  await page.evaluate(() => document.getElementById('sm-toast').classList.remove('show'));
+  await page.screenshot({ path: path.join(SHOTS, `dark-${width}.png`) });
+  // The choice survives a reload
+  await page.reload({ waitUntil: 'networkidle0' });
+  await page.waitForSelector('.home-greeting', { timeout: 15000 });
+  eq(await page.evaluate(() => document.documentElement.getAttribute('data-theme')), 'dark', `${tag} theme persists across reload`);
+  await page.evaluate(() => toggleTheme());
+  await sleep(150);
+  eq(await page.evaluate(() => document.documentElement.getAttribute('data-theme')), 'light', `${tag} toggles back to light`);
+
+  // Gap: a Copilot answer must not follow the user to another screen
+  await page.evaluate(() => copilotAsk('who has not paid?'));
+  await page.waitForFunction(() => /owe|Nobody/.test(document.querySelector('#copilot-out')?.textContent || ''), { timeout: 10000 });
+  await page.evaluate(() => navigate('rooms'));
+  await sleep(400);
+  ok(await page.$eval('#copilot-out', e => e.classList.contains('hidden') && e.textContent.trim() === ''), `${tag} Copilot answer clears when leaving the screen`);
+  eq(await page.$eval('#copilot-q', e => e.value), '', `${tag} Copilot input clears too`);
+
+  // Gap: the Residents screen is called Residents everywhere, not "Guests"
+  await page.evaluate(() => navigate('guests'));
+  await page.waitForFunction(() => document.querySelector('#page-content table.sm-cards tbody tr'), { timeout: 10000 });
+  const resTxt = await page.$eval('#page-content', e => e.textContent);
+  ok(/Residents/.test(resTxt), `${tag} Residents heading`);
+  ok(!/All Guests|Add Guest/.test(resTxt), `${tag} no "Guests" wording left on the screen`);
+
   eq(jsErrors.length, 0, `${tag} no uncaught JS errors (${jsErrors.join('; ')})`);
   await page.close(); await ctx.close();
 }
