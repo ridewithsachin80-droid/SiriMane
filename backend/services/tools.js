@@ -226,6 +226,21 @@ const TOOLS = {
       return { text: `${priority.toUpperCase()} · ${title}`, preview, execute: { tool: 'post_announcement', label: 'Post notice', args: preview } };
     }
   },
+  prepare_request_status: {
+    description: 'Draft a status change on a maintenance request: "mark request 12 resolved", "request 7 in progress". Preview only.',
+    args: { id: 'number', status: 'string', note: 'string?' }, role: 'staff', level: 'prepare',
+    async run(a) {
+      const map = { resolved: 'resolved', done: 'resolved', fixed: 'resolved', closed: 'resolved', 'in progress': 'in_progress', in_progress: 'in_progress', started: 'in_progress', working: 'in_progress', open: 'open', reopen: 'open', reopened: 'open' };
+      const status = map[String(a.status || '').toLowerCase().trim()];
+      if (!status) return { clarify: 'Which status — resolved, in progress, or open?' };
+      const r = await pool.query(`SELECT id, category, description, room_number, status FROM complaints WHERE id=$1`, [a.id]);
+      if (!r.rows[0]) return { clarify: `I can't find request #${a.id}.` };
+      const c = r.rows[0];
+      if (c.status === status) return { clarify: `Request #${c.id} is already ${status.replace('_', ' ')}.` };
+      const preview = { id: c.id, status, note: a.note || null, category: c.category, description: c.description, room_number: c.room_number, from: c.status };
+      return { text: `Request #${c.id} (${c.category}${c.room_number ? ' · Room ' + c.room_number : ''}: "${c.description.slice(0, 60)}") → ${status.replace('_', ' ')}${a.note ? ' — ' + a.note : ''}.`, preview, execute: { tool: 'update_request_status', label: `Mark ${status.replace('_', ' ')}`, args: { id: c.id, status, note: a.note || null } } };
+    }
+  },
   prepare_room_shift: {
     description: 'Draft moving a resident to another room. Preview only.',
     args: { name: 'string?', resident_id: 'number?', to_room: 'string', bed: 'string?', date: 'string?' }, role: 'staff', level: 'prepare',

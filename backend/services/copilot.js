@@ -42,12 +42,21 @@ function localIntent(text, user, context) {
     const m = t.match(/(\d+)\s*\+?\s*months?/i);
     return { tool: 'prepare_reminders', args: m ? { min_months: Number(m[1]) } : {}, via: 'local' };
   }
+  {
+    const m = t.match(/\b(?:mark|set|close|resolve|reopen|update)?\s*(?:request|complaint|issue|ticket)\s*#?\s*(\d+)\b.*?\b(resolved|done|fixed|closed|in progress|started|working|open|reopen(?:ed)?)\b/i)
+      || t.match(/\b(?:resolve|close|fix)\s+(?:request|complaint|issue|ticket)\s*#?\s*(\d+)\b/i);
+    if (m) return { tool: 'prepare_request_status', args: { id: Number(m[1]), status: m[2] || 'resolved', note: (t.match(/[—–-]\s*(.+)$/) || [])[1] }, via: 'local' };
+  }
   if (/\b(move|shift)\b.*\b(room|to)\b/i.test(t)) {
     const room = (t.match(/\b(?:to|into)\s+(?:room\s*)?([a-z]?\d{1,3}[a-z]?)\b/i) || [])[1];
     const name = (t.match(/^(?:move|shift)\s+([a-z ]+?)\s+(?:to|into|from)\b/i) || [])[1];
     if (room) return { tool: 'prepare_room_shift', args: { name, to_room: room }, via: 'local' };
   }
-  if (/\b(here|this room|this resident|her|she)\b/i.test(t) && context) {
+  // Pronouns follow what is open: "she/her/this resident" → the resident,
+  // "here/this room" → the room. A resident view carries her room too, so
+  // the resident check must come first.
+  if (context && /\b(her|she|this resident|summari[sz]e)\b/i.test(t) && context.resident_id) return { tool: 'get_resident', args: { resident_id: context.resident_id }, via: 'local' };
+  if (context && /\b(here|this room)\b/i.test(t)) {
     if (context.room_number) return { tool: 'get_room_status', args: { room: context.room_number }, via: 'local' };
     if (context.resident_id) return { tool: 'get_resident', args: { resident_id: context.resident_id }, via: 'local' };
   }

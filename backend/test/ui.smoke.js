@@ -441,6 +441,19 @@ async function runAtWidth(browser, BASE, width) {
   await page.evaluate(() => closeModal());
   const ctxAfter = await page.evaluate(() => smContext.resident_id);
   eq(ctxAfter, null, `${tag} context clears when the modal closes`);
+  // 6.1: Admin → Copilot log tab renders the audit
+  await page.evaluate(() => navigate('admin'));
+  await page.waitForSelector('#schema-banner', { timeout: 8000 });
+  await page.evaluate(() => switchAdminTab('copilot'));
+  await page.waitForFunction(() => document.querySelector('#admin-tab-content tbody tr, #admin-tab-content .sm-empty-state'), { timeout: 10000 });
+  const logTxt = await page.$eval('#admin-tab-content', e => e.textContent);
+  ok(/record 700 rent/.test(logTxt), `${tag} Copilot log lists the ask made earlier (${logTxt.replace(/\s+/g, ' ').slice(0, 160)})`);
+  ok(await page.$eval('#admin-tab-content', e => /done/.test(e.textContent)), `${tag} Copilot log shows the confirmed outcome`);
+  await page.evaluate(() => switchAdminTab('settings'));
+  await page.waitForSelector('#set-evening-time', { timeout: 8000 });
+  ok(await page.$('#set-evening-time'), `${tag} evening time is editable in Settings`);
+  await page.evaluate(() => navigate('dashboard'));
+  await page.waitForSelector('#copilot-q', { timeout: 8000 });
   // Ctrl+K focuses the bar
   await page.keyboard.down('Control'); await page.keyboard.press('k'); await page.keyboard.up('Control');
   eq(await page.evaluate(() => document.activeElement && document.activeElement.id), 'copilot-q', `${tag} Ctrl+K focuses the Copilot`);

@@ -65,7 +65,8 @@ async function run(mode) {
   eq(r.data.tool, 'get_outstanding_rent', `${mode}: filtered NL query`); ok(r.data.evidence.every(x => x.amount_due >= 10000 && x.months >= 2), `${mode}: filters applied (${r.data.evidence.length} rows)`);
   r = await askAs(staffTok, 'which rooms are vacant?'); eq(r.data.tool, 'get_room_status', `${mode}: vacancy`); ok(/vacant/.test(r.data.answer), `${mode}: vacancy text`);
   r = await askAs(staffTok, "what's wrong here?", { page: 'rooms', room_number: 'C1' }); eq(r.data.tool, 'get_room_status', `${mode}: "here" resolves to the viewed room`); ok(/Room C1/.test(r.data.answer), `${mode}: answers about room C1`);
-  r = await askAs(staffTok, 'why is she overdue?', { page: 'guests', resident_id: F.gA.id, resident_name: 'Copilot Anu' }); eq(r.data.tool, 'get_resident', `${mode}: "she" resolves to the viewed resident`); ok(/Copilot Anu/.test(r.data.answer), `${mode}: names her`);
+  r = await askAs(staffTok, 'why is she overdue?', { page: 'guests', resident_id: F.gA.id, resident_name: 'Copilot Anu', room_number: 'C1' }); eq(r.data.tool, 'get_resident', `${mode}: "she" resolves to the viewed resident even when her room is also in context`); ok(/Copilot Anu/.test(r.data.answer), `${mode}: names her`);
+  r = await askAs(staffTok, "what's wrong here?", { page: 'guests', resident_id: F.gA.id, resident_name: 'Copilot Anu', room_number: 'C1' }); eq(r.data.tool, 'get_room_status', `${mode}: "here" prefers the room when both are in context`);
   r = await askAs(staffTok, 'which complaint is taking too long'); eq(r.data.tool, 'get_open_requests', `${mode}: open requests`);
   r = await askAs(staffTok, 'what needs attention today?'); eq(r.data.tool, 'get_today', `${mode}: brief`);
   r = await askAs(staffTok, 'how is this month compared to last month'); ok(r.data.tool !== 'get_month_performance' || r.data.forbidden, `${mode}: staff never gets owner performance`);
@@ -125,6 +126,16 @@ async function run(mode) {
   r = await askAs(staffTok, 'send reminders to residents 1+ months behind'); eq(r.data.tool, 'prepare_reminders', `${mode}: reminders drafted`); ok(r.data.evidence.length >= 1 && r.data.evidence[0].text, `${mode}: reminder texts`); ok(r.data.actions.some(a => a.navigate === 'reminders'), `${mode}: opens Reminders`);
   ok(!r.data.proposal, `${mode}: reminders are prepare-only (sending is the warden's tap)`);
 
+  // ── request status by voice (6.1) ──────────────────────────────────────
+  const openReq = (await pool.query(`SELECT id FROM complaints WHERE status<>'resolved' ORDER BY id LIMIT 1`)).rows[0];
+  r = await askAs(staffTok, `mark request ${openReq.id} resolved — tap replaced`);
+  eq(r.data.tool, 'prepare_request_status', `${mode}: status change prepared`); eq(r.data.proposal.preview.status, 'resolved', `${mode}: target status`); ok(r.data.proposal.preview.note && /tap replaced/.test(r.data.proposal.preview.note), `${mode}: note captured`);
+  eq((await pool.query(`SELECT status FROM complaints WHERE id=$1`, [openReq.id])).rows[0].status !== 'resolved', true, `${mode}: preview changed nothing`);
+  c = await confirmAs(staffTok, r.data.proposal.id); eq(c.status, 200, `${mode}: status confirmed`);
+  eq((await pool.query(`SELECT status, resolution_notes FROM complaints WHERE id=$1`, [openReq.id])).rows[0].status, 'resolved', `${mode}: request resolved after confirm`);
+  r = await askAs(staffTok, `resolve request ${openReq.id}`); ok(r.data.clarify && /already/.test(r.data.clarify), `${mode}: already-resolved is explained, not re-proposed`);
+  r = await askAs(staffTok, `mark request 999999 resolved`); ok(r.data.clarify && /can't find/.test(r.data.clarify), `${mode}: unknown request id is explained`);
+
   // ── audit ─────────────────────────────────────────────────────────────
   const audit = await pool.query(`SELECT * FROM ai_actions WHERE request_text ILIKE 'record 2500 rent%' ORDER BY id DESC LIMIT 1`);
   ok(audit.rows[0], `${mode}: ask audited`); eq(audit.rows[0].interpretation.tool, 'prepare_payment', `${mode}: audit has the interpretation`); ok(audit.rows[0].proposal_id, `${mode}: audit links the proposal`);
@@ -176,6 +187,11 @@ async function run(mode) {
     await pool.query(`INSERT INTO app_settings(key, value) VALUES('evening_time','00:00') ON CONFLICT (key) DO UPDATE SET value='00:00'`);
     const logs = []; const sch = copilot.startEveningScheduler({ intervalMs: 60000, log: l => logs.push(l) }); await sch.tick(); await sch.tick(); sch.stop();
     eq(logs.filter(l => /summary computed/.test(l)).length, 1, 'evening scheduler runs once per day, not twice');
+    // 6.1: audit screen route + evening time setting
+    r = await api('GET', '/copilot/audit', null, staffTok); eq(r.status, 403, 'audit is admin-only');
+    r = await api('GET', '/copilot/audit', null, adminTok); eq(r.status, 200, 'audit readable'); ok(Array.isArray(r.data), 'audit is a list');
+    r = await api('PUT', '/settings', { evening_time: '21:30' }, adminTok); eq(r.status, 200, 'evening time saved');
+    eq((await pool.query(`SELECT value FROM app_settings WHERE key='evening_time'`)).rows[0].value, '21:30', 'evening_time persisted');
     r = await api('GET', '/copilot/tools', null, staffTok); ok(r.data.tools.every(t => !/announcement|performance|owner_report/.test(t.name)), 'staff tool list excludes admin tools');
     r = await api('GET', '/copilot/tools', null, adminTok); ok(r.data.tools.some(t => t.name === 'get_month_performance'), 'admin tool list includes performance');
     console.log('✓ health, brief v2, evening, tool catalogue');
@@ -184,6 +200,10 @@ async function run(mode) {
     await run('no-model');
     ok(modelCalls.every(u => !/9555555551|9555555552|9555555553/.test(u)), 'PRIVACY: phone numbers never sent to the model');
     ok(modelCalls.every(u => !/12000/.test(u)), 'PRIVACY: deposit amounts never sent to the model');
+    const auditRows = (await api('GET', '/copilot/audit?limit=500', null, adminTok)).data;
+    ok(auditRows.some(x => /record 2500 rent/i.test(x.request_text)), 'audit screen data includes asks');
+    ok(auditRows.some(x => x.request_text === 'confirm' && x.confirmed_at), 'audit screen data includes confirms');
+    ok(auditRows.some(x => x.error === 'forbidden'), 'audit screen data includes refusals');
     console.log(`\n✅ Copilot gate passed — ${count} assertions`);
   } catch (e) {
     console.error(`\n❌ Copilot gate FAILED after ${count} assertions:\n`, e.stack || e.message); process.exitCode = 1;

@@ -2817,9 +2817,11 @@ function renderAdminPage() {
       <button class="btn ${adminActiveTab==='audit'?'btn-primary':'btn-outline'} btn-sm" onclick="switchAdminTab('audit')">Audit Log</button>
       <button class="btn ${adminActiveTab==='refunds'?'btn-primary':'btn-outline'} btn-sm" onclick="switchAdminTab('refunds')">Deposit Refunds</button>
       <button class="btn ${adminActiveTab==='settings'?'btn-primary':'btn-outline'} btn-sm" onclick="switchAdminTab('settings')">Settings</button>
+      <button class="btn ${adminActiveTab==='copilot'?'btn-primary':'btn-outline'} btn-sm" onclick="switchAdminTab('copilot')">Copilot log</button>
     </div>
     <div id="admin-tab-content"><div class="loading-center"><div class="spinner"></div></div></div>`);
-  if (adminActiveTab === 'staff') renderAdminStaffTab();
+  if (adminActiveTab === 'copilot') renderAdminCopilotTab();
+  else if (adminActiveTab === 'staff') renderAdminStaffTab();
   else if (adminActiveTab === 'audit') renderAdminAuditTab();
   else if (adminActiveTab === 'refunds') renderAdminRefundsTab();
   else renderAdminSettingsTab();
@@ -2854,6 +2856,7 @@ async function renderAdminSettingsTab() {
           <div class="form-group"><label>Phone</label><input id="set-pg-phone" placeholder="e.g. 9880217627" value="${settings.pg_phone||''}"/></div>
           <div class="form-row">
             <div class="form-group"><label>Morning brief time (IST)</label><input id="set-brief-time" type="time" value="${settings.brief_time||'07:00'}"/></div>
+            <div class="form-group"><label>Evening summary time (IST)</label><input id="set-evening-time" type="time" value="${settings.evening_time||'20:00'}"/></div>
             <div class="form-group"><label>Send brief to (WhatsApp)</label><input id="set-owner-phone" placeholder="Owner's number" value="${settings.owner_phone||''}"/></div>
           </div>
           <div class="form-group"><label>Reminder language</label>
@@ -2882,6 +2885,7 @@ async function savePgSettings() {
     pg_address: document.getElementById('set-pg-address').value.trim(),
     pg_phone: document.getElementById('set-pg-phone').value.trim(),
     brief_time: document.getElementById('set-brief-time').value || '07:00',
+    evening_time: document.getElementById('set-evening-time').value || '20:00',
     owner_phone: document.getElementById('set-owner-phone').value.trim(),
     reminder_lang: document.getElementById('set-reminder-lang').value
   };
@@ -3901,7 +3905,7 @@ function renderCopilotResult(r) {
 }
 function previewRows(p) {
   if (!p) return '';
-  const label = { guest_name: 'Resident', amount: 'Amount', payment_mode: 'Mode', collection_type: 'Type', collection_date: 'Date', collection_month: 'For', category: 'Category', paid_to: 'Paid to', description: 'Details', purchase_date: 'Date', priority: 'Priority', title: 'Title', message: 'Message', effective_from: 'From', bed_number: 'Bed' };
+  const label = { guest_name: 'Resident', amount: 'Amount', payment_mode: 'Mode', collection_type: 'Type', collection_date: 'Date', collection_month: 'For', category: 'Category', paid_to: 'Paid to', description: 'Details', purchase_date: 'Date', priority: 'Priority', title: 'Title', message: 'Message', effective_from: 'From', bed_number: 'Bed', id: 'Request', from: 'Currently', status: 'Change to', note: 'Note', room_number: 'Room' };
   return Object.entries(p).filter(([k, v]) => label[k] && v !== null && v !== '' && v !== undefined).map(([k, v]) => `<div class="copilot-kv"><span>${label[k]}</span><strong>${k === 'amount' ? fmt(v) : v}</strong></div>`).join('');
 }
 async function copilotConfirm(id, btn) {
@@ -3924,4 +3928,21 @@ async function copilotRetool(a) {
     const r = await apiFetch('/copilot/ask', { method: 'POST', body: { text: q, context: { page: smContext.page, resident_id: a.args && a.args.resident_id, resident_name: a.label } } });
     renderCopilotResult(r);
   } catch (e) { out.innerHTML = `<div class="copilot-answer copilot-err">${e.message}</div>`; }
+}
+
+// Admin → Copilot log: every ask, confirm and refusal, newest first.
+async function renderAdminCopilotTab() {
+  const host = document.getElementById('admin-tab-content');
+  try {
+    const rows = await apiFetch('/copilot/audit?limit=150');
+    if (!rows.length) { host.innerHTML = emptyState('✦', 'No Copilot activity yet', 'Every question and confirmed action will be listed here.'); return; }
+    host.innerHTML = `<div class="card"><div class="card-header"><h3>✦ Copilot log</h3><span class="text-muted" style="font-size:12px">${rows.length} most recent</span></div>
+      <div class="table-wrap"><table><thead><tr><th>WHEN</th><th>WHO</th><th>ASKED</th><th>SIRI DID</th><th>OUTCOME</th></tr></thead><tbody>
+      ${rows.map(r => {
+        const i = r.interpretation || {};
+        const did = r.request_text === 'confirm' ? `Confirmed ${i.tool || r.proposal_tool || ''}` : (i.tool ? `${i.tool}${i.via ? ' · ' + i.via : ''}` : (i.clarify ? 'Asked: ' + i.clarify : '—'));
+        const outcome = r.error ? `<span class="badge badge-red">${r.error}</span>` : r.confirmed_at ? `<span class="badge badge-green">done</span>` : r.proposal_id && !r.proposal_confirmed_at ? `<span class="badge badge-amber">prepared, not confirmed</span>` : `<span class="badge badge-gray">answered</span>`;
+        return `<tr><td>${new Date(r.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td><td>${r.username || '—'}</td><td>${r.request_text === 'confirm' ? `<em>${r.preview_text || 'confirm'}</em>` : r.request_text}</td><td>${did}</td><td>${outcome}${r.result_text && r.request_text !== 'confirm' ? `<div class="text-muted" style="font-size:11px;margin-top:2px">${r.result_text.slice(0, 80)}</div>` : ''}</td></tr>`;
+      }).join('')}</tbody></table></div></div>`;
+  } catch (e) { host.innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
 }

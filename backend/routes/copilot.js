@@ -41,6 +41,19 @@ router.get('/evening', auth, async (req, res) => {
   catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// GET /copilot/audit?limit=100 — admin: every ask / confirm / refusal
+router.get('/audit', auth, async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+  const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+  try {
+    const r = await require('../db').query(`SELECT a.id, a.created_at, u.username, a.request_text, a.interpretation, a.proposal_id, a.confirmed_at, a.result_text, a.error, a.ms,
+        p.tool AS proposal_tool, p.preview_text, p.confirmed_at AS proposal_confirmed_at
+      FROM ai_actions a LEFT JOIN users u ON u.id=a.user_id LEFT JOIN ai_proposals p ON p.id=a.proposal_id
+      ORDER BY a.id DESC LIMIT $1`, [limit]);
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // GET /copilot/tools — what this user may ask for (drives the chips)
 router.get('/tools', auth, (req, res) => res.json({ model: copilot.modelAvailable(), tools: tools.catalogue(req.user).map(t => ({ name: t.name, level: t.level })) }));
 
