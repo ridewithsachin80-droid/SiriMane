@@ -57,6 +57,7 @@ function navigate(page) {
   document.getElementById('topbar-actions').innerHTML = '';
   document.getElementById('sidebar').classList.remove('open');
   if (typeof syncChrome === 'function') syncChrome(page);
+  if (typeof smSetContext === 'function') smSetContext({ page, resident_id: null, resident_name: null, room_number: null });
   const pages = { dashboard:pgDashboard, rooms:pgRooms, guests:pgGuests, 'daily-menu':pgMenu, 'daily-checklist':pgChecklist, complaints:pgComplaints, payments:pgPayments, 'guest-messages':pgAnnouncements, inbox:pgInbox, purchases:pgPurchases, collections:pgCollections, 'rent-due':pgRentDue, reports:pgReports, 'balance-sheet':pgBalanceSheet, admin:pgAdmin, collect:pgCollect, reminders:pgReminders };
   if(!pages[page]) return;
   // Error boundary: a thrown error inside any screen shows a retry card
@@ -133,7 +134,7 @@ function openModal(html) {
   document.getElementById('modal-container').innerHTML = `<div class="modal-overlay" id="modal-overlay">${html}</div>`;
   document.getElementById('modal-overlay').addEventListener('click', e => { if(e.target.id==='modal-overlay') closeModal(); });
 }
-function closeModal() { stopPurchaseVoice(); document.getElementById('modal-container').innerHTML = ''; }
+function closeModal() { stopPurchaseVoice(); document.getElementById('modal-container').innerHTML = ''; smSetContext({ resident_id: null, resident_name: null, room_number: null }); }
 // Skeleton placeholders read as "content is coming" far better than a bare
 // spinner on a slow 4G connection. Same call site as before.
 function loading() {
@@ -197,26 +198,20 @@ async function pgDashboard() {
       <div class="page-header"><h1>Dashboard</h1><p>Welcome to Siri Mane PG Management</p></div>
       <div class="card mb-6" id="brief-card">
         <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-          <h3>☀️ Today's brief</h3>
-          <button class="btn btn-outline btn-sm" onclick="loadBrief(true)" title="Recompute">↻</button>
+          <h3 id="brief-greeting">☀️ Siri's Brief</h3>
+          <div class="flex items-center gap-2">
+            <span id="health-pill" class="health-pill hidden" title="Property health"></span>
+            <button class="btn btn-outline btn-sm" onclick="loadBrief(true)" title="Recompute">↻</button>
+          </div>
         </div>
         <div style="padding:14px 16px">
-          <pre id="brief-text" style="white-space:pre-wrap;font-family:inherit;font-size:14px;line-height:1.55;margin:0 0 12px">Loading…</pre>
-          <div class="flex gap-2" style="flex-wrap:wrap">
+          <div id="brief-body"><div class="sm-skel"><div class="sm-skel-line" style="width:60%"></div><div class="sm-skel-line"></div><div class="sm-skel-line" style="width:80%"></div></div></div>
+          <div class="flex gap-2" style="flex-wrap:wrap;margin-top:12px">
             <button class="btn btn-success btn-sm" id="brief-wa" onclick="shareBrief()">💬 WhatsApp</button>
             <button class="btn btn-outline btn-sm" onclick="copyBrief()">📋 Copy</button>
-            <button class="btn btn-outline btn-sm" onclick="navigate('reminders')">📣 Send rent reminders</button>
+            <button class="btn btn-outline btn-sm" onclick="showEvening()">🌙 Evening summary</button>
           </div>
           <div id="brief-meta" class="text-muted" style="font-size:11px;margin-top:8px"></div>
-        </div>
-      </div>
-      <div class="card mb-6">
-        <div style="padding:12px 16px">
-          <div class="flex gap-2">
-            <input type="text" id="ask-q" placeholder="Ask Siri Mane… e.g. who has not paid?" style="margin:0;flex:1" onkeydown="if(event.key==='Enter')askSiriMane()"/>
-            <button class="btn btn-primary" onclick="askSiriMane()">Ask</button>
-          </div>
-          <pre id="ask-a" class="hidden" style="white-space:pre-wrap;font-family:inherit;font-size:14px;line-height:1.5;margin:12px 0 0;padding:12px;background:#F8FAFC;border-radius:8px"></pre>
         </div>
       </div>
       ${isAdmin() ? `<div class="card mb-6 hidden" id="attention-card">
@@ -657,6 +652,7 @@ async function saveGuest(id) {
 }
 
 async function viewGuest(id) {
+  smSetContext({ resident_id: id });
   try {
     const [g, ledgerData, history, roomHistory] = await Promise.all([
       API.getGuest(id),
@@ -664,6 +660,7 @@ async function viewGuest(id) {
       API.getRentHistory(id).catch(()=>[]),
       API.getRoomHistory(id).catch(()=>[])
     ]);
+    smSetContext({ resident_id: id, resident_name: g.name, room_number: g.room_number || null });
     const balance = ledgerData ? parseFloat(ledgerData.current_balance) : null;
     const balanceLabel = balance===null ? '' : balance < -0.5 ? `${fmt(Math.abs(balance))} due` : balance > 0.5 ? `${fmt(balance)} credit` : 'Settled';
     const balanceClass = balance===null ? '' : balance < -0.5 ? 'text-red' : balance > 0.5 ? 'text-green' : 'text-muted';
@@ -3043,7 +3040,7 @@ const SM_PHONE = () => window.matchMedia('(max-width: 640px)').matches;
 // One entry point for all the phone chrome added in Sprint 1. Safe to call
 // twice — every piece checks whether it already exists.
 function initPhoneChrome() {
-  try { initTabBar(); initTopbarMore(); initMobileCards(); } catch (e) { console.error(e); }
+  try { initTabBar(); initTopbarMore(); initMobileCards(); initCopilotBar(); } catch (e) { console.error(e); }
   loadAiStatus();
 }
 
@@ -3648,14 +3645,48 @@ async function loadAttention() {
 
 async function loadBrief(force) {
   loadAttention();
-  const el = document.getElementById('brief-text');
-  if (!el) return;
+  const body = document.getElementById('brief-body');
+  if (!body) return;
   try {
-    briefCache = await apiFetch('/assistant/brief' + (force ? '?refresh=1' : ''));
-    el.textContent = briefCache.text;
-    const when = new Date(briefCache.computed_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
-    document.getElementById('brief-meta').textContent = `Computed ${when}${briefCache.cached ? ' · tap ↻ for fresh numbers' : ''}`;
-  } catch (e) { el.textContent = 'Could not load the brief: ' + e.message; }
+    briefCache = await apiFetch('/copilot/brief' + (force ? '?force=1' : ''));
+    const b = briefCache;
+    document.getElementById('brief-greeting').textContent = `☀️ ${b.greeting}`;
+    const pill = document.getElementById('health-pill');
+    pill.textContent = `Health ${b.health.overall}`;
+    pill.className = 'health-pill ' + (b.health.overall >= 80 ? 'good' : b.health.overall >= 60 ? 'ok' : 'low');
+    pill.onclick = () => showHealthDetail(b.health);
+    const level = (arr, dot) => arr.map(l => `<div class="brief-line">${dot} ${l}</div>`).join('');
+    body.innerHTML = `
+      <div class="brief-date">${b.dateLabel}</div>
+      <div class="brief-section"><div class="brief-h">What changed</div>${b.changed.map(l => `<div class="brief-line">• ${l}</div>`).join('')}</div>
+      <div class="brief-section"><div class="brief-h">Needs attention</div>
+        ${level(b.attention.high, '🔴')}${level(b.attention.medium, '🟠')}${level(b.attention.low, '🟢')}
+        ${!b.attention.high.length && !b.attention.medium.length && !b.attention.low.length ? '<div class="brief-line">✅ Nothing needs attention</div>' : ''}
+      </div>
+      <div class="brief-section"><div class="brief-h">Siri recommends</div>
+        ${b.recommendations.map((r, i) => `<div class="brief-rec"><span>${i + 1}. ${r.text}</span>
+          <button class="btn btn-primary btn-sm" onclick='${r.action.navigate ? `navigate("${r.action.navigate}")` : `copilotAsk(${JSON.stringify(r.action.ask)})`}'>${r.action.label}</button></div>`).join('')}
+      </div>`;
+    const when = new Date(b.computed_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+    document.getElementById('brief-meta').textContent = `Computed ${when}${b.cached ? ' · tap ↻ for fresh numbers' : ''}`;
+  } catch (e) { body.textContent = 'Could not load the brief: ' + e.message; }
+}
+function showHealthDetail(h) {
+  const rows = Object.entries(h.components).map(([k, c]) => `
+    <div style="display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--border)">
+      <div><div style="font-weight:600;text-transform:capitalize">${k}</div><div style="font-size:12px;color:var(--text-muted,#64748B)">${c.why}</div></div>
+      <div style="font-size:18px;font-weight:700;white-space:nowrap">${c.score == null ? '—' : c.score}</div>
+    </div>`).join('');
+  openModal(`<div class="modal"><div class="modal-header"><h3>Property health · ${h.overall}/100</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+    <div class="modal-body"><p class="text-muted" style="font-size:12px;margin-bottom:8px">Each part is a plain rule you can check; the overall is their average. Resident experience joins once residents start rating meals.</p>${rows}</div></div>`);
+}
+async function showEvening() {
+  try {
+    const e = await apiFetch('/copilot/evening');
+    openModal(`<div class="modal"><div class="modal-header"><h3>🌙 Evening summary</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+      <div class="modal-body"><pre style="white-space:pre-wrap;font-family:inherit;font-size:14px;line-height:1.55">${e.text}</pre>
+      <div class="flex gap-2" style="margin-top:12px"><a class="btn btn-success btn-sm" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(e.text)}">💬 WhatsApp</a><button class="btn btn-outline btn-sm" onclick="navigator.clipboard.writeText(${JSON.stringify('')} + document.querySelector('.modal-body pre').textContent).then(()=>toast('Copied','ok'))">📋 Copy</button></div></div></div>`);
+  } catch (err) { toast(err.message); }
 }
 async function shareBrief() {
   if (!briefCache) return;
@@ -3670,15 +3701,7 @@ function copyBrief() {
   if (!briefCache) return;
   navigator.clipboard?.writeText(briefCache.text).then(() => toast('Brief copied', 'ok')).catch(() => toast('Copy not available on this browser'));
 }
-async function askSiriMane() {
-  const q = document.getElementById('ask-q').value.trim();
-  const a = document.getElementById('ask-a');
-  if (!q) return;
-  a.classList.remove('hidden'); a.textContent = 'Thinking…';
-  try { const r = await apiFetch('/assistant/ask', { method: 'POST', body: { question: q } }); a.textContent = r.answer; }
-  catch (e) { a.textContent = e.message; }
-}
-
+async function askSiriMane() { const q = document.getElementById('ask-q')?.value; if (q) copilotAsk(q); }
 function priorityBadge(p) {
   const map = { high: ['badge-red', '🔴 High'], medium: ['badge-amber', '🟡 Medium'], low: ['badge-gray', '⚪ Low'] };
   const [cls, label] = map[p] || map.medium;
@@ -3780,4 +3803,125 @@ async function loadSchemaBanner() {
         In the Railway console run: <code>node backend/scripts/migrate-all.js</code></div>`;
     } else host.innerHTML = '';
   } catch { /* no banner */ }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   SPRINT 6 — Copilot bar: one entry point on every screen.
+   Inform answers render inline; prepare answers show a preview with a
+   Confirm button; execute only ever happens through that button.
+   ═══════════════════════════════════════════════════════════════ */
+const smContext = { page: 'dashboard', resident_id: null, resident_name: null, room_number: null };
+function smSetContext(patch) { Object.assign(smContext, patch); renderCopilotChips(); }
+
+const COPILOT_CHIPS = {
+  dashboard: ['What needs attention today?', 'Who has not paid?', 'Which rooms are vacant?'],
+  collect: ['Record 6000 rent from … by UPI', 'Who owes more than 10,000?'],
+  guests: ['Who joined recently?', 'Who is 2+ months behind?', 'Find …'],
+  rooms: ['Which rooms are vacant?', 'Who is in room …?'],
+  'rent-due': ['Who is repeatedly late?', 'Send reminders to residents 2+ months behind'],
+  reminders: ['Send reminders to residents 1+ months behind'],
+  complaints: ['Which complaint is taking too long?', 'Geyser not working in room …'],
+  purchases: ['Expense 500 vegetables paid to … cash', 'Expenses this month'],
+  payments: ['Who has not paid?', 'How much collected this month?'],
+  reports: ['How is this month compared to last month?', 'Give me a report'],
+  admin: ['What needs attention today?']
+};
+function renderCopilotChips() {
+  const host = document.getElementById('copilot-chips');
+  if (!host) return;
+  let chips = COPILOT_CHIPS[smContext.page] || COPILOT_CHIPS.dashboard;
+  if (smContext.resident_name) chips = [`Summarise ${smContext.resident_name.split(' ')[0]}`, 'Why is she overdue?', ...chips.slice(0, 1)];
+  else if (smContext.room_number) chips = [`What's wrong here?`, `Who is in room ${smContext.room_number}?`, ...chips.slice(0, 1)];
+  host.innerHTML = chips.map(c => `<button type="button" class="copilot-chip" onclick="copilotAsk(${JSON.stringify(c)})">${c}</button>`).join('');
+}
+
+function initCopilotBar() {
+  if (document.getElementById('copilot-bar')) return;
+  const bar = document.createElement('div');
+  bar.id = 'copilot-bar';
+  bar.innerHTML = `
+    <div class="copilot-row">
+      <span class="copilot-orb" aria-hidden="true">✦</span>
+      <input type="text" id="copilot-q" placeholder="Ask Siri… or tell me what to record" autocomplete="off"
+        onkeydown="if(event.key==='Enter'){copilotAsk(this.value)}" onfocus="document.getElementById('copilot-bar').classList.add('focus')" onblur="document.getElementById('copilot-bar').classList.remove('focus')"/>
+      <button type="button" class="mic-btn" id="copilot-mic" onclick="copilotVoice()" aria-label="Speak">🎤</button>
+      <button type="button" class="btn btn-primary btn-sm" id="copilot-go" onclick="copilotAsk(document.getElementById('copilot-q').value)">Ask</button>
+    </div>
+    <div id="copilot-chips" class="copilot-chips"></div>
+    <div id="copilot-voice-status" class="voice-status" style="padding:2px 4px;min-height:0"></div>
+    <div id="copilot-out" class="copilot-out hidden"></div>`;
+  const content = document.getElementById('page-content');
+  content.parentNode.insertBefore(bar, content);
+  renderCopilotChips();
+  document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); document.getElementById('copilot-q').focus(); } });
+}
+function copilotVoice() { smVoice('copilot-mic', 'copilot-voice-status', t => copilotAsk(t), 'ask or tell me what to record'); }
+
+let copilotBusy = false;
+async function copilotAsk(text) {
+  const q = String(text || '').trim();
+  if (!q || copilotBusy) return;
+  const out = document.getElementById('copilot-out');
+  const input = document.getElementById('copilot-q');
+  input.value = q;
+  out.classList.remove('hidden');
+  out.innerHTML = `<div class="copilot-answer"><div class="sm-skel"><div class="sm-skel-line" style="width:70%"></div><div class="sm-skel-line" style="width:40%"></div></div></div>`;
+  copilotBusy = true;
+  try {
+    const r = await apiFetch('/copilot/ask', { method: 'POST', body: { text: q, context: { page: smContext.page, resident_id: smContext.resident_id, resident_name: smContext.resident_name, room_number: smContext.room_number } } });
+    renderCopilotResult(r);
+  } catch (e) { out.innerHTML = `<div class="copilot-answer copilot-err">${e.message}</div>`; }
+  finally { copilotBusy = false; input.select(); }
+}
+
+function renderCopilotResult(r) {
+  const out = document.getElementById('copilot-out');
+  const ev = (r.evidence || []).slice(0, 8);
+  const evidence = ev.length ? `<div class="copilot-evidence">${ev.map(x => {
+    if (x.text && x.name) return `<div><strong>${x.name}</strong>${x.room ? ' · Room ' + x.room : ''} — ${fmt(x.amount_due)}</div>`;
+    if (x.name && 'amount_due' in x) return `<div><strong>${x.name}</strong>${x.room || x.room_number ? ' · Room ' + (x.room || x.room_number) : ''} — ${fmt(x.amount_due)}${x.months ? ` · ${x.months} mo` : ''}</div>`;
+    if (x.room_number && 'vacant' in x) return `<div><strong>Room ${x.room_number}</strong> — ${x.vacant} free of ${x.total_beds}${x.residents && x.residents.length ? ' · ' + x.residents.map(z => z.name).join(', ') : ''}</div>`;
+    if (x.category && x.description) return `<div><strong>${x.category}</strong> · ${x.priority || ''}${x.room_number ? ' · Room ' + x.room_number : ''} — ${x.description}${x.age_days != null ? ` (${x.age_days} d)` : ''}</div>`;
+    return `<div>${x.name || x.title || JSON.stringify(x)}</div>`;
+  }).join('')}${(r.evidence || []).length > 8 ? `<div class="text-muted">…and ${r.evidence.length - 8} more</div>` : ''}</div>` : '';
+  const preview = r.proposal ? `<div class="copilot-preview"><div class="copilot-preview-h">Siri prepared — check before confirming</div>${previewRows(r.proposal.preview)}</div>` : '';
+  const buttons = (r.actions || []).map(a => {
+    if (a.confirm) return `<button class="btn btn-success" onclick="copilotConfirm('${a.confirm}', this)">✓ ${a.label}</button>`;
+    if (a.navigate) return `<button class="btn btn-outline btn-sm" onclick="navigate('${a.navigate}')">${a.label}</button>`;
+    if (a.download) return `<button class="btn btn-outline btn-sm" onclick="API.downloadExport('${a.download}','${a.filename || 'file'}').catch(e=>toast(e.message))">📄 ${a.label}</button>`;
+    if (a.tool) return `<button class="btn btn-outline btn-sm" onclick='copilotRetool(${JSON.stringify(a).replace(/'/g, "&#39;")})'>${a.label}</button>`;
+    return '';
+  }).join('');
+  const conf = r.confidence === 'low' ? '<span class="copilot-conf">not sure</span>' : '';
+  out.innerHTML = `<div class="copilot-answer ${r.clarify ? 'copilot-ask' : ''}">
+    <div class="copilot-text">${(r.answer || '').replace(/\n/g, '<br>')} ${conf}</div>${evidence}${preview}
+    ${buttons ? `<div class="copilot-actions">${buttons}${r.proposal ? '<button class="btn btn-outline btn-sm" onclick="copilotDismiss()">✗ Cancel</button>' : ''}</div>` : ''}
+  </div>`;
+}
+function previewRows(p) {
+  if (!p) return '';
+  const label = { guest_name: 'Resident', amount: 'Amount', payment_mode: 'Mode', collection_type: 'Type', collection_date: 'Date', collection_month: 'For', category: 'Category', paid_to: 'Paid to', description: 'Details', purchase_date: 'Date', priority: 'Priority', title: 'Title', message: 'Message', effective_from: 'From', bed_number: 'Bed' };
+  return Object.entries(p).filter(([k, v]) => label[k] && v !== null && v !== '' && v !== undefined).map(([k, v]) => `<div class="copilot-kv"><span>${label[k]}</span><strong>${k === 'amount' ? fmt(v) : v}</strong></div>`).join('');
+}
+async function copilotConfirm(id, btn) {
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    const r = await apiFetch('/copilot/confirm', { method: 'POST', body: { proposal_id: id } });
+    toast(r.answer, 'ok');
+    renderCopilotResult({ answer: '✅ ' + r.answer, actions: r.actions || [], confidence: 'high' });
+    // Refresh whatever screen is showing so the new record appears.
+    if (typeof currentPage !== 'undefined' && currentPage) navigate(currentPage);
+  } catch (e) { btn.disabled = false; btn.textContent = 'Try again'; toast(e.message); }
+}
+function copilotDismiss() { document.getElementById('copilot-out').classList.add('hidden'); }
+// A candidate button ("which Priya?") re-asks with the chosen resident fixed.
+async function copilotRetool(a) {
+  const out = document.getElementById('copilot-out');
+  out.innerHTML = `<div class="copilot-answer"><div class="sm-skel"><div class="sm-skel-line" style="width:60%"></div></div></div>`;
+  try {
+    const q = document.getElementById('copilot-q').value;
+    const r = await apiFetch('/copilot/ask', { method: 'POST', body: { text: q, context: { page: smContext.page, resident_id: a.args && a.args.resident_id, resident_name: a.label } } });
+    renderCopilotResult(r);
+  } catch (e) { out.innerHTML = `<div class="copilot-answer copilot-err">${e.message}</div>`; }
 }

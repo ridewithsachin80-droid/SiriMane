@@ -463,7 +463,7 @@ router.get('/collections/export/pdf', auth, requireAdmin, async (req, res) => {
 });
 
 router.post('/collections', auth, async (req, res) => {
-  const src = ['manual','voice','photo'].includes(req.body.source) ? req.body.source : 'manual';
+  const src = ['manual','voice','photo','copilot'].includes(req.body.source) ? req.body.source : 'manual';
   const { guest_id,guest_name,amount,collection_date,collection_month,collection_type,payment_mode,description,receipt_number } = req.body;
   if (!amount) return res.status(400).json({ error: 'Amount required' });
   try {
@@ -549,7 +549,7 @@ router.get('/purchases/export/pdf', auth, requireAdmin, async (req, res) => {
 });
 
 router.post('/purchases', auth, async (req, res) => {
-  const src = ['manual','voice','photo'].includes(req.body.source) ? req.body.source : 'manual';
+  const src = ['manual','voice','photo','copilot'].includes(req.body.source) ? req.body.source : 'manual';
   const { amount,category,description,purchase_date,paid_to,payment_mode,receipt_number } = req.body;
   if (!amount || !category) return res.status(400).json({ error: 'Amount and category required' });
   try {
@@ -1581,7 +1581,7 @@ router.post('/complaints', auth, async (req, res) => {
       `INSERT INTO complaints(guest_id, guest_name, room_number, category, description, status, raised_by, created_by, source, priority)
        VALUES($1,$2,$3,$4,$5,'open','staff',$6,$7,$8) RETURNING *`,
       [guestId, guestName, roomNumber, (category || 'Other').trim(), String(description).trim(), req.user.id,
-       ['manual','voice','photo'].includes(req.body.source) ? req.body.source : 'manual',
+       ['manual','voice','photo','copilot'].includes(req.body.source) ? req.body.source : 'manual',
        ['low','medium','high'].includes(req.body.priority) ? req.body.priority : require('../services/assistant').rulePriority(category || 'Other', description)]);
     await logActivity(req, 'complaint_add', `${category || 'Other'}: ${String(description).trim().slice(0, 80)}`);
     res.status(201).json(r.rows[0]);

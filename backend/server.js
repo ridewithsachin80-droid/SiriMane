@@ -18,10 +18,13 @@ app.use(cors({
   allowedHeaders: ['Content-Type','Authorization']
 }));
 
-// Global limit: 200 requests / 15 min per IP (unchanged).
+// Global limit: 600 requests / 15 min per IP. Raised from 200 in Sprint 6 —
+// the Copilot bar, brief and attention card make the app chattier, and a
+// warden working through a busy morning was within reach of the old cap.
+// Login attempts are limited separately below (10 / 15 min).
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 200,
+  max: 600,
   standardHeaders: true,
   legacyHeaders: false
 }));
@@ -49,6 +52,7 @@ app.use(express.json({ limit: '10kb' }));
 app.use('/api', require('./routes/index'));
 app.use('/api/assistant', require('./routes/assistant'));
 app.use('/api/owner', require('./routes/owner'));
+app.use('/api/copilot', require('./routes/copilot'));
 
 // Any /api path that no route claimed answers with JSON — never the landing
 // page. (Before this, a missing route returned home.html and the app showed
@@ -96,6 +100,7 @@ if (require.main === module) {
   // (default 07:00 IST). Runs inside this process — no extra Railway service.
   require('./services/assistant').startScheduler();
   require('./services/owner').startScheduler();
+  require('./services/copilot').startEveningScheduler();
   schemaCheck.checkSchema().then(schemaCheck.logResult).catch(e => console.error('schema check failed:', e.message));
   setInterval(() => schemaCheck.checkSchema().catch(() => {}), 10 * 60 * 1000).unref();
 }

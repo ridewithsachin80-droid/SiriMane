@@ -26,7 +26,11 @@ ai.providers.geminiVision = async ({ prompt }) => /identity/i.test(prompt)
   ? '{"name":"Scan Test","id_proof_type":"Aadhaar","id_proof_number":"9999 8888 7777","address":"5th Cross, Tumakuru","confidence":"high"}'
   : '{"amount":845,"paid_to":"Nandini Milk Parlour","purchase_date":"2026-09-11","category":"Groceries","description":"Milk and curd for the week","payment_mode":"Cash","confidence":"high"}';
 ai.providers.geminiText = async () => 'OK';
-ai.providers.groqText = async ({ user }) => user === 'ping' ? 'OK' : JSON.stringify({ guest_id: null, amount: null, mode: null, type: 'rent', category: 'Water', priority: 'high', description: user });
+ai.providers.groqText = async ({ user }) => {
+  if (user === 'ping') return 'OK';
+  if (/Request:/.test(user)) return JSON.stringify({ tool: null, args: {}, clarify: null }); // copilot router: defer to local/template
+  return JSON.stringify({ guest_id: null, amount: null, mode: null, type: 'rent', category: 'Water', priority: 'high', description: user });
+};
 const app = require('../server');
 const pool = require('../db');
 let count = 0;
@@ -308,17 +312,16 @@ async function runAtWidth(browser, BASE, width) {
 
   // ── Sprint 4: brief on Home, ask box, reminders, priority ─────────────
   await page.evaluate(() => navigate('dashboard'));
-  await page.waitForFunction(() => { const t = document.getElementById('brief-text'); return t && t.textContent && !/Loading/.test(t.textContent); }, { timeout: 10000 });
-  const briefUi = await page.$eval('#brief-text', e => e.textContent);
-  const briefApi = await page.evaluate(() => apiFetch('/assistant/brief'));
-  eq(briefUi, briefApi.text, `${tag} Home shows the brief word-for-word from ai_reads`);
-  ok(briefUi.includes('Siri Mane') && /Rent due/.test(briefUi), `${tag} brief has the rent line`);
+  await page.waitForFunction(() => document.querySelector('#brief-body .brief-section'), { timeout: 15000 });
+  const briefApi = await page.evaluate(() => apiFetch('/copilot/brief'));
+  const briefUi = await page.$eval('#brief-body', e => e.textContent);
+  for (const line of briefApi.changed) ok(briefUi.includes(line), `${tag} Home shows brief line "${line.slice(0, 30)}…" word-for-word from ai_reads`);
+  ok(briefUi.includes('Needs attention'), `${tag} brief has the attention section`);
   await page.screenshot({ path: path.join(SHOTS, `home-brief-${width}.png`) });
-  await page.type('#ask-q', 'who has not paid');
-  await page.evaluate(() => askSiriMane());
-  await page.waitForFunction(() => { const a = document.getElementById('ask-a'); return a && !a.classList.contains('hidden') && !/Thinking/.test(a.textContent); }, { timeout: 8000 });
-  const askUi = await page.$eval('#ask-a', e => e.textContent);
-  ok(/owe|Nobody owes/.test(askUi), `${tag} ask answers in place ("${askUi.slice(0, 40)}…")`);
+  await page.evaluate(() => copilotAsk('who has not paid'));
+  await page.waitForFunction(() => { const a = document.getElementById('copilot-out'); return a && !a.classList.contains('hidden') && /owe|Nobody/.test(a.textContent); }, { timeout: 10000 });
+  const askUi = await page.$eval('#copilot-out', e => e.textContent);
+  ok(/owe|Nobody/.test(askUi), `${tag} ask answers in place ("${askUi.slice(0, 40)}…")`);
   await noHScroll('dashboard');
 
   await page.evaluate(() => navigate('reminders'));
@@ -355,7 +358,7 @@ async function runAtWidth(browser, BASE, width) {
   await page.waitForSelector('#owner-card', { timeout: 8000 });
   await page.waitForFunction(() => { const t = document.querySelector('#owner-summary')?.textContent || ''; return t && !/Loading|Computing/.test(t); }, { timeout: 15000 });
   const summary = await page.$eval('#owner-summary', e => e.textContent);
-  eq(summary.split('\n').length, 5, `${tag} owner summary is five lines`);
+  eq(summary.split('\n').length, 5, `${tag} owner summary is five lines (${summary.slice(0, 120)})`);
   ok(/collected Rs [\d,]+/.test(summary), `${tag} summary quotes collections`);
   ok((await page.$eval('#owner-forecast', e => e.textContent)).includes('Next 3 months'), `${tag} forecast shown`);
   const ownerW = await page.$eval('#owner-card', e => e.getBoundingClientRect().right);
@@ -386,6 +389,62 @@ async function runAtWidth(browser, BASE, width) {
   await sleep(500);
   eq(await page.$eval('#schema-banner', e => e.innerHTML.trim()), '', `${tag} no schema banner when migrations are current`);
 
+  // ── Sprint 6: Copilot bar on every screen, brief v2, prepare→confirm ────
+  await page.evaluate(() => navigate('dashboard'));
+  await page.waitForSelector('#page-content .stat-card', { timeout: 10000 });
+  ok(await page.$('#copilot-bar'), `${tag} Copilot bar present`);
+  await page.waitForSelector('#health-pill:not(.hidden), .brief-rec', { timeout: 15000 });
+  const healthTxt = await page.$eval('#health-pill', e => e.textContent);
+  ok(/Health \d+/.test(healthTxt), `${tag} brief v2 shows a health score (${healthTxt})`);
+  ok((await page.$$('.brief-rec .btn')).length >= 1, `${tag} recommendations are buttons`);
+  ok(await page.$eval('#brief-body', e => /What changed/.test(e.textContent) && /Needs attention/.test(e.textContent)), `${tag} brief has changed + attention sections`);
+  const barW = await page.$eval('#copilot-bar', e => e.getBoundingClientRect().right);
+  ok(barW <= width + 1, `${tag} Copilot bar fits (${Math.round(barW)}px)`);
+  for (const pg of ['guests', 'rooms', 'rent-due', 'purchases']) {
+    await page.evaluate(p => navigate(p), pg);
+    await sleep(500);
+    ok(await page.$('#copilot-bar'), `${tag} Copilot bar persists on ${pg}`);
+    const chips = await page.$$eval('#copilot-chips .copilot-chip', els => els.map(e => e.textContent));
+    ok(chips.length >= 1, `${tag} ${pg} has context chips (${chips[0]})`);
+  }
+  // inform
+  await page.evaluate(() => copilotAsk('who has not paid?'));
+  await page.waitForFunction(() => /owe|outstanding|Nobody/.test(document.querySelector('#copilot-out')?.textContent || ''), { timeout: 10000 });
+  ok(true, `${tag} inform answer renders inline`);
+  // prepare → preview → nothing saved → confirm → saved
+  const nBefore = (await page.evaluate(() => apiFetch('/collections'))).length;
+  await page.evaluate(n => copilotAsk(`record 700 rent from ${n} cash`), target.name);
+  await page.waitForSelector('#copilot-out .copilot-preview', { timeout: 10000 });
+  ok(await page.$eval('#copilot-out', e => /700/.test(e.textContent) && /Cash/.test(e.textContent)), `${tag} preview shows amount and mode`);
+  eq((await page.evaluate(() => apiFetch('/collections'))).length, nBefore, `${tag} MONEY: preview saved nothing`);
+  const confirmBtn = await page.$('#copilot-out .btn-success');
+  ok(confirmBtn, `${tag} Confirm button present`);
+  const btnH = await page.$eval('#copilot-out .btn-success', e => e.getBoundingClientRect().height);
+  ok(btnH >= 44, `${tag} confirm is thumb-sized (${Math.round(btnH)}px)`);
+  await page.screenshot({ path: path.join(SHOTS, `copilot-preview-${width}.png`) });
+  await page.evaluate(() => document.querySelector('#copilot-out .btn-success').click());
+  await page.waitForFunction(() => /✅/.test(document.querySelector('#copilot-out')?.textContent || ''), { timeout: 10000 });
+  eq((await page.evaluate(() => apiFetch('/collections'))).length, nBefore + 1, `${tag} MONEY: exactly one row after confirm`);
+  const cp = (await page.evaluate(() => apiFetch('/collections'))).find(c => parseFloat(c.amount) === 700);
+  eq(cp.source, 'copilot', `${tag} saved with source=copilot`);
+  // context: viewing a resident makes "her" resolve
+  await page.evaluate(() => navigate('guests'));
+  await page.waitForFunction(() => document.querySelector('#page-content table.sm-cards tbody tr'), { timeout: 8000 });
+  await page.evaluate(id => viewGuest(id), target.id);
+  await page.waitForSelector('.modal', { timeout: 8000 });
+  await sleep(300);
+  const chipsCtx = await page.$$eval('#copilot-chips .copilot-chip', els => els.map(e => e.textContent));
+  ok(chipsCtx.some(c => /Summarise/.test(c)), `${tag} chips change when viewing a resident`);
+  await page.evaluate(() => copilotAsk('why is she overdue?'));
+  await page.waitForFunction(n => (document.querySelector('#copilot-out')?.textContent || '').includes(n), { timeout: 10000 }, target.name);
+  ok(true, `${tag} "she" resolves to the resident being viewed`);
+  await page.evaluate(() => closeModal());
+  const ctxAfter = await page.evaluate(() => smContext.resident_id);
+  eq(ctxAfter, null, `${tag} context clears when the modal closes`);
+  // Ctrl+K focuses the bar
+  await page.keyboard.down('Control'); await page.keyboard.press('k'); await page.keyboard.up('Control');
+  eq(await page.evaluate(() => document.activeElement && document.activeElement.id), 'copilot-q', `${tag} Ctrl+K focuses the Copilot`);
+
   eq(jsErrors.length, 0, `${tag} no uncaught JS errors (${jsErrors.join('; ')})`);
   await page.close(); await ctx.close();
 }
@@ -410,7 +469,7 @@ async function runAtWidth(browser, BASE, width) {
     for (const w of [360, 390]) { await runAtWidth(browser, BASE, w); console.log(`✓ ${w}px`); }
     console.log(`\n✅ UI gate passed — ${count} assertions (screenshots in backend/test/screenshots/)`);
   } catch (e) {
-    console.error(`\n❌ UI gate FAILED after ${count} assertions:\n`, e.message); process.exitCode = 1;
+    console.error(`\n❌ UI gate FAILED after ${count} assertions:\n`, e.stack || e.message); process.exitCode = 1;
   } finally {
     await browser.close(); server.close(); await pool.end();
   }
