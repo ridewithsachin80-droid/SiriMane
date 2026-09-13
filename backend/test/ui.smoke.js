@@ -59,7 +59,7 @@ async function runAtWidth(browser, BASE, width) {
   await page.waitForSelector('#app:not(.hidden)', { timeout: 8000 });
   // Let the dashboard finish its async render before navigating, otherwise
   // its late setContent() overwrites the screen under test.
-  await page.waitForSelector('#page-content .stat-card', { timeout: 10000 });
+  await page.waitForSelector('.home-greeting', { timeout: 15000 });
   ok(true, `${tag} login works`);
   // Measures the screen body only. The topbar (#topbar-actions) already
   // overflows at 360px on every screen in the current app — a pre-existing
@@ -139,13 +139,13 @@ async function runAtWidth(browser, BASE, width) {
   // ── Error boundary + JSON 404 + toast ─────────────────────────────────
   await page.evaluate(() => { window.pgBroken = () => { throw new Error('boom from screen'); }; });
   await page.evaluate(() => {
-    // Register a fake page through navigate's table by monkey-patching pgDashboard temporarily
-    window.__origDash = window.pgDashboard; window.pgDashboard = window.pgBroken; navigate('dashboard');
+    // Force the Home renderer to throw, to prove the boundary catches it.
+    window.__origHome = window.pgHome; window.pgHome = window.pgBroken; navigate('dashboard');
   });
   await page.waitForFunction(() => document.body.innerText.includes('This screen could not load'), { timeout: 5000 });
   ok(true, `${tag} error boundary shows retry card instead of blank page`);
   ok(await page.evaluate(() => document.body.innerText.includes('boom from screen')), `${tag} boundary shows the error message`);
-  await page.evaluate(() => { window.pgDashboard = window.__origDash; });
+  await page.evaluate(() => { window.pgHome = window.__origHome; });
   await page.click('#page-content button.btn-primary');
   await page.waitForFunction(() => !document.body.innerText.includes('This screen could not load'), { timeout: 8000 });
   ok(true, `${tag} retry recovers`);
@@ -161,14 +161,18 @@ async function runAtWidth(browser, BASE, width) {
   // ── Sprint 1: phone chrome ────────────────────────────────────────────
   const tabs = await page.$$eval('.sm-tab', els => els.map(e => e.textContent.trim()));
   eq(tabs.length, 5, `${tag} bottom tab bar has 5 tabs`);
-  ok(tabs.join('|').includes('Collect'), `${tag} Collect tab present`);
+  ok(tabs.join('|').includes('Finance'), `${tag} Finance tab present (Sprint 7 regrouping)`);
   ok(await page.$eval('.sm-tabbar', e => getComputedStyle(e).display === 'grid'), `${tag} tab bar visible on phone`);
   const tabH = await page.$eval('.sm-tab', e => e.getBoundingClientRect().height);
   ok(tabH >= 44, `${tag} tab targets ≥44px (${Math.round(tabH)}px)`);
   await page.evaluate(() => navigate('guests'));
   await page.waitForFunction(() => document.querySelector('#page-content table.sm-cards tbody tr'), { timeout: 8000 });
   await page.screenshot({ path: path.join(SHOTS, `guests-cards-${width}.png`) });
-  ok(await page.$eval('.sm-fab', e => e.classList.contains('sm-fab-on')), `${tag} Collect FAB shown on Guests`);
+  await page.evaluate(() => navigate('rent-due'));
+  await page.waitForFunction(() => document.querySelector('#rentdue-tb tr'), { timeout: 8000 });
+  ok(await page.$eval('.sm-fab', e => e.classList.contains('sm-fab-on')), `${tag} Collect FAB shown on Rent Due`);
+  await page.evaluate(() => navigate('guests'));
+  await page.waitForFunction(() => document.querySelector('#page-content table.sm-cards tbody tr'), { timeout: 8000 });
   ok(await page.$eval('#page-content thead', e => getComputedStyle(e).display === 'none'), `${tag} table headers hidden, cards shown`);
   const labelled = await page.$$eval('#page-content tbody tr:first-child td', tds => tds.filter(t => t.hasAttribute('data-label')).length);
   ok(labelled >= 5, `${tag} card cells carry their column labels (${labelled})`);
@@ -180,9 +184,9 @@ async function runAtWidth(browser, BASE, width) {
   const dueBefore = await page.evaluate(() => API.getRentDue());
   const target = dueBefore.find(g => parseFloat(g.amount_due) > 0) || dueBefore[0];
   const beforeLedger = await page.evaluate(id => API.getGuestLedger ? API.getGuestLedger(id) : apiFetch(`/guests/${id}/ledger`), target.id);
-  await page.evaluate(() => document.getElementById('sm-fab').click());
+  await page.evaluate(() => navigate('collect'));
   await page.waitForSelector('#collect-people .sm-person', { timeout: 8000 });
-  ok(true, `${tag} FAB opens Collect`);
+  ok(true, `${tag} Collect opens from the Finance group`);
   await page.screenshot({ path: path.join(SHOTS, `collect-${width}.png`) });
   await page.waitForSelector('#collect-people .sm-person .sm-person-due', { timeout: 8000 });
   const firstDue = await page.$eval('#collect-people .sm-person .sm-person-due', e => e.textContent);
@@ -312,11 +316,11 @@ async function runAtWidth(browser, BASE, width) {
 
   // ── Sprint 4: brief on Home, ask box, reminders, priority ─────────────
   await page.evaluate(() => navigate('dashboard'));
-  await page.waitForFunction(() => document.querySelector('#brief-body .brief-section'), { timeout: 15000 });
+  await page.waitForSelector('#brief-card .brief-line', { timeout: 15000 });
   const briefApi = await page.evaluate(() => apiFetch('/copilot/brief'));
-  const briefUi = await page.$eval('#brief-body', e => e.textContent);
+  const briefUi = await page.$eval('#brief-card', e => e.textContent);
   for (const line of briefApi.changed) ok(briefUi.includes(line), `${tag} Home shows brief line "${line.slice(0, 30)}…" word-for-word from ai_reads`);
-  ok(briefUi.includes('Needs attention'), `${tag} brief has the attention section`);
+  ok((await page.$eval('#page-content', e => e.textContent)).includes('Needs attention') || !briefApi.attention.high.concat(briefApi.attention.medium, briefApi.attention.low).length, `${tag} Home shows the attention section when there is something to show`);
   await page.screenshot({ path: path.join(SHOTS, `home-brief-${width}.png`) });
   await page.evaluate(() => copilotAsk('who has not paid'));
   await page.waitForFunction(() => { const a = document.getElementById('copilot-out'); return a && !a.classList.contains('hidden') && /owe|Nobody/.test(a.textContent); }, { timeout: 10000 });
@@ -378,11 +382,12 @@ async function runAtWidth(browser, BASE, width) {
   eq(fs.readFileSync(path.join(ownerDl, zipFile)).readUInt32LE(0), 0x04034b50, `${tag} ZIP has a valid signature`);
 
   await page.evaluate(() => navigate('dashboard'));
-  await page.waitForSelector('#page-content .stat-card', { timeout: 10000 });
-  await page.waitForFunction(() => { const c = document.getElementById('attention-card'); return c && !c.classList.contains('hidden'); }, { timeout: 10000 });
-  const flagsShown = await page.$$eval('#attention-list > div', els => els.length);
-  ok(flagsShown >= 1, `${tag} Home shows "Needs attention" (${flagsShown} items)`);
-  ok(await page.$('#attention-list button'), `${tag} each flag has an Open button`);
+  await page.waitForSelector('.home-greeting', { timeout: 15000 });
+  // Sprint 7 folded the owner's anomaly list into Home's "Flagged for the owner".
+  await page.waitForFunction(() => /Flagged for the owner/.test(document.getElementById('page-content')?.textContent || ''), { timeout: 12000 });
+  const homeFlags = await page.evaluate(() => homeCache.flags.length);
+  ok(homeFlags >= 1, `${tag} Home shows owner flags (${homeFlags})`);
+  ok(await page.$eval('#page-content', e => /Open/.test(e.textContent)), `${tag} flags carry an Open button`);
 
   await page.evaluate(() => navigate('admin'));
   await page.waitForSelector('#schema-banner', { timeout: 8000 });
@@ -391,13 +396,14 @@ async function runAtWidth(browser, BASE, width) {
 
   // ── Sprint 6: Copilot bar on every screen, brief v2, prepare→confirm ────
   await page.evaluate(() => navigate('dashboard'));
-  await page.waitForSelector('#page-content .stat-card', { timeout: 10000 });
+  await page.waitForSelector('.home-greeting', { timeout: 15000 });
   ok(await page.$('#copilot-bar'), `${tag} Copilot bar present`);
-  await page.waitForSelector('#health-pill:not(.hidden), .brief-rec', { timeout: 15000 });
-  const healthTxt = await page.$eval('#health-pill', e => e.textContent);
-  ok(/Health \d+/.test(healthTxt), `${tag} brief v2 shows a health score (${healthTxt})`);
-  ok((await page.$$('.brief-rec .btn')).length >= 1, `${tag} recommendations are buttons`);
-  ok(await page.$eval('#brief-body', e => /What changed/.test(e.textContent) && /Needs attention/.test(e.textContent)), `${tag} brief has changed + attention sections`);
+  await page.waitForSelector('.health-pill', { timeout: 15000 });
+  const healthTxt = await page.$eval('.health-pill', e => e.textContent);
+  ok(/Health \d+/.test(healthTxt), `${tag} Home shows a health score (${healthTxt})`);
+  const homeAll = await page.$eval('#page-content', e => e.textContent);
+  ok(/Siri recommends/.test(homeAll) || !(await page.evaluate(() => homeCache.recommendations.length)), `${tag} recommendations shown when present`);
+  ok(/What changed/.test(homeAll), `${tag} brief shows what changed`);
   const barW = await page.$eval('#copilot-bar', e => e.getBoundingClientRect().right);
   ok(barW <= width + 1, `${tag} Copilot bar fits (${Math.round(barW)}px)`);
   for (const pg of ['guests', 'rooms', 'rent-due', 'purchases']) {
@@ -445,7 +451,7 @@ async function runAtWidth(browser, BASE, width) {
   await page.evaluate(() => navigate('admin'));
   await page.waitForSelector('#schema-banner', { timeout: 8000 });
   await page.evaluate(() => switchAdminTab('copilot'));
-  await page.waitForFunction(() => document.querySelector('#admin-tab-content tbody tr, #admin-tab-content .sm-empty-state'), { timeout: 10000 });
+  await page.waitForFunction(() => /Copilot log|No Copilot activity/.test(document.querySelector('#admin-tab-content')?.textContent || ''), { timeout: 10000 });
   const logTxt = await page.$eval('#admin-tab-content', e => e.textContent);
   ok(/record 700 rent/.test(logTxt), `${tag} Copilot log lists the ask made earlier (${logTxt.replace(/\s+/g, ' ').slice(0, 160)})`);
   ok(await page.$eval('#admin-tab-content', e => /done/.test(e.textContent)), `${tag} Copilot log shows the confirmed outcome`);
@@ -455,8 +461,114 @@ async function runAtWidth(browser, BASE, width) {
   await page.evaluate(() => navigate('dashboard'));
   await page.waitForSelector('#copilot-q', { timeout: 8000 });
   // Ctrl+K focuses the bar
+  // Sprint 7: Ctrl+K opens universal search; the Copilot bar is always on screen.
   await page.keyboard.down('Control'); await page.keyboard.press('k'); await page.keyboard.up('Control');
-  eq(await page.evaluate(() => document.activeElement && document.activeElement.id), 'copilot-q', `${tag} Ctrl+K focuses the Copilot`);
+  eq(await page.evaluate(() => document.activeElement && document.activeElement.id), 'search-q', `${tag} Ctrl+K opens search`);
+  await page.keyboard.press('Escape');
+  ok(await page.$('#copilot-q'), `${tag} Copilot bar still reachable on the page`);
+
+  // ── Sprint 7: one product — Home in one call, groups, search, quick add ──
+  // Let any in-flight navigation settle, then count the requests one fresh
+  // Home render makes.
+  await page.evaluate(() => navigate('dashboard'));
+  await page.waitForSelector('.home-greeting', { timeout: 15000 });
+  await sleep(600);
+  let homeCalls = 0;
+  const countHome = res => { if (/\/api\/home/.test(res.url())) homeCalls++; };
+  page.on('response', countHome);
+  await page.evaluate(() => navigate('guests'));
+  await sleep(400);
+  await page.evaluate(() => navigate('dashboard'));
+  await page.waitForSelector('.home-greeting', { timeout: 15000 });
+  eq(homeCalls, 1, `${tag} Home renders from exactly one /home request`);
+  page.off('response', countHome);
+  const homeTxt = await page.$eval('#page-content', e => e.textContent);
+  const hierarchy = ['Siri\'s Brief', 'Today', 'Occupancy'].map(h => homeTxt.indexOf(h));
+  ok(hierarchy.every((v, i) => v >= 0 && (i === 0 || v > hierarchy[i - 1])), `${tag} Home follows brief → … → occupancy order`);
+  ok(/Health \d+/.test(homeTxt), `${tag} Home shows the health pill`);
+  ok(await page.$('.home-section-h'), `${tag} Home uses sections, not a grid of module cards`);
+  eq(await page.$$eval('#page-content .stat-grid', e => e.length), 0, `${tag} the old module-card grid is gone`);
+  await page.screenshot({ path: path.join(SHOTS, `home-sprint7-${width}.png`) });
+  await noHScroll('home');
+  // Admin sees money on Home; the API must not send it to staff at all
+  ok(/This month/.test(homeTxt), `${tag} admin Home shows the month's money`);
+  const staffHome = await page.evaluate(async () => {
+    const r = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'ui_staff', password: 'staff123' }) });
+    const { token } = await r.json();
+    const h = await (await fetch('/api/home', { headers: { Authorization: 'Bearer ' + token } })).json();
+    return { hasFinance: 'finance' in h, hasFlags: 'flags' in h, hasApprovals: h.pending && h.pending.approvals !== undefined, hasRentDue: !!h.today.rentDue };
+  });
+  eq(staffHome.hasFinance, false, `${tag} ROLE: staff /home carries no finance block`);
+  eq(staffHome.hasFlags, false, `${tag} ROLE: staff /home carries no owner flags`);
+  eq(staffHome.hasApprovals, false, `${tag} ROLE: staff /home carries no approval queue`);
+  eq(staffHome.hasRentDue, true, `${tag} ROLE: staff still sees rent due`);
+  // Icons, not emoji, in the chrome
+  // Icons must render at their declared size — a stray `height:auto` once made
+  // them 150px tall inside cards.
+  const iconSizes = await page.$$eval('#page-content svg.ic', els => els.map(e => Math.round(e.getBoundingClientRect().height)));
+  ok(iconSizes.length >= 3, `${tag} icons render in content (${iconSizes.length})`);
+  ok(iconSizes.every(h => h > 0 && h <= 24), `${tag} every icon is icon-sized (max ${Math.max(...iconSizes)}px)`);
+  const hdrH = await page.$eval('#brief-card .card-header', e => Math.round(e.getBoundingClientRect().height));
+  ok(hdrH <= 80, `${tag} card headers stay compact (${hdrH}px)`);
+  const sprite = await page.$$eval('#icon-sprite symbol', els => els.length);
+  ok(sprite >= 20, `${tag} icon sprite loaded (${sprite} icons)`);
+  const navTxt = await page.$$eval('.nav-item', els => els.map(e => e.textContent.trim()).join('|'));
+  ok(!/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(navTxt), `${tag} no emoji in the sidebar (${navTxt.slice(0, 60)})`);
+  const tabTxt = await page.$$eval('.sm-tab', els => els.map(e => e.textContent.trim()).join('|'));
+  ok(!/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(tabTxt), `${tag} no emoji in the tab bar`);
+  eq(tabTxt.split('|').length, 5, `${tag} five tabs`);
+  ok(/Residents/.test(navTxt) && /Operations/.test(navTxt) && /Finance/.test(navTxt), `${tag} sidebar is grouped and renamed`);
+  eq(await page.$$eval('.nav-item', els => els.length), 7, `${tag} sidebar is 7 entries, not 17`);
+  // Grouped screens keep working and show their sub-tabs
+  for (const [group, first] of [['finance', 'collect'], ['operations', 'daily-checklist']]) {
+    await page.evaluate(g => navigate(g), group);
+    await page.waitForSelector('.subtabs .subtab.active', { timeout: 10000 });
+    const active = await page.$eval('.subtabs .subtab.active', e => e.textContent.trim());
+    ok(active.length > 0, `${tag} ${group} opens on ${active}`);
+    const activeNav = await page.$eval('.nav-item.active', e => e.dataset.page);
+    eq(activeNav, group, `${tag} ${group} highlights its sidebar entry`);
+  }
+  // Every legacy page key still navigates (bookmarks, old calls, tab bar)
+  for (const key of ['dashboard', 'rooms', 'guests', 'daily-menu', 'daily-checklist', 'complaints', 'payments', 'guest-messages', 'inbox', 'purchases', 'collections', 'rent-due', 'reports', 'admin', 'collect', 'reminders']) {
+    await page.evaluate(k => navigate(k), key);
+    // Wait for the screen to actually paint (skeleton → content), not just for
+    // the absence of the error card.
+    await page.waitForFunction(() => {
+      const c = document.getElementById('page-content');
+      return c && c.textContent.trim().length > 0 && !c.querySelector('.sm-skel') && !document.body.innerText.includes('This screen could not load');
+    }, { timeout: 12000 });
+    ok(true, `${tag} legacy key "${key}" still renders`);
+  }
+  // Universal search
+  await page.evaluate(() => navigate('dashboard'));
+  await page.waitForSelector('.home-greeting', { timeout: 12000 });
+  await page.evaluate(() => openSearch());
+  await page.waitForSelector('#search-q', { timeout: 5000 });
+  await page.type('#search-q', target.name.slice(0, 4));
+  await page.waitForSelector('.search-item', { timeout: 8000 });
+  const found = await page.$eval('.search-results', e => e.textContent);
+  ok(found.includes(target.name), `${tag} search finds the resident`);
+  await page.keyboard.press('ArrowDown');
+  ok(await page.$('.search-item.sel'), `${tag} arrow keys move the selection`);
+  await page.screenshot({ path: path.join(SHOTS, `search-${width}.png`) });
+  await page.keyboard.press('Escape');
+  ok(!(await page.$('#search-overlay')), `${tag} Esc closes search`);
+  await page.evaluate(() => openSearch());
+  await page.type('#search-q', 'zzzznothing');
+  await page.waitForFunction(() => /Nothing matches/.test(document.querySelector('#search-results')?.textContent || ''), { timeout: 8000 });
+  ok(true, `${tag} empty search says so`);
+  await page.keyboard.press('Escape');
+  // Quick action
+  await page.evaluate(() => openQuickActions());
+  await page.waitForSelector('#qa-sheet .qa-item', { timeout: 5000 });
+  const qa = await page.$$eval('#qa-sheet .qa-item', els => els.map(e => e.textContent.trim()));
+  ok(qa.length >= 4 && qa.some(x => /Collect rent/.test(x)) && qa.some(x => /Add expense/.test(x)), `${tag} quick actions listed (${qa.length})`);
+  const qaH = await page.$eval('#qa-sheet .qa-item', e => e.getBoundingClientRect().height);
+  ok(qaH >= 44, `${tag} quick actions are thumb-sized`);
+  await page.evaluate(() => document.querySelectorAll('#qa-sheet .qa-item')[0].click());
+  await page.waitForFunction(() => /Collect/.test(document.getElementById('page-title')?.textContent || ''), { timeout: 8000 });
+  ok(true, `${tag} quick action navigates`);
+  ok(!(await page.$('#qa-sheet')), `${tag} quick action sheet closes after use`);
 
   eq(jsErrors.length, 0, `${tag} no uncaught JS errors (${jsErrors.join('; ')})`);
   await page.close(); await ctx.close();
@@ -470,6 +582,7 @@ async function runAtWidth(browser, BASE, width) {
   const login = await (await fetch(BASE + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'admin', password: process.env.ADMIN_PASSWORD || 'SiriMane@2024' }) })).json();
   const H = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + login.token };
   const post = (p, b) => fetch(BASE + '/api' + p, { method: 'POST', headers: H, body: JSON.stringify(b) }).then(r => r.json());
+  await post('/users', { username: 'ui_staff', password: 'staff123', role: 'staff' }).catch(() => {});
   const r1 = await post('/rooms', { room_number: 'U1', floor: 1, total_beds: 2, monthly_rent: 6000 });
   await post('/rooms', { room_number: 'U2', floor: 1, total_beds: 2, monthly_rent: 6000 });
   await post('/rooms', { room_number: 'U3', floor: 1, total_beds: 2, monthly_rent: 6000 });

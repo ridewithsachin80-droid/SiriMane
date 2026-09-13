@@ -93,9 +93,11 @@ node backend/scripts/seed.js
 
 This creates all tables and the admin user:
 - **Username:** `admin`
-- **Password:** `SiriMane@2024`
+- **Password:** set by `backend/scripts/seed.js` — change it on first login (Admin → Change password)
 
-> ⚠️ **Change the password immediately after first login!**
+> ⚠️ **Change the password immediately after first login.** Never commit a
+> real password to this repository — it is public. Set a strong `JWT_SECRET`
+> in Railway as well; anyone with it can mint a valid session token.
 
 ---
 
@@ -130,7 +132,7 @@ This creates all tables and the admin user:
 Visit **https://sirimane.in/index.html**
 
 - Username: `admin`
-- Password: `SiriMane@2024`
+- Password: as printed by the seed script when you run it
 
 **Immediately change your password:**
 Go to Settings (inside the app) → Change Password
@@ -205,5 +207,5 @@ npm run dev
 
 ```
 Username: admin
-Password: SiriMane@2024
+Password: (as printed by the seed script — change it on first login)
 ```

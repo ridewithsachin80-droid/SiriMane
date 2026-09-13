@@ -1,29 +1,34 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300;1,400&display=swap');
 
 :root {
-  --primary: #4F46E5;
-  --primary-light: #EEF2FF;
-  --primary-dark: #3730A3;
-  --amber: #F59E0B;
+  /* Sprint 7 palette: warm off-white ground, charcoal ink, muted gold used
+     only for brand and the single primary action on a screen. */
+  --primary: #1F2937;
+  --primary-light: #F1F2F4;
+  --primary-dark: #111827;
+  --accent: #B89A5A;
+  --accent-light: #FBF7EE;
+  --amber: #B45309;
   --amber-light: #FFFBEB;
-  --green: #10B981;
+  --green: #15803D;
   --green-light: #ECFDF5;
-  --red: #EF4444;
+  --red: #B91C1C;
   --red-light: #FEF2F2;
-  --blue: #3B82F6;
+  --blue: #1D4ED8;
   --blue-light: #EFF6FF;
   --sidebar-bg: #FFFFFF;
-  --sidebar-width: 220px;
+  --sidebar-width: 232px;
   --topbar-h: 60px;
-  --bg: #F8FAFC;
+  --bg: #F7F7F5;
   --card: #FFFFFF;
-  --border: #E2E8F0;
-  --text: #1E293B;
-  --text-muted: #64748B;
-  --text-light: #94A3B8;
-  --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
-  --shadow-md: 0 4px 6px rgba(0,0,0,0.05), 0 2px 4px rgba(0,0,0,0.04);
-  --radius: 10px;
+  --border: #E6E5E1;
+  --text: #1F2937;
+  --text-muted: #6B7280;
+  --text-light: #9CA3AF;
+  --shadow: 0 1px 2px rgba(17,24,39,.05);
+  --shadow-md: 0 8px 24px rgba(17,24,39,.08);
+  --radius: 12px;
+  --radius-sm: 8px;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -603,7 +608,9 @@ input, select, textarea { font-size: 16px; }
 /* The root .app is a row flexbox; without min-width:0 its .main column grows
    to fit the widest child (a chart, a long table) instead of the viewport. */
 .main, .content, #page-content { min-width: 0; }
-@media (max-width: 640px) { #page-content canvas, #page-content svg, #page-content img { max-width: 100%; height: auto; } }
+/* Charts and images may scale; sprite icons must keep their fixed size
+   (`height:auto` on an <svg> with no intrinsic height makes it grow). */
+@media (max-width: 640px) { #page-content canvas, #page-content svg:not(.ic), #page-content img { max-width: 100%; height: auto; } }
 
 /* ── Sprint 6: Copilot bar + Siri's Brief v2 ─────────────────── */
 #copilot-bar { margin: 12px 24px 0; }
@@ -637,3 +644,119 @@ input, select, textarea { font-size: 16px; }
 .brief-line { font-size: 14px; line-height: 1.5; }
 .brief-rec { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--border); font-size: 14px; }
 .brief-rec .btn { white-space: nowrap; }
+
+/* ── Sprint 7: icons, nav, sub-tabs, Home, search, quick action ────────── */
+.ic { width: 18px; height: 18px; flex: 0 0 18px; vertical-align: -3px; }
+.ic-sm { width: 15px; height: 15px; flex: 0 0 15px; }
+.ic-lg { width: 22px; height: 22px; flex: 0 0 22px; }
+.nav-item .ic { margin-right: 10px; }
+.btn .ic { margin-right: 6px; }
+.btn .ic:only-child { margin-right: 0; }
+
+/* Primary = the one action that matters on a screen; gold, not charcoal. */
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn-primary:hover { background: #A88849; border-color: #A88849; }
+.btn-outline { background: #fff; }
+.nav-item.active { background: var(--accent-light); color: var(--primary); border-left: 3px solid var(--accent); }
+
+/* Sub-tabs (Finance, Operations) */
+.subtabs { display: flex; gap: 4px; overflow-x: auto; padding: 4px; background: #fff; border: 1px solid var(--border); border-radius: 999px; margin-bottom: 18px; scrollbar-width: none; }
+.subtabs::-webkit-scrollbar { display: none; }
+.subtab { flex: 0 0 auto; border: none; background: transparent; padding: 9px 14px; border-radius: 999px; font-size: 13.5px; font-weight: 600; color: var(--text-muted); cursor: pointer; font-family: inherit; white-space: nowrap; min-height: 38px; }
+.subtab.active { background: var(--primary); color: #fff; }
+
+/* Home */
+.home-greeting { font-size: 22px; font-weight: 700; }
+.home-date { font-size: 13px; color: var(--text-muted); margin-bottom: 16px; }
+.home-section-h { font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--text-muted); margin: 22px 0 8px; font-weight: 700; }
+.today-row { display: flex; align-items: center; gap: 10px; padding: 11px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+.today-row:last-child { border-bottom: none; }
+.today-row .ic { color: var(--text-muted); }
+.today-row .t-main { flex: 1; min-width: 0; }
+.today-row .t-sub { font-size: 12px; color: var(--text-muted); }
+.money-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.money-card { background: #fff; border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; }
+.money-card .m-label { font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted); font-weight: 700; }
+.money-card .m-value { font-size: 22px; font-weight: 700; margin-top: 4px; }
+.occ-bar { height: 10px; background: var(--primary-light); border-radius: 999px; overflow: hidden; margin: 8px 0 6px; }
+.occ-bar > span { display: block; height: 100%; background: var(--accent); }
+
+/* Search sheet */
+.search-overlay { position: fixed; inset: 0; background: rgba(17,24,39,.35); z-index: 200; display: flex; justify-content: center; align-items: flex-start; padding: 8vh 16px 16px; }
+.search-sheet { background: #fff; width: min(640px, 100%); border-radius: 16px; box-shadow: var(--shadow-md); overflow: hidden; max-height: 78vh; display: flex; flex-direction: column; }
+.search-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.search-head input { flex: 1; border: none; outline: none; font-size: 16px; min-height: 40px; }
+.search-results { overflow: auto; padding: 6px 0 10px; }
+.search-group { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); padding: 10px 16px 4px; font-weight: 700; }
+.search-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 11px 16px; border: none; background: none; text-align: left; font-family: inherit; font-size: 14px; cursor: pointer; min-height: 48px; }
+.search-item:hover, .search-item.sel { background: var(--accent-light); }
+.search-item .s-sub { font-size: 12px; color: var(--text-muted); }
+.search-item .s-right { margin-left: auto; font-size: 13px; font-weight: 600; white-space: nowrap; }
+
+/* Quick action sheet */
+.qa-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 190; background: #fff; border-radius: 18px 18px 0 0; box-shadow: var(--shadow-md); padding: 10px 10px calc(16px + env(safe-area-inset-bottom)); }
+.qa-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 14px 12px; border: none; background: none; font-family: inherit; font-size: 15px; font-weight: 600; text-align: left; cursor: pointer; border-radius: var(--radius-sm); min-height: 52px; }
+.qa-item:hover { background: var(--accent-light); }
+.qa-item .ic { color: var(--accent); }
+
+/* ── Sprint 7: icons, nav, sub-tabs, Home, search, quick action ────────── */
+.ic { width: 18px; height: 18px; flex: 0 0 18px; vertical-align: -3px; }
+.ic-sm { width: 15px; height: 15px; flex: 0 0 15px; }
+.ic-lg { width: 22px; height: 22px; flex: 0 0 22px; }
+.nav-item .ic { margin-right: 10px; }
+.btn .ic { margin-right: 6px; }
+.btn .ic:only-child { margin-right: 0; }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn-primary:hover { background: #A88849; border-color: #A88849; }
+.btn-outline { background: #fff; }
+.nav-item.active { background: var(--accent-light); color: var(--primary); }
+.nav-badge { background: var(--red); color: #fff; font-size: 10px; padding: 1px 6px; border-radius: 10px; margin-left: 4px; }
+.subtabs { display: flex; gap: 4px; overflow-x: auto; padding: 4px; background: #fff; border: 1px solid var(--border); border-radius: 999px; margin-bottom: 18px; scrollbar-width: none; }
+.subtabs::-webkit-scrollbar { display: none; }
+.subtab { flex: 0 0 auto; border: none; background: transparent; padding: 9px 14px; border-radius: 999px; font-size: 13.5px; font-weight: 600; color: var(--text-muted); cursor: pointer; font-family: inherit; white-space: nowrap; min-height: 38px; }
+.subtab.active { background: var(--primary); color: #fff; }
+.home-greeting { font-size: 22px; font-weight: 700; }
+.home-date { font-size: 13px; color: var(--text-muted); margin-bottom: 16px; }
+.home-section-h { font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--text-muted); margin: 22px 0 8px; font-weight: 700; }
+.today-row { display: flex; align-items: center; gap: 10px; padding: 11px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+.today-row:last-child { border-bottom: none; }
+.today-row > .ic { color: var(--text-muted); }
+.today-row .t-main { flex: 1; min-width: 0; }
+.today-row .t-sub { font-size: 12px; color: var(--text-muted); }
+.money-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.money-card { background: #fff; border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; }
+.money-card .m-label { font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted); font-weight: 700; }
+.money-card .m-value { font-size: 22px; font-weight: 700; margin-top: 4px; }
+.occ-bar { height: 10px; background: var(--primary-light); border-radius: 999px; overflow: hidden; margin: 8px 0 6px; }
+.occ-bar > span { display: block; height: 100%; background: var(--accent); }
+.search-overlay { position: fixed; inset: 0; background: rgba(17,24,39,.35); z-index: 200; display: flex; justify-content: center; align-items: flex-start; padding: 8vh 16px 16px; }
+.search-sheet { background: #fff; width: min(640px, 100%); border-radius: 16px; box-shadow: var(--shadow-md); overflow: hidden; max-height: 78vh; display: flex; flex-direction: column; }
+.search-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.search-head input { flex: 1; border: none; outline: none; font-size: 16px; min-height: 40px; }
+.search-results { overflow: auto; padding: 6px 0 10px; }
+.search-group { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); padding: 10px 16px 4px; font-weight: 700; }
+.search-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 11px 16px; border: none; background: none; text-align: left; font-family: inherit; font-size: 14px; cursor: pointer; min-height: 48px; }
+.search-item:hover, .search-item.sel { background: var(--accent-light); }
+.search-item .s-sub { font-size: 12px; color: var(--text-muted); }
+.search-item .s-right { margin-left: auto; font-size: 13px; font-weight: 600; white-space: nowrap; }
+.qa-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 190; background: #fff; border-radius: 18px 18px 0 0; box-shadow: var(--shadow-md); padding: 10px 10px calc(16px + env(safe-area-inset-bottom)); }
+.qa-backdrop { position: fixed; inset: 0; background: rgba(17,24,39,.3); z-index: 189; }
+.qa-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 14px 12px; border: none; background: none; font-family: inherit; font-size: 15px; font-weight: 600; text-align: left; cursor: pointer; border-radius: var(--radius-sm); min-height: 52px; }
+.qa-item:hover { background: var(--accent-light); }
+.qa-item .ic { color: var(--accent); }
+#today-chip { font-size: 12px; white-space: nowrap; }
+@media (max-width: 640px) { #today-chip { display: none !important; } }
+
+/* Buttons and card headers must lay out as rows, not stretch their icon
+   children to the container height (seen at 360px on Siri's Brief). */
+.btn { display: inline-flex; align-items: center; justify-content: center; }
+.card-header { display: flex; align-items: center; gap: 8px; }
+.card-header h3 { display: flex; align-items: center; gap: 8px; margin: 0; }
+.card-header .btn { flex: 0 0 auto; }
+svg.ic { display: inline-block; }
+.sm-tab .sm-tab-icon { display: inline-flex; }
+
+/* Icons keep their size wherever they appear. */
+svg.ic { width: 18px !important; height: 18px !important; flex: 0 0 18px; }
+svg.ic.ic-sm { width: 15px !important; height: 15px !important; flex: 0 0 15px; }
+svg.ic.ic-lg { width: 22px !important; height: 22px !important; flex: 0 0 22px; }

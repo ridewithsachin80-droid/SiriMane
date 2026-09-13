@@ -16,6 +16,7 @@
   <link rel="stylesheet" href="/css/style.css"/>
 </head>
 <body>
+<div id="icon-sprite" hidden></div>
 
 <!-- LOGIN PAGE -->
 <div id="login-page" class="login-page">
@@ -46,25 +47,14 @@
       <img src="/images/logo.png" alt="Siri Mane – Ladies Paying Guest" style="width:100%;max-width:180px;height:auto;border-radius:8px;display:block;margin:0 auto;"/>
     </div>
     <nav class="sidebar-nav">
-      <button class="nav-item active" data-page="dashboard"><span class="icon">📊</span> Dashboard</button>
-      <button class="nav-item" data-page="collect"><span class="icon">💵</span> Collect Rent</button>
-      <button class="nav-item" data-page="rooms"><span class="icon">🛏️</span> Rooms</button>
-      <button class="nav-item" data-page="guests"><span class="icon">👥</span> Guests</button>
-      <button class="nav-item" data-page="daily-menu"><span class="icon">🍽️</span> Daily Menu</button>
-      <button class="nav-item" data-page="daily-checklist"><span class="icon">✅</span> Daily Checklist</button>
-      <button class="nav-item" data-page="complaints"><span class="icon">🛠️</span> Complaints <span id="complaints-badge" class="hidden" style="background:#EF4444;color:white;font-size:10px;padding:1px 6px;border-radius:10px;margin-left:2px"></span></button>
-      <button class="nav-item" data-page="payments"><span class="icon">💰</span> Payments</button>
-      <button class="nav-item" data-page="guest-messages"><span class="icon">📢</span> Guest Messages</button>
-      <button class="nav-item" data-page="inbox"><span class="icon">📥</span> Inbox <span id="inbox-badge" class="hidden" style="background:#EF4444;color:white;font-size:10px;padding:1px 6px;border-radius:10px;margin-left:2px"></span></button>
-      <div class="nav-section">ACCOUNTS</div>
-      <button class="nav-item" data-page="purchases"><span class="icon">🛒</span> Purchases</button>
-      <button class="nav-item" data-page="collections"><span class="icon">💵</span> Collections</button>
-      <button class="nav-item" data-page="rent-due"><span class="icon">📅</span> Rent Due</button>
-      <button class="nav-item" data-page="reminders"><span class="icon">📣</span> Rent Reminders</button>
-      <button class="nav-item" data-page="reports"><span class="icon">📋</span> Reports</button>
-      <button class="nav-item admin-only hidden" data-page="balance-sheet"><span class="icon">⚖️</span> Balance Sheet</button>
+      <button class="nav-item active" data-page="dashboard"><svg class="ic"><use href="#i-home"/></svg> Home</button>
+      <button class="nav-item" data-page="guests"><svg class="ic"><use href="#i-users"/></svg> Residents</button>
+      <button class="nav-item" data-page="rooms"><svg class="ic"><use href="#i-bed"/></svg> Rooms</button>
+      <button class="nav-item" data-page="operations"><svg class="ic"><use href="#i-check-square"/></svg> Operations <span id="complaints-badge" class="nav-badge hidden"></span></button>
+      <button class="nav-item" data-page="finance"><svg class="ic"><use href="#i-wallet"/></svg> Finance</button>
+      <button class="nav-item" data-page="inbox"><svg class="ic"><use href="#i-inbox"/></svg> Messages <span id="inbox-badge" class="nav-badge hidden"></span></button>
       <div class="nav-section admin-only hidden" id="nav-section-admin">ADMIN</div>
-      <button class="nav-item admin-only hidden" data-page="admin"><span class="icon">🔐</span> Admin</button>
+      <button class="nav-item admin-only hidden" data-page="admin"><svg class="ic"><use href="#i-lock"/></svg> Admin</button>
     </nav>
     <div class="sidebar-footer">
       <button class="logout-btn" id="logout-btn">🚪 Logout</button>
@@ -74,13 +64,16 @@
   <div class="main">
     <header class="topbar">
       <div class="flex items-center gap-2">
-        <button id="menu-toggle" style="background:none;border:none;font-size:20px;cursor:pointer;padding:4px 8px;border-radius:6px;">☰</button>
+        <button id="menu-toggle" aria-label="Menu" style="background:none;border:none;cursor:pointer;padding:6px 8px;border-radius:6px;line-height:0"><svg class="ic ic-lg"><use href="#i-menu"/></svg></button>
         <div>
           <span id="page-title" style="font-weight:600;font-size:15px"></span>
         </div>
       </div>
       <div class="flex items-center gap-2" id="topbar-right">
         <span id="topbar-user" style="font-size:13px;color:#64748B"></span>
+        <span id="today-chip" class="text-muted"></span>
+        <button id="topbar-search" aria-label="Search" title="Search (Ctrl+K)" style="background:none;border:none;cursor:pointer;padding:8px;border-radius:8px;line-height:0"><svg class="ic ic-lg"><use href="#i-search"/></svg></button>
+        <button id="topbar-add" aria-label="Quick add" title="Quick add" class="btn btn-primary btn-sm" style="padding:9px 11px;line-height:0"><svg class="ic"><use href="#i-plus"/></svg></button>
         <div id="topbar-actions"></div>
       </div>
     </header>

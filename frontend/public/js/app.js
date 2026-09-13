@@ -52,17 +52,18 @@ let currentPage = null;
 function navigate(page) {
   currentPage = page;
   document.querySelectorAll('.nav-item[data-page]').forEach(b => b.classList.toggle('active', b.dataset.page===page));
-  const titles = { dashboard:'Dashboard', rooms:'Rooms', guests:'Guests', 'daily-menu':'Daily Menu', 'daily-checklist':'Daily Checklist', complaints:'Complaints', payments:'Payments', 'guest-messages':'Guest Messages', inbox:'Inbox', purchases:'Purchases', collections:'Collections', 'rent-due':'Rent Due', reports:'Reports', 'balance-sheet':'Balance Sheet', admin:'Admin', collect:'Collect Rent', reminders:'Rent Reminders' };
+  const titles = { dashboard:'Home', rooms:'Rooms', guests:'Residents', 'daily-menu':'Daily Menu', 'daily-checklist':'Daily Checklist', complaints:'Maintenance & Requests', payments:'Payments', 'guest-messages':'Announcements', inbox:'Inbox', purchases:'Purchases', collections:'Collections', 'rent-due':'Rent Due', reports:'Reports', 'balance-sheet':'Balance Sheet', admin:'Admin', collect:'Collect Rent', reminders:'Rent Reminders', finance:'Finance', operations:'Operations' };
   document.getElementById('page-title').textContent = titles[page]||page;
   document.getElementById('topbar-actions').innerHTML = '';
   document.getElementById('sidebar').classList.remove('open');
   if (typeof syncChrome === 'function') syncChrome(page);
+  highlightNav(page);
   if (typeof smSetContext === 'function') smSetContext({ page, resident_id: null, resident_name: null, room_number: null });
-  const pages = { dashboard:pgDashboard, rooms:pgRooms, guests:pgGuests, 'daily-menu':pgMenu, 'daily-checklist':pgChecklist, complaints:pgComplaints, payments:pgPayments, 'guest-messages':pgAnnouncements, inbox:pgInbox, purchases:pgPurchases, collections:pgCollections, 'rent-due':pgRentDue, reports:pgReports, 'balance-sheet':pgBalanceSheet, admin:pgAdmin, collect:pgCollect, reminders:pgReminders };
+  const pages = { dashboard:pgHome, rooms:pgRooms, guests:pgGuests, 'daily-menu':pgMenu, 'daily-checklist':pgChecklist, complaints:pgComplaints, payments:pgPayments, 'guest-messages':pgAnnouncements, inbox:pgInbox, purchases:pgPurchases, collections:pgCollections, 'rent-due':pgRentDue, reports:pgReports, 'balance-sheet':pgBalanceSheet, admin:pgAdmin, collect:pgCollect, reminders:pgReminders, finance:pgFinance, operations:pgOperations };
   if(!pages[page]) return;
   // Error boundary: a thrown error inside any screen shows a retry card
   // instead of a blank page.
-  Promise.resolve().then(() => pages[page]()).catch(e => {
+  Promise.resolve().then(() => pages[page]()).then(() => { try { injectSubtabs(page); } catch (e) { console.error(e); } }).catch(e => {
     console.error(e);
     setContent(`<div class="card" style="padding:32px;text-align:center">
       <div style="font-size:32px">⚠️</div>
@@ -1326,7 +1327,7 @@ async function delCollectionFromPayments(id) {
 // ── GUEST MESSAGES (Announcements) ───────────────
 async function pgAnnouncements() {
   loading();
-  document.getElementById('topbar-actions').innerHTML = isAdmin() ? `<button class="btn btn-primary btn-sm" onclick="announcementModal()">📢 Post Message</button>` : '';
+  document.getElementById('topbar-actions').innerHTML = isAdmin() ? `<button class="btn btn-primary btn-sm" onclick="announcementModal()">${icon('megaphone')} Post Message</button>` : '';
   try {
     const list = await API.getAnnouncements();
     setContent(`
@@ -1336,7 +1337,7 @@ async function pgAnnouncements() {
           <h3>Posted Messages</h3>
           <div class="flex gap-2">
             ${list.length>0?`<input type="text" placeholder="🔍 Search title, message..." style="width:200px;margin:0" oninput="filterTable(this.value,'ann-list')" />`:''}
-            ${isAdmin()?`<button class="btn btn-primary btn-sm" onclick="announcementModal()">📢 Post Message</button>`:''}
+            ${isAdmin()?`<button class="btn btn-primary btn-sm" onclick="announcementModal()">${icon('megaphone')} Post Message</button>`:''}
           </div>
         </div>
         ${list.length===0
@@ -1364,7 +1365,7 @@ async function pgAnnouncements() {
 function announcementModal() {
   openModal(`
     <div class="modal">
-      <div class="modal-header"><h3>📢 Post Message to Guests</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+      <div class="modal-header"><h3>${icon('megaphone')} Post Message to Guests</h3><button class="modal-close" onclick="closeModal()">×</button></div>
       <div class="modal-body">
         <div id="an-alert" class="alert alert-danger hidden"></div>
         <div class="form-group"><label>Title *</label><input id="an-title" placeholder="e.g. Water supply maintenance"/></div>
@@ -1531,7 +1532,7 @@ async function pgPurchases(month, year, from, to) {
       ? `${fmtDate(from)} – ${fmtDate(to)}`
       : new Date(y,m-1,1).toLocaleString('en-IN',{month:'long',year:'numeric'});
     setContent(`
-      <div class="page-header"><h1>🛒 Purchases</h1><p>Track all PG expenses and purchases</p></div>
+      <div class="page-header"><h1>Purchases</h1><p>Track all PG expenses and purchases</p></div>
       ${pendingCount>0?`<div class="alert" style="background:#FFFBEB;border:1px solid var(--amber);color:#92400E;margin-bottom:16px">⏳ ${pendingCount} staff-entered purchase${pendingCount>1?'s':''} awaiting your approval below.</div>`:''}
       ${isAdmin()?`<div class="flex gap-2 mb-5">
         <button class="btn btn-outline btn-sm" onclick="exportPurchasesCsv()">⬇ Export CSV</button>
@@ -1916,7 +1917,7 @@ async function pgCollections(month, year, from, to) {
       ? `${fmtDate(from)} – ${fmtDate(to)}`
       : new Date(y,m-1,1).toLocaleString('en-IN',{month:'long',year:'numeric'});
     setContent(`
-      <div class="page-header"><h1>💵 Collections</h1><p>Track all income — rent, deposits, and extra charges</p></div>
+      <div class="page-header"><h1>${icon('rupee')} Collections</h1><p>Track all income — rent, deposits, and extra charges</p></div>
       ${pendingVerificationCount>0?`<div class="alert" style="background:var(--amber-light,#FFFBEB);border:1px solid var(--amber,#F59E0B);color:#92400E;margin-bottom:10px">⏳ ${pendingVerificationCount} resident-reported UPI payment${pendingVerificationCount>1?'s':''} awaiting your confirmation below — check your bank/UPI app, then confirm or reject.</div>`:''}
       ${pendingApprovalCount>0?`<div class="alert" style="background:var(--amber-light,#FFFBEB);border:1px solid var(--amber,#F59E0B);color:#92400E;margin-bottom:16px">⏳ ${pendingApprovalCount} staff-entered collection${pendingApprovalCount>1?'s':''} awaiting your approval below.</div>`:''}
       ${isAdmin()?`<div class="flex gap-2 mb-5">
@@ -2141,7 +2142,7 @@ async function pgRentDue() {
     const fullyPaidCount = list.filter(g => parseFloat(g.amount_due) <= 0).length;
     const pendingCount = list.filter(g => parseFloat(g.amount_due) > 0 || parseFloat(g.deposit_pending||0) > 0).length;
     setContent(`
-      <div class="page-header"><h1>📅 Rent Due <span class="sm-kn" style="font-size:15px">ಬಾಕಿ</span></h1><p>Running balance for each guest, carried forward across months — not just this month's snapshot</p></div>
+      <div class="page-header"><h1>Rent Due <span class="sm-kn" style="font-size:15px">ಬಾಕಿ</span></h1><p>Running balance for each guest, carried forward across months — not just this month's snapshot</p></div>
       <div class="flex gap-2 mb-5" style="flex-wrap:wrap">
         ${isAdmin()?`<button class="btn btn-outline btn-sm" onclick="exportRentDueCsv()">⬇ Export CSV</button>
         <button class="btn btn-outline btn-sm" onclick="exportRentDuePdf()">⬇ Export PDF</button>`:''}
@@ -2238,10 +2239,10 @@ function renderRentDueRows(list) {
       <td class="${totalPayable>0?'text-red fw-600':''}">${totalPayable>0?fmt(totalPayable):'—'}</td>
       <td><span class="badge ${anyPending?'badge-red':'badge-green'}">${anyPending?'Pending':credit>0?'Ahead':'Settled'}</span></td>
       <td><div class="flex gap-2">
-        ${anyPending ? `<button class="btn btn-primary btn-sm" onclick="collectFrom(${g.id})" title="Collect payment">💵 Collect</button>` : ''}
+        ${anyPending ? `<button class="btn btn-primary btn-sm" onclick="collectFrom(${g.id})" title="Collect payment">${icon('rupee')} Collect</button>` : ''}
         ${anyPending
           ? (g.phone
-              ? `<button class="btn btn-outline btn-sm" onclick="sendOneRentReminder(${g.id})" title="Send WhatsApp reminder">💬 Remind</button>`
+              ? `<button class="btn btn-outline btn-sm" onclick="sendOneRentReminder(${g.id})" title="Send WhatsApp reminder">${icon('whatsapp')} Remind</button>`
               : `<span style="font-size:11px;color:var(--text-muted,#999)">No phone</span>`)
           : ''}
       </div></td>
@@ -2434,7 +2435,7 @@ function applyReportsRange() {
 function renderReportsPage(r, controlsHtml) {
   return `
       <div class="page-header flex justify-between items-center">
-        <div><h1>📋 Reports</h1><p>Profit &amp; Loss summary</p></div>
+        <div><h1>Reports</h1><p>Profit &amp; Loss summary</p></div>
         <div class="flex items-center gap-2">${controlsHtml}</div>
       </div>
       ${isAdmin()?`<div class="card mb-6" id="owner-card">
@@ -2449,9 +2450,9 @@ function renderReportsPage(r, controlsHtml) {
           <pre id="owner-summary" style="white-space:pre-wrap;font-family:inherit;font-size:14px;line-height:1.55;margin:0 0 12px">Loading…</pre>
           <div id="owner-forecast" style="font-size:13px;color:var(--text-muted,#64748B);margin-bottom:12px"></div>
           <div class="flex gap-2" style="flex-wrap:wrap">
-            <button class="btn btn-primary btn-sm" onclick="downloadOwnerPdf()">📄 Download PDF</button>
-            <button class="btn btn-outline btn-sm" onclick="shareOwnerSummary()">💬 WhatsApp summary</button>
-            <button class="btn btn-outline btn-sm" onclick="downloadAccountantZip()">🗂️ Export CSVs (ZIP)</button>
+            <button class="btn btn-primary btn-sm" onclick="downloadOwnerPdf()">${icon('receipt')} Download PDF</button>
+            <button class="btn btn-outline btn-sm" onclick="shareOwnerSummary()">${icon('whatsapp')} WhatsApp summary</button>
+            <button class="btn btn-outline btn-sm" onclick="downloadAccountantZip()">${icon('copy')} Export CSVs (ZIP)</button>
           </div>
           <div id="owner-meta" class="text-muted" style="font-size:11px;margin-top:8px"></div>
         </div>
@@ -2592,7 +2593,7 @@ async function pgBalanceSheet(asOf) {
     const hasGap = Math.abs(bs.reconciliationDiff) > 0.5;
     setContent(`
       <div class="page-header flex justify-between items-center">
-        <div><h1>⚖️ Balance Sheet</h1><p>What the business owns vs. owes, as of a point in time</p></div>
+        <div><h1>Balance Sheet</h1><p>What the business owns vs. owes, as of a point in time</p></div>
         <div class="flex items-center gap-2">
           <span style="font-size:13px;color:var(--text-muted)">As of</span>
           <input type="date" value="${date}" onchange="pgBalanceSheet(this.value)" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit"/>
@@ -2800,6 +2801,9 @@ async function delCapitalTransaction(id) {
 
 // ── ADMIN (Staff / Audit Log / Deposit Refunds) ───
 let adminActiveTab = 'staff';
+let adminRenderSeq = 0;
+// Returns the element to write into, or null if the user has moved on.
+function adminHost(seq) { return seq === adminRenderSeq ? document.getElementById('admin-tab-content') : null; }
 
 async function pgAdmin() {
   loading();
@@ -2810,7 +2814,7 @@ async function pgAdmin() {
 
 function renderAdminPage() {
   setContent(`
-    <div class="page-header"><h1>🔐 Admin</h1><p>Staff accounts, audit trail, deposit refunds, and app settings</p></div>
+    <div class="page-header"><h1>Admin</h1><p>Staff accounts, audit trail, deposit refunds, and app settings</p></div>
     <div id="schema-banner"></div>
     <div class="flex gap-2 mb-5">
       <button class="btn ${adminActiveTab==='staff'?'btn-primary':'btn-outline'} btn-sm" onclick="switchAdminTab('staff')">Staff Users</button>
@@ -2829,13 +2833,15 @@ function renderAdminPage() {
 
 function switchAdminTab(tab) {
   adminActiveTab = tab;
+  adminRenderSeq++;
   renderAdminPage();
 }
 
 async function renderAdminSettingsTab() {
+  const __seq = adminRenderSeq;
   try {
     const settings = await API.getSettings();
-    document.getElementById('admin-tab-content').innerHTML = `
+    (adminHost(__seq) || {}).innerHTML = `
       <div class="card mb-6">
         <div class="card-header"><h3>AI inputs</h3></div>
         <div style="padding:16px 20px">
@@ -2843,7 +2849,7 @@ async function renderAdminSettingsTab() {
             Photo scanning (bills, ID proof): <strong>${aiStatus.vision ? 'enabled' : 'not enabled — set GEMINI_API_KEY on Railway'}</strong> ·
             Voice fallback: <strong>${aiStatus.text ? 'enabled' : 'not enabled — set GROQ_API_KEY on Railway'}</strong>
           </p>
-          <button class="btn btn-outline btn-sm" id="ai-probe-btn" onclick="runAiProbe()">🔌 Test AI connection</button>
+          <button class="btn btn-outline btn-sm" id="ai-probe-btn" onclick="runAiProbe()">${icon('sparkle')} Test AI connection</button>
           <div id="ai-probe-result" style="font-size:13px;margin-top:10px"></div>
         </div>
       </div>
@@ -2875,7 +2881,7 @@ async function renderAdminSettingsTab() {
           <button class="btn btn-primary" onclick="saveAdminSettings()">Save Settings</button>
         </div>
       </div>`;
-  } catch(e) { document.getElementById('admin-tab-content').innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
+  } catch(e) { (adminHost(__seq) || {}).innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
 }
 
 async function savePgSettings() {
@@ -2904,9 +2910,10 @@ async function saveAdminSettings() {
 }
 
 async function renderAdminStaffTab() {
+  const __seq = adminRenderSeq;
   try {
     const users = await API.getUsers();
-    document.getElementById('admin-tab-content').innerHTML = `
+    (adminHost(__seq) || {}).innerHTML = `
       <div class="card">
         <div class="card-header">
           <h3>Staff &amp; Admin Accounts</h3>
@@ -2929,7 +2936,7 @@ async function renderAdminStaffTab() {
           </table>
         </div>
       </div>`;
-  } catch(e) { document.getElementById('admin-tab-content').innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
+  } catch(e) { (adminHost(__seq) || {}).innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
 }
 
 function staffModal() {
@@ -2969,9 +2976,10 @@ async function delStaffUser(id, username) {
 }
 
 async function renderAdminAuditTab() {
+  const __seq = adminRenderSeq;
   try {
     const log = await API.getActivityLog();
-    document.getElementById('admin-tab-content').innerHTML = `
+    (adminHost(__seq) || {}).innerHTML = `
       <div class="card">
         <div class="card-header">
           <h3>Recent Activity</h3>
@@ -2993,13 +3001,14 @@ async function renderAdminAuditTab() {
           </table>
         </div>
       </div>`;
-  } catch(e) { document.getElementById('admin-tab-content').innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
+  } catch(e) { (adminHost(__seq) || {}).innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
 }
 
 async function renderAdminRefundsTab() {
+  const __seq = adminRenderSeq;
   try {
     const refunds = await API.getDepositRefunds();
-    document.getElementById('admin-tab-content').innerHTML = `
+    (adminHost(__seq) || {}).innerHTML = `
       <div class="card">
         <div class="card-header">
           <h3>Deposit Refund History</h3>
@@ -3027,7 +3036,7 @@ async function renderAdminRefundsTab() {
           </table>
         </div>
       </div>`;
-  } catch(e) { document.getElementById('admin-tab-content').innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
+  } catch(e) { (adminHost(__seq) || {}).innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
 }
 
 async function delDepositRefund(id) {
@@ -3044,8 +3053,25 @@ const SM_PHONE = () => window.matchMedia('(max-width: 640px)').matches;
 // One entry point for all the phone chrome added in Sprint 1. Safe to call
 // twice — every piece checks whether it already exists.
 function initPhoneChrome() {
-  try { initTabBar(); initTopbarMore(); initMobileCards(); initCopilotBar(); } catch (e) { console.error(e); }
+  try { initTabBar(); initTopbarMore(); initMobileCards(); initCopilotBar(); initTopbarTools(); } catch (e) { console.error(e); }
+  loadIconSprite();
   loadAiStatus();
+}
+
+function initTopbarTools() {
+  const search = document.getElementById('topbar-search');
+  const add = document.getElementById('topbar-add');
+  if (search && !search.dataset.wired) { search.dataset.wired = '1'; search.onclick = openSearch; }
+  if (add && !add.dataset.wired) { add.dataset.wired = '1'; add.onclick = openQuickActions; }
+  const chip = document.getElementById('today-chip');
+  if (chip) { chip.textContent = 'Today · ' + new Date(Date.now() + 5.5 * 3600 * 1000).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' }); chip.style.display = ''; }
+  if (!window.__smKeys) {
+    window.__smKeys = true;
+    document.addEventListener('keydown', e => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); openSearch(); }
+      if (e.key === 'Escape') { closeSearch(); closeQuickActions(); }
+    });
+  }
 }
 
 // ── Tables → cards on phones ────────────────────────────────────
@@ -3131,14 +3157,16 @@ function initTopbarMore() {
 
 // ── Bottom tab bar + Collect FAB ────────────────────────────────
 const SM_TABS = [
-  { page: 'dashboard',       icon: '🏠', label: 'Home' },
-  { page: 'collect',         icon: '💵', label: 'Collect' },
-  { page: 'guests',          icon: '👥', label: 'Guests' },
-  { page: 'daily-checklist', icon: '✅', label: 'Checklist' },
-  { page: '__more',          icon: '☰',  label: 'More' }
+  { page: 'dashboard', ic: 'home',   label: 'Home' },
+  { page: 'guests',    ic: 'users',  label: 'Residents' },
+  { page: 'rooms',     ic: 'bed',    label: 'Rooms' },
+  { page: 'finance',   ic: 'wallet', label: 'Finance' },
+  { page: '__more',    ic: 'more',   label: 'More' }
 ];
 // Screens where "collect rent" is the obvious next action.
-const SM_FAB_PAGES = ['dashboard', 'guests', 'rent-due', 'payments', 'collections'];
+// The ＋ quick action in the topbar covers every screen, so the FAB stays
+// only where collecting rent is the single obvious next step.
+const SM_FAB_PAGES = ['rent-due'];
 
 function initTabBar() {
   if (document.getElementById('sm-tabbar')) return;
@@ -3147,7 +3175,7 @@ function initTabBar() {
   bar.className = 'sm-tabbar';
   bar.innerHTML = SM_TABS.map(t => `
     <button class="sm-tab" data-tab="${t.page}" type="button">
-      <span class="sm-tab-icon">${t.icon}</span>${t.label}
+      <span class="sm-tab-icon">${icon(t.ic, 'ic ic-lg')}</span>${t.label}
     </button>`).join('');
   document.getElementById('app').appendChild(bar);
   bar.querySelectorAll('.sm-tab').forEach(b => {
@@ -3163,14 +3191,15 @@ function initTabBar() {
   fab.id = 'sm-fab';
   fab.className = 'sm-fab';
   fab.type = 'button';
-  fab.innerHTML = '＋ Collect';
+  fab.innerHTML = icon('plus', 'ic ic-lg') + ' Collect';
   fab.onclick = () => navigate('collect');
   document.getElementById('app').appendChild(fab);
   syncChrome(currentPage);
 }
 
 function syncChrome(page) {
-  document.querySelectorAll('.sm-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === page));
+  const group = (typeof PAGE_GROUP !== 'undefined' && PAGE_GROUP[page]) || page;
+  document.querySelectorAll('.sm-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === page || b.dataset.tab === group));
   const fab = document.getElementById('sm-fab');
   if (fab) fab.classList.toggle('sm-fab-on', SM_FAB_PAGES.includes(page));
   const actions = document.getElementById('topbar-actions');
@@ -3202,7 +3231,7 @@ async function pgCollect() {
   collectState.source = 'manual';
   collectState.voiceProposal = null;
   setContent(`
-    <div class="page-header"><h1>💵 Collect</h1><p>Rent · <span class="sm-kn">ಬಾಡಿಗೆ ಸಂಗ್ರಹ</span></p></div>
+    <div class="page-header"><h1>${icon('rupee')} Collect</h1><p>Rent · <span class="sm-kn">ಬಾಡಿಗೆ ಸಂಗ್ರಹ</span></p></div>
     <div class="card" style="padding:16px">
       ${collectVoiceRow()}
       <div class="sm-collect-step">
@@ -3329,10 +3358,10 @@ function showCollectDone(g, amount, saved) {
       <p class="text-muted" style="margin-bottom:6px">${g.name}${g.room_number ? ' · Room ' + g.room_number : ''}</p>
       ${pending ? `<p style="font-size:13px;color:var(--amber)">Waiting for admin confirmation before it counts as income.</p>` : ''}
       <div style="display:grid;gap:10px;max-width:320px;margin:18px auto 0">
-        ${wa ? `<a class="btn btn-success" style="justify-content:center" href="${wa}" target="_blank" rel="noopener">💬 Send receipt on WhatsApp</a>` : `<span class="text-muted" style="font-size:13px">No phone number on file for WhatsApp</span>`}
-        ${(saved && saved.id && !pending) ? `<button class="btn btn-outline" onclick="downloadReceipt(${saved.id})">🧾 Download receipt</button>` : ''}
-        <button class="btn btn-primary" onclick="navigate('collect')">＋ Collect from someone else</button>
-        <button class="btn btn-outline" onclick="navigate('rent-due')">📅 Back to Rent Due</button>
+        ${wa ? `<a class="btn btn-success" style="justify-content:center" href="${wa}" target="_blank" rel="noopener">${icon('whatsapp')} Send receipt on WhatsApp</a>` : `<span class="text-muted" style="font-size:13px">No phone number on file for WhatsApp</span>`}
+        ${(saved && saved.id && !pending) ? `<button class="btn btn-outline" onclick="downloadReceipt(${saved.id})">${icon('receipt')} Download receipt</button>` : ''}
+        <button class="btn btn-primary" onclick="navigate('collect')">${icon('plus')} Collect from someone else</button>
+        <button class="btn btn-outline" onclick="navigate('rent-due')">${icon('calendar')} Back to Rent Due</button>
       </div>
     </div>`);
 }
@@ -3648,7 +3677,6 @@ async function loadAttention() {
 }
 
 async function loadBrief(force) {
-  loadAttention();
   const body = document.getElementById('brief-body');
   if (!body) return;
   try {
@@ -3726,7 +3754,7 @@ async function renderReminders() {
   reminderState.list = list;
   const total = list.reduce((t, g) => t + (parseFloat(g.amount_due) || 0), 0);
   setContent(`
-    <div class="page-header"><h1>📣 Rent Reminders <span class="sm-kn" style="font-size:15px">ಜ್ಞಾಪನೆ</span></h1>
+    <div class="page-header"><h1>Rent Reminders <span class="sm-kn" style="font-size:15px">ಜ್ಞಾಪನೆ</span></h1>
       <p>${list.length ? `${list.length} resident${list.length === 1 ? ' owes' : 's owe'} ${fmt(total)}. Each message is drafted from her exact balance — read it, edit if you like, then send.` : 'Nobody owes rent right now.'}</p>
     </div>
     <div class="sm-chip-row" style="margin-bottom:14px">
@@ -3741,8 +3769,8 @@ async function renderReminders() {
         </div>
         <textarea id="rem-text-${g.guest_id}" rows="4" style="margin-top:10px;font-size:14px">${g.text}</textarea>
         <div class="flex gap-2" style="margin-top:8px">
-          ${g.phone ? `<button class="btn btn-success btn-sm" onclick="sendReminder(${g.guest_id})">💬 Send on WhatsApp</button>` : `<span class="text-muted" style="font-size:12px">No phone on file</span>`}
-          <button class="btn btn-outline btn-sm" onclick="collectFrom(${g.guest_id})">💵 Collect</button>
+          ${g.phone ? `<button class="btn btn-success btn-sm" onclick="sendReminder(${g.guest_id})">${icon('whatsapp')} Send on WhatsApp</button>` : `<span class="text-muted" style="font-size:12px">No phone on file</span>`}
+          <button class="btn btn-outline btn-sm" onclick="collectFrom(${g.guest_id})">${icon('rupee')} Collect</button>
         </div>
       </div>`).join('') : emptyState('🎉', 'All rent collected', 'There is nobody to remind.')}
   `);
@@ -3932,6 +3960,7 @@ async function copilotRetool(a) {
 
 // Admin → Copilot log: every ask, confirm and refusal, newest first.
 async function renderAdminCopilotTab() {
+  const __seq = adminRenderSeq;
   const host = document.getElementById('admin-tab-content');
   try {
     const rows = await apiFetch('/copilot/audit?limit=150');
@@ -3946,3 +3975,220 @@ async function renderAdminCopilotTab() {
       }).join('')}</tbody></table></div></div>`;
   } catch (e) { host.innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
 }
+
+
+/* ═══════════════════════════════════════════════════════════════
+   SPRINT 7 — one product: icons, grouped navigation, AI-first Home,
+   universal search, quick action.
+   ═══════════════════════════════════════════════════════════════ */
+
+// Inline the sprite once so <use href="#i-…"> resolves without a network hop
+// on every icon (and works from file:// during local testing).
+async function loadIconSprite() {
+  const host = document.getElementById('icon-sprite');
+  if (!host || host.dataset.loaded) return;
+  try {
+    const res = await fetch('/icons.svg');
+    host.innerHTML = await res.text();
+    host.dataset.loaded = '1';
+  } catch { /* icons degrade to empty boxes; the labels still read */ }
+}
+const icon = (name, cls = 'ic') => `<svg class="${cls}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+
+// ── Navigation groups ────────────────────────────────────────────────────
+// The screens did not move; they are grouped. Every old page key still
+// navigates, so bookmarks, the tab bar and navigate() calls keep working.
+const NAV_GROUPS = {
+  finance: { label: 'Finance', tabs: [
+    { page: 'collect', label: 'Collect' }, { page: 'rent-due', label: 'Rent Due' }, { page: 'payments', label: 'Payments' },
+    { page: 'reminders', label: 'Reminders' }, { page: 'purchases', label: 'Expenses' }, { page: 'collections', label: 'Collections' },
+    { page: 'reports', label: 'Reports' }, { page: 'balance-sheet', label: 'Balance Sheet', admin: true } ] },
+  operations: { label: 'Operations', tabs: [
+    { page: 'daily-checklist', label: 'Checklist' }, { page: 'complaints', label: 'Requests' },
+    { page: 'daily-menu', label: 'Menu' }, { page: 'guest-messages', label: 'Announcements' } ] }
+};
+const PAGE_GROUP = {};
+for (const [g, def] of Object.entries(NAV_GROUPS)) for (const t of def.tabs) PAGE_GROUP[t.page] = g;
+
+function highlightNav(page) {
+  const group = PAGE_GROUP[page] || page;
+  document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.page === group || b.dataset.page === page));
+}
+function renderSubtabs(group, active) {
+  const def = NAV_GROUPS[group];
+  if (!def) return '';
+  return `<div class="subtabs">${def.tabs.filter(t => !t.admin || isAdmin())
+    .map(t => `<button class="subtab ${t.page === active ? 'active' : ''}" onclick="navigate('${t.page}')">${t.label}</button>`).join('')}</div>`;
+}
+// Landing on a group opens its first tab; the strip then rides above it.
+async function pgFinance() { navigate(isAdmin() ? 'collect' : 'collect'); }
+async function pgOperations() { navigate('daily-checklist'); }
+// Injected by navigate() after any grouped screen renders.
+function injectSubtabs(page) {
+  const group = PAGE_GROUP[page];
+  const host = document.getElementById('page-content');
+  if (!group || !host || host.querySelector('.subtabs')) return;
+  host.insertAdjacentHTML('afterbegin', renderSubtabs(group, page));
+}
+
+// ── Universal search (topbar icon · Ctrl+K) ──────────────────────────────
+let searchTimer = null, searchSel = -1, searchRows = [];
+function openSearch() {
+  if (document.getElementById('search-overlay')) return;
+  const el = document.createElement('div');
+  el.id = 'search-overlay';
+  el.className = 'search-overlay';
+  el.onclick = e => { if (e.target === el) closeSearch(); };
+  el.innerHTML = `<div class="search-sheet">
+      <div class="search-head">${icon('search', 'ic ic-lg')}
+        <input id="search-q" type="text" placeholder="Search residents, rooms, receipts, requests…" autocomplete="off"/>
+        <button class="btn btn-outline btn-sm" onclick="closeSearch()">Esc</button></div>
+      <div class="search-results" id="search-results"><div class="search-group">Type at least 2 letters</div></div>
+    </div>`;
+  document.body.appendChild(el);
+  const input = document.getElementById('search-q');
+  input.focus();
+  input.oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(runSearch, 220); };
+  input.onkeydown = e => {
+    if (e.key === 'Escape') return closeSearch();
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); moveSearchSel(e.key === 'ArrowDown' ? 1 : -1); }
+    if (e.key === 'Enter' && searchSel >= 0 && searchRows[searchSel]) { e.preventDefault(); searchRows[searchSel].go(); }
+  };
+}
+function closeSearch() { const el = document.getElementById('search-overlay'); if (el) el.remove(); searchSel = -1; searchRows = []; }
+function moveSearchSel(d) {
+  const items = [...document.querySelectorAll('.search-item')];
+  if (!items.length) return;
+  searchSel = (searchSel + d + items.length) % items.length;
+  items.forEach((it, i) => it.classList.toggle('sel', i === searchSel));
+  items[searchSel].scrollIntoView({ block: 'nearest' });
+}
+async function runSearch() {
+  const q = document.getElementById('search-q')?.value.trim();
+  const host = document.getElementById('search-results');
+  if (!host) return;
+  if (!q || q.length < 2) { host.innerHTML = '<div class="search-group">Type at least 2 letters</div>'; searchRows = []; return; }
+  try {
+    const r = await apiFetch(`/search?q=${encodeURIComponent(q)}`);
+    searchRows = []; searchSel = -1;
+    const parts = [];
+    const add = (label, rows, render, go) => {
+      if (!rows.length) return;
+      parts.push(`<div class="search-group">${label}</div>`);
+      rows.forEach(row => { const i = searchRows.length; searchRows.push({ go: () => go(row) }); parts.push(`<button class="search-item" data-i="${i}" onclick="searchRows[${i}].go()">${render(row)}</button>`); });
+    };
+    add('Residents', r.residents, g => `${icon('users')}<span><span>${g.name}${g.is_active ? '' : ' <span class="s-sub">(past)</span>'}</span><div class="s-sub">${g.room_number ? 'Room ' + g.room_number : 'No room'}${g.phone ? ' · ' + g.phone : ''}</div></span>${g.amount_due > 0 ? `<span class="s-right text-red">${fmt(g.amount_due)}</span>` : ''}`,
+      g => { closeSearch(); navigate('guests'); setTimeout(() => viewGuest(g.id), 350); });
+    add('Rooms', r.rooms, x => `${icon('bed')}<span><span>Room ${x.room_number}</span><div class="s-sub">Floor ${x.floor} · ${x.occupied}/${x.total_beds} beds</div></span>${x.vacant ? `<span class="s-right text-green">${x.vacant} free</span>` : ''}`,
+      () => { closeSearch(); navigate('rooms'); });
+    add('Payments', r.payments, p => `${icon('receipt')}<span><span>${p.guest_name} — ${fmt(p.amount)}</span><div class="s-sub">${p.receipt_number || ''} · ${fmtDate(p.collection_date)}${p.status !== 'confirmed' ? ' · ' + p.status : ''}</div></span>`,
+      () => { closeSearch(); navigate('payments'); });
+    add('Requests', r.requests, c => `${icon('wrench')}<span><span>${c.category}${c.room_number ? ' · Room ' + c.room_number : ''}</span><div class="s-sub">${c.description.slice(0, 60)} · ${c.status}</div></span>`,
+      () => { closeSearch(); navigate('complaints'); });
+    host.innerHTML = parts.length ? parts.join('') : `<div class="search-group">Nothing matches “${q}”</div>`;
+  } catch (e) { host.innerHTML = `<div class="search-group">${e.message}</div>`; }
+}
+
+// ── Quick action ─────────────────────────────────────────────────────────
+const QUICK_ACTIONS = [
+  { icon: 'rupee', label: 'Collect rent', run: () => navigate('collect') },
+  { icon: 'users', label: 'Add resident', run: () => { navigate('guests'); setTimeout(() => guestModal(), 350); } },
+  { icon: 'cart', label: 'Add expense', run: () => { navigate('purchases'); setTimeout(() => purchaseModal(), 350); } },
+  { icon: 'wrench', label: 'Report an issue', run: () => { navigate('complaints'); setTimeout(() => complaintModal(), 350); } },
+  { icon: 'megaphone', label: 'Post an announcement', admin: true, run: () => { navigate('guest-messages'); setTimeout(() => announcementModal(), 350); } }
+];
+function openQuickActions() {
+  if (document.getElementById('qa-sheet')) return closeQuickActions();
+  const back = document.createElement('div'); back.id = 'qa-backdrop'; back.className = 'qa-backdrop'; back.onclick = closeQuickActions;
+  const sheet = document.createElement('div'); sheet.id = 'qa-sheet'; sheet.className = 'qa-sheet';
+  sheet.innerHTML = QUICK_ACTIONS.filter(a => !a.admin || isAdmin())
+    .map((a, i) => `<button class="qa-item" onclick="runQuickAction(${i})">${icon(a.icon, 'ic ic-lg')} ${a.label}</button>`).join('');
+  document.body.appendChild(back); document.body.appendChild(sheet);
+}
+function closeQuickActions() { ['qa-sheet', 'qa-backdrop'].forEach(id => { const e = document.getElementById(id); if (e) e.remove(); }); }
+function runQuickAction(i) { const list = QUICK_ACTIONS.filter(a => !a.admin || isAdmin()); closeQuickActions(); list[i].run(); }
+
+// ── Home (AI-first hierarchy, one API call) ──────────────────────────────
+let homeCache = null;
+async function pgHome(force) {
+  skeleton('cards');
+  document.getElementById('topbar-actions').innerHTML = '';
+  const h = await apiFetch('/home');
+  homeCache = h;
+  const t = h.today;
+  const rec = h.recommendations || [];
+  const level = (arr, dot) => arr.map(l => `<div class="today-row"><span>${dot}</span><span class="t-main">${l}</span></div>`).join('');
+  const hasAttention = h.attention.high.length || h.attention.medium.length || h.attention.low.length;
+  const row = (ic, main, sub, action) => `<div class="today-row">${icon(ic)}<span class="t-main">${main}${sub ? `<div class="t-sub">${sub}</div>` : ''}</span>${action || ''}</div>`;
+
+  setContent(`
+    <div class="home-greeting">${h.brief.greeting}, ${h.user.username}</div>
+    <div class="home-date">${h.brief.dateLabel}${h.brief.health ? ` · <span class="health-pill ${h.brief.health.overall >= 80 ? 'good' : h.brief.health.overall >= 60 ? 'ok' : 'low'}" onclick='showHealthDetail(homeCache.brief.health)'>Health ${h.brief.health.overall}</span>` : ''}</div>
+
+    <div class="card mb-6" id="brief-card">
+      <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <h3>${icon('sparkle')} Siri's Brief</h3>
+        <button class="btn btn-outline btn-sm" onclick="loadHome(true)" title="Recompute">${icon('refresh')}</button>
+      </div>
+      <div style="padding:14px 16px">
+        <div class="brief-h">What changed</div>
+        ${h.brief.changed.map(l => `<div class="brief-line">• ${l}</div>`).join('')}
+        <div class="flex gap-2" style="flex-wrap:wrap;margin-top:12px">
+          <button class="btn btn-outline btn-sm" onclick="shareBrief()">${icon('whatsapp')} WhatsApp</button>
+          <button class="btn btn-outline btn-sm" onclick="copyBrief()">${icon('copy')} Copy</button>
+          <button class="btn btn-outline btn-sm" onclick="showEvening()">${icon('moon')} Evening summary</button>
+        </div>
+      </div>
+    </div>
+
+    ${hasAttention ? `<div class="home-section-h">Needs attention</div>
+    <div class="card"><div style="padding:4px 16px">
+      ${level(h.attention.high, '🔴')}${level(h.attention.medium, '🟠')}${level(h.attention.low, '🟢')}
+    </div></div>` : ''}
+
+    ${rec.length ? `<div class="home-section-h">Siri recommends</div>
+    <div class="card"><div style="padding:4px 16px">
+      ${rec.map((r, i) => `<div class="today-row"><span class="t-main"><strong>${i + 1}.</strong> ${r.text}</span>
+        <button class="btn btn-primary btn-sm" onclick='${r.action.navigate ? `navigate("${r.action.navigate}")` : `copilotAsk(${JSON.stringify(r.action.ask)})`}'>${r.action.label}</button></div>`).join('')}
+    </div></div>` : ''}
+
+    <div class="home-section-h">Today</div>
+    <div class="card"><div style="padding:4px 16px">
+      ${t.arrivals.length ? row('users', `${t.arrivals.length} check-in${t.arrivals.length === 1 ? '' : 's'} today`, t.arrivals.map(a => a.name + (a.room_number ? ' → Room ' + a.room_number : '')).join(', ')) : ''}
+      ${t.departures.length ? row('logout', `${t.departures.length} checkout${t.departures.length === 1 ? '' : 's'} today`, t.departures.map(d => d.name + (d.room_number ? ' (Room ' + d.room_number + ')' : '')).join(', ')) : ''}
+      ${row('rupee', `${fmt(t.collectedToday.t)} collected today`, `${t.collectedToday.n} payment${t.collectedToday.n === 1 ? '' : 's'}`, `<button class="btn btn-primary btn-sm" onclick="navigate('collect')">Collect</button>`)}
+      ${t.rentDue.count ? row('calendar', `${fmt(t.rentDue.total)} rent outstanding`, `${t.rentDue.count} resident${t.rentDue.count === 1 ? '' : 's'}`, `<button class="btn btn-outline btn-sm" onclick="navigate('rent-due')">Open</button>`) : row('calendar', 'No rent outstanding', 'All settled')}
+      ${row('check-square', `Checklist ${t.checklist.done}/${t.checklist.total}`, t.checklist.done >= t.checklist.total && t.checklist.total ? 'Complete for today' : 'Tap to continue', `<button class="btn btn-outline btn-sm" onclick="navigate('daily-checklist')">Open</button>`)}
+      ${row('wrench', `${t.openRequests} open request${t.openRequests === 1 ? '' : 's'}`, t.highRequests.length ? `${t.highRequests.length} high priority` : 'None urgent', `<button class="btn btn-outline btn-sm" onclick="navigate('complaints')">Open</button>`)}
+      ${Object.keys(t.menu).length ? row('utensils', "Today's menu", ['Breakfast', 'Lunch', 'Dinner'].filter(m => t.menu[m]).map(m => `${m}: ${t.menu[m]}`).join(' · ')) : ''}
+    </div></div>
+
+    ${h.finance ? `<div class="home-section-h">This month</div>
+    <div class="money-grid">
+      <div class="money-card"><div class="m-label">Collected</div><div class="m-value text-green">${fmt(h.finance.monthIncome)}</div></div>
+      <div class="money-card"><div class="m-label">Spent</div><div class="m-value text-red">${fmt(h.finance.monthExpenses)}</div></div>
+      <div class="money-card"><div class="m-label">Net</div><div class="m-value">${fmt(h.finance.monthNet)}</div></div>
+      <div class="money-card"><div class="m-label">Outstanding</div><div class="m-value text-amber">${fmt(h.finance.outstanding)}</div></div>
+    </div>` : ''}
+
+    <div class="home-section-h">Occupancy</div>
+    <div class="card"><div style="padding:14px 16px">
+      <div style="display:flex;justify-content:space-between;font-size:14px"><strong>${h.occupancy.residents} of ${h.occupancy.beds} beds</strong><span>${h.occupancy.percent}%</span></div>
+      <div class="occ-bar"><span style="width:${h.occupancy.percent}%"></span></div>
+      <div class="t-sub">${h.occupancy.vacant} bed${h.occupancy.vacant === 1 ? '' : 's'} vacant</div>
+    </div></div>
+
+    ${h.upcoming.length ? `<div class="home-section-h">Upcoming</div>
+    <div class="card"><div style="padding:4px 16px">
+      ${h.upcoming.map(u => row('calendar', `${u.name} checks out`, `${u.room_number ? 'Room ' + u.room_number + ' · ' : ''}${fmtDate(u.leave_date)}`)).join('')}
+    </div></div>` : ''}
+
+    ${h.flags && h.flags.length ? `<div class="home-section-h">Flagged for the owner</div>
+    <div class="card"><div style="padding:4px 16px">
+      ${h.flags.map(f => row('flag', f.title, f.detail, f.action ? `<button class="btn btn-outline btn-sm" onclick="navigate('${f.action}')">Open</button>` : '')).join('')}
+      ${h.flagCount > h.flags.length ? `<div class="t-sub" style="padding:8px 0">…and ${h.flagCount - h.flags.length} more in the owner report</div>` : ''}
+    </div></div>` : ''}
+  `);
+  briefCache = { text: h.brief.text, computed_at: h.brief.computed_at, cached: h.brief.cached };
+}
+async function loadHome(force) { if (force) { await apiFetch('/copilot/brief?force=1'); } navigate('dashboard'); }
