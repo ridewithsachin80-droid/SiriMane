@@ -52,12 +52,12 @@ let currentPage = null;
 function navigate(page) {
   currentPage = page;
   document.querySelectorAll('.nav-item[data-page]').forEach(b => b.classList.toggle('active', b.dataset.page===page));
-  const titles = { dashboard:'Dashboard', rooms:'Rooms', guests:'Guests', 'daily-menu':'Daily Menu', 'daily-checklist':'Daily Checklist', complaints:'Complaints', payments:'Payments', 'guest-messages':'Guest Messages', inbox:'Inbox', purchases:'Purchases', collections:'Collections', 'rent-due':'Rent Due', reports:'Reports', 'balance-sheet':'Balance Sheet', admin:'Admin', collect:'Collect Rent' };
+  const titles = { dashboard:'Dashboard', rooms:'Rooms', guests:'Guests', 'daily-menu':'Daily Menu', 'daily-checklist':'Daily Checklist', complaints:'Complaints', payments:'Payments', 'guest-messages':'Guest Messages', inbox:'Inbox', purchases:'Purchases', collections:'Collections', 'rent-due':'Rent Due', reports:'Reports', 'balance-sheet':'Balance Sheet', admin:'Admin', collect:'Collect Rent', reminders:'Rent Reminders' };
   document.getElementById('page-title').textContent = titles[page]||page;
   document.getElementById('topbar-actions').innerHTML = '';
   document.getElementById('sidebar').classList.remove('open');
   if (typeof syncChrome === 'function') syncChrome(page);
-  const pages = { dashboard:pgDashboard, rooms:pgRooms, guests:pgGuests, 'daily-menu':pgMenu, 'daily-checklist':pgChecklist, complaints:pgComplaints, payments:pgPayments, 'guest-messages':pgAnnouncements, inbox:pgInbox, purchases:pgPurchases, collections:pgCollections, 'rent-due':pgRentDue, reports:pgReports, 'balance-sheet':pgBalanceSheet, admin:pgAdmin, collect:pgCollect };
+  const pages = { dashboard:pgDashboard, rooms:pgRooms, guests:pgGuests, 'daily-menu':pgMenu, 'daily-checklist':pgChecklist, complaints:pgComplaints, payments:pgPayments, 'guest-messages':pgAnnouncements, inbox:pgInbox, purchases:pgPurchases, collections:pgCollections, 'rent-due':pgRentDue, reports:pgReports, 'balance-sheet':pgBalanceSheet, admin:pgAdmin, collect:pgCollect, reminders:pgReminders };
   if(!pages[page]) return;
   // Error boundary: a thrown error inside any screen shows a retry card
   // instead of a blank page.
@@ -195,6 +195,30 @@ async function pgDashboard() {
     const d = await API.dashboard();
     setContent(`
       <div class="page-header"><h1>Dashboard</h1><p>Welcome to Siri Mane PG Management</p></div>
+      <div class="card mb-6" id="brief-card">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+          <h3>☀️ Today's brief</h3>
+          <button class="btn btn-outline btn-sm" onclick="loadBrief(true)" title="Recompute">↻</button>
+        </div>
+        <div style="padding:14px 16px">
+          <pre id="brief-text" style="white-space:pre-wrap;font-family:inherit;font-size:14px;line-height:1.55;margin:0 0 12px">Loading…</pre>
+          <div class="flex gap-2" style="flex-wrap:wrap">
+            <button class="btn btn-success btn-sm" id="brief-wa" onclick="shareBrief()">💬 WhatsApp</button>
+            <button class="btn btn-outline btn-sm" onclick="copyBrief()">📋 Copy</button>
+            <button class="btn btn-outline btn-sm" onclick="navigate('reminders')">📣 Send rent reminders</button>
+          </div>
+          <div id="brief-meta" class="text-muted" style="font-size:11px;margin-top:8px"></div>
+        </div>
+      </div>
+      <div class="card mb-6">
+        <div style="padding:12px 16px">
+          <div class="flex gap-2">
+            <input type="text" id="ask-q" placeholder="Ask Siri Mane… e.g. who has not paid?" style="margin:0;flex:1" onkeydown="if(event.key==='Enter')askSiriMane()"/>
+            <button class="btn btn-primary" onclick="askSiriMane()">Ask</button>
+          </div>
+          <pre id="ask-a" class="hidden" style="white-space:pre-wrap;font-family:inherit;font-size:14px;line-height:1.5;margin:12px 0 0;padding:12px;background:#F8FAFC;border-radius:8px"></pre>
+        </div>
+      </div>
       <div class="stat-grid mb-6">
         <div class="stat-card">
           <div class="s-label">Total Guests</div>
@@ -290,6 +314,7 @@ async function pgDashboard() {
         </div>
       </div>
     `);
+      loadBrief(false);
   } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
 }
 
@@ -1108,7 +1133,7 @@ async function pgComplaints(filter) {
         ${list.length===0 ? '<div style="text-align:center;padding:48px;color:var(--text-muted)">🛠️<br><br>No issues here.</div>' : `
         <div class="table-wrap">
           <table>
-            <thead><tr><th>DATE</th><th>CATEGORY</th><th>ISSUE</th><th>FROM</th><th>STATUS</th><th>ACTIONS</th></tr></thead>
+            <thead><tr><th>DATE</th><th>CATEGORY</th><th>ISSUE</th><th>FROM</th><th>PRIORITY</th><th>STATUS</th><th>ACTIONS</th></tr></thead>
             <tbody id="complaints-tb">
               ${list.map(c => `
                 <tr data-search="${c.category.toLowerCase()} ${c.description.toLowerCase()} ${(c.guest_name||'').toLowerCase()} ${(c.room_number||'').toLowerCase()}">
@@ -1116,6 +1141,7 @@ async function pgComplaints(filter) {
                   <td>${c.category}</td>
                   <td style="max-width:260px">${c.description}${c.resolution_notes?`<br><span class="text-muted" style="font-size:12px">✔ ${c.resolution_notes}</span>`:''}</td>
                   <td>${c.guest_name || (c.raised_by==='guest'?'Guest':'Staff')}${c.room_number?' · Room '+c.room_number:''}</td>
+                  <td>${priorityBadge(c.priority)}</td>
                   <td><span class="badge ${c.status==='resolved'?'badge-green':c.status==='in_progress'?'badge-blue':'badge-red'}">${c.status.replace('_',' ')}</span></td>
                   <td>
                     ${c.status!=='resolved' ? `<button class="btn btn-outline btn-sm" onclick="complaintStatusModal(${c.id},'${c.status}')">Update</button>` : ''}
@@ -2803,6 +2829,13 @@ async function renderAdminSettingsTab() {
           <div class="form-group"><label>PG Name</label><input id="set-pg-name" placeholder="e.g. Siri Mane" value="${settings.pg_name||''}"/></div>
           <div class="form-group"><label>Address</label><textarea id="set-pg-address" rows="2" placeholder="e.g. 5th cross, Gangothri Road,&#10;SIT Ext, Tumakuru.">${settings.pg_address||''}</textarea></div>
           <div class="form-group"><label>Phone</label><input id="set-pg-phone" placeholder="e.g. 9880217627" value="${settings.pg_phone||''}"/></div>
+          <div class="form-row">
+            <div class="form-group"><label>Morning brief time (IST)</label><input id="set-brief-time" type="time" value="${settings.brief_time||'07:00'}"/></div>
+            <div class="form-group"><label>Send brief to (WhatsApp)</label><input id="set-owner-phone" placeholder="Owner's number" value="${settings.owner_phone||''}"/></div>
+          </div>
+          <div class="form-group"><label>Reminder language</label>
+            <select id="set-reminder-lang"><option value="en" ${(settings.reminder_lang||'en')==='en'?'selected':''}>English</option><option value="kn" ${settings.reminder_lang==='kn'?'selected':''}>ಕನ್ನಡ</option></select>
+          </div>
           <button class="btn btn-primary" onclick="savePgSettings()">Save PG Details</button>
         </div>
       </div>
@@ -2824,7 +2857,10 @@ async function savePgSettings() {
   const d = {
     pg_name: document.getElementById('set-pg-name').value.trim(),
     pg_address: document.getElementById('set-pg-address').value.trim(),
-    pg_phone: document.getElementById('set-pg-phone').value.trim()
+    pg_phone: document.getElementById('set-pg-phone').value.trim(),
+    brief_time: document.getElementById('set-brief-time').value || '07:00',
+    owner_phone: document.getElementById('set-owner-phone').value.trim(),
+    reminder_lang: document.getElementById('set-reminder-lang').value
   };
   try { await API.updateSettings(d); renderAdminSettingsTab(); }
   catch(e) { showAlert(al, e.message); }
@@ -3550,4 +3586,101 @@ async function runAiProbe() {
     out.innerHTML = line('Gemini', r.gemini) + '<br>' + line('Groq', r.groq);
   } catch (e) { out.textContent = e.message; }
   finally { btn.disabled = false; }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   SPRINT 4 — the warden's assistant: brief, reminders, priority, ask
+   ═══════════════════════════════════════════════════════════════ */
+let briefCache = null;
+let appSettingsCache = null;
+async function getAppSettings() {
+  if (appSettingsCache) return appSettingsCache;
+  try { appSettingsCache = isAdmin() ? await API.getSettings() : {}; } catch { appSettingsCache = {}; }
+  return appSettingsCache;
+}
+
+async function loadBrief(force) {
+  const el = document.getElementById('brief-text');
+  if (!el) return;
+  try {
+    briefCache = await apiFetch('/assistant/brief' + (force ? '?refresh=1' : ''));
+    el.textContent = briefCache.text;
+    const when = new Date(briefCache.computed_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+    document.getElementById('brief-meta').textContent = `Computed ${when}${briefCache.cached ? ' · tap ↻ for fresh numbers' : ''}`;
+  } catch (e) { el.textContent = 'Could not load the brief: ' + e.message; }
+}
+async function shareBrief() {
+  if (!briefCache) return;
+  const settings = await getAppSettings();
+  const to = settings.owner_phone || settings.pg_phone || '';
+  const url = to ? buildWhatsappUrl(to, briefCache.text) : null;
+  if (url) window.open(url, '_blank', 'noopener');
+  else if (navigator.share) navigator.share({ text: briefCache.text }).catch(() => {});
+  else copyBrief();
+}
+function copyBrief() {
+  if (!briefCache) return;
+  navigator.clipboard?.writeText(briefCache.text).then(() => toast('Brief copied', 'ok')).catch(() => toast('Copy not available on this browser'));
+}
+async function askSiriMane() {
+  const q = document.getElementById('ask-q').value.trim();
+  const a = document.getElementById('ask-a');
+  if (!q) return;
+  a.classList.remove('hidden'); a.textContent = 'Thinking…';
+  try { const r = await apiFetch('/assistant/ask', { method: 'POST', body: { question: q } }); a.textContent = r.answer; }
+  catch (e) { a.textContent = e.message; }
+}
+
+function priorityBadge(p) {
+  const map = { high: ['badge-red', '🔴 High'], medium: ['badge-amber', '🟡 Medium'], low: ['badge-gray', '⚪ Low'] };
+  const [cls, label] = map[p] || map.medium;
+  return `<span class="badge ${cls}">${label}</span>`;
+}
+
+// ── Rent reminders: AI-drafted, warden reviews, sends one by one ────────
+let reminderState = { lang: 'en', list: [] };
+async function pgReminders() {
+  loading();
+  document.getElementById('topbar-actions').innerHTML = '';
+  const settings = await getAppSettings();
+  reminderState.lang = settings.reminder_lang === 'kn' ? 'kn' : (reminderState.lang || 'en');
+  await renderReminders();
+}
+async function renderReminders() {
+  const list = await apiFetch('/assistant/reminders?lang=' + reminderState.lang);
+  reminderState.list = list;
+  const total = list.reduce((t, g) => t + (parseFloat(g.amount_due) || 0), 0);
+  setContent(`
+    <div class="page-header"><h1>📣 Rent Reminders <span class="sm-kn" style="font-size:15px">ಜ್ಞಾಪನೆ</span></h1>
+      <p>${list.length ? `${list.length} resident${list.length === 1 ? ' owes' : 's owe'} ${fmt(total)}. Each message is drafted from her exact balance — read it, edit if you like, then send.` : 'Nobody owes rent right now.'}</p>
+    </div>
+    <div class="sm-chip-row" style="margin-bottom:14px">
+      <button class="sm-chip ${reminderState.lang === 'en' ? 'selected' : ''}" onclick="reminderState.lang='en';renderReminders()">English</button>
+      <button class="sm-chip ${reminderState.lang === 'kn' ? 'selected' : ''}" onclick="reminderState.lang='kn';renderReminders()">ಕನ್ನಡ</button>
+    </div>
+    ${list.length ? list.map((g, i) => `
+      <div class="card" style="padding:14px;margin-bottom:12px" id="rem-${g.guest_id}">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+          <div><strong style="font-size:15px">${g.name}</strong><div class="text-muted" style="font-size:12px">${g.room_number ? 'Room ' + g.room_number + ' · ' : ''}${fmt(g.amount_due)} due${g.months_behind >= 1 ? ' · ' + g.months_behind + ' month' + (g.months_behind === 1 ? '' : 's') : ''}</div></div>
+          ${g.last_reminded ? `<span class="badge badge-gray" title="Last reminded">sent ${fmtDate(g.last_reminded)}</span>` : ''}
+        </div>
+        <textarea id="rem-text-${g.guest_id}" rows="4" style="margin-top:10px;font-size:14px">${g.text}</textarea>
+        <div class="flex gap-2" style="margin-top:8px">
+          ${g.phone ? `<button class="btn btn-success btn-sm" onclick="sendReminder(${g.guest_id})">💬 Send on WhatsApp</button>` : `<span class="text-muted" style="font-size:12px">No phone on file</span>`}
+          <button class="btn btn-outline btn-sm" onclick="collectFrom(${g.guest_id})">💵 Collect</button>
+        </div>
+      </div>`).join('') : emptyState('🎉', 'All rent collected', 'There is nobody to remind.')}
+  `);
+}
+async function sendReminder(guestId) {
+  const g = reminderState.list.find(x => x.guest_id === guestId);
+  if (!g) return;
+  const text = document.getElementById('rem-text-' + guestId).value.trim();
+  const url = buildWhatsappUrl(g.phone, text);
+  if (!url) { toast('Phone number looks invalid'); return; }
+  window.open(url, '_blank', 'noopener');
+  try { await apiFetch('/assistant/reminders/sent', { method: 'POST', body: { guest_id: guestId, text, lang: reminderState.lang } }); } catch {}
+  const card = document.getElementById('rem-' + guestId);
+  if (card) card.style.opacity = '0.6';
 }

@@ -305,6 +305,50 @@ async function runAtWidth(browser, BASE, width) {
   const full = await page.evaluate(id => API.getGuest(id), saved2.id);
   eq(full.address, '5th Cross, Tumakuru', `${tag} LINKAGE: address actually persisted`); eq(full.id_proof_number, '999988887777', `${tag} ID number persisted`);
 
+  // ── Sprint 4: brief on Home, ask box, reminders, priority ─────────────
+  await page.evaluate(() => navigate('dashboard'));
+  await page.waitForFunction(() => { const t = document.getElementById('brief-text'); return t && t.textContent && !/Loading/.test(t.textContent); }, { timeout: 10000 });
+  const briefUi = await page.$eval('#brief-text', e => e.textContent);
+  const briefApi = await page.evaluate(() => apiFetch('/assistant/brief'));
+  eq(briefUi, briefApi.text, `${tag} Home shows the brief word-for-word from ai_reads`);
+  ok(briefUi.includes('Siri Mane') && /Rent due/.test(briefUi), `${tag} brief has the rent line`);
+  await page.screenshot({ path: path.join(SHOTS, `home-brief-${width}.png`) });
+  await page.type('#ask-q', 'who has not paid');
+  await page.evaluate(() => askSiriMane());
+  await page.waitForFunction(() => { const a = document.getElementById('ask-a'); return a && !a.classList.contains('hidden') && !/Thinking/.test(a.textContent); }, { timeout: 8000 });
+  const askUi = await page.$eval('#ask-a', e => e.textContent);
+  ok(/owe|Nobody owes/.test(askUi), `${tag} ask answers in place ("${askUi.slice(0, 40)}…")`);
+  await noHScroll('dashboard');
+
+  await page.evaluate(() => navigate('reminders'));
+  await page.waitForFunction(() => document.querySelector('#page-content h1')?.textContent.includes('Rent Reminders'), { timeout: 8000 });
+  const remCards = await page.$$('[id^="rem-text-"]');
+  const remApi = await page.evaluate(() => apiFetch('/assistant/reminders?lang=en'));
+  eq(remCards.length, remApi.length, `${tag} one editable draft per resident who owes (${remApi.length})`);
+  if (remApi.length) {
+    eq(await page.$eval('[id^="rem-text-"]', e => e.value), remApi[0].text, `${tag} draft text identical to the API's`);
+    await page.evaluate(() => { const t = document.querySelector('[id^="rem-text-"]'); t.value = t.value + ' — edited by warden'; });
+    const opened = [];
+    await page.exposeFunction('__capture', u => opened.push(u)).catch(() => {});
+    await page.evaluate(() => { window.open = u => { window.__capture(u); return null; }; });
+    await page.evaluate(id => sendReminder(id), remApi[0].guest_id);
+    await sleep(600);
+    ok(opened[0] && opened[0].startsWith('https://wa.me/91') && decodeURIComponent(opened[0]).includes('edited by warden'), `${tag} Send opens WhatsApp with the warden's edited text`);
+    const logged = await page.evaluate(() => apiFetch('/assistant/reminders?lang=en'));
+    ok(logged[0].last_reminded, `${tag} send is logged (last_reminded set)`);
+  }
+  await page.evaluate(() => document.querySelector('.sm-chip-row .sm-chip:last-child').click());
+  await page.waitForFunction(() => document.querySelector('.sm-chip-row .sm-chip:last-child')?.classList.contains('selected'), { timeout: 8000 });
+  if (remApi.length) ok((await page.$eval('[id^="rem-text-"]', e => e.value)).includes('ನಮಸ್ಕಾರ'), `${tag} Kannada toggle rewrites the drafts`);
+  await page.screenshot({ path: path.join(SHOTS, `reminders-${width}.png`) });
+  await noHScroll('reminders');
+
+  await page.evaluate(() => navigate('complaints'));
+  await page.waitForFunction(() => document.querySelector('#page-content h1')?.textContent.includes('Complaint'), { timeout: 8000 });
+  const hasPriority = await page.$$eval('#complaints-tb td[data-label="PRIORITY"] .badge', els => els.length);
+  ok(hasPriority >= 1, `${tag} complaints show a priority badge`);
+  ok(await page.evaluate(() => document.body.innerText.includes('🔴 High')), `${tag} the geyser/water issue is marked High`);
+
   eq(jsErrors.length, 0, `${tag} no uncaught JS errors (${jsErrors.join('; ')})`);
   await page.close(); await ctx.close();
 }

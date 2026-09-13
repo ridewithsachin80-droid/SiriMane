@@ -47,6 +47,7 @@ app.use('/api/ai', require('./routes/ai'));
 app.use(express.json({ limit: '10kb' }));
 
 app.use('/api', require('./routes/index'));
+app.use('/api/assistant', require('./routes/assistant'));
 
 // Any /api path that no route claimed answers with JSON — never the landing
 // page. (Before this, a missing route returned home.html and the app showed
@@ -83,5 +84,8 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 if (require.main === module) {
   app.listen(PORT, () => console.log(`✅ Siri Mane server running on port ${PORT}`));
+  // Sprint 4: compute the morning brief once a day at the time in Settings
+  // (default 07:00 IST). Runs inside this process — no extra Railway service.
+  require('./services/assistant').startScheduler();
 }
 module.exports = app;

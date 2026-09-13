@@ -22,7 +22,8 @@ const ORDER = [
   'migrate-room-shift.js',      // guest_room_history
   'migrate-checklist.js',       // checklist_items + checklist_log (+ default tasks on first run)
   'migrate-complaints.js',      // complaints
-  'migrate-ai-inputs.js'        // Sprint 3: source columns + ai_reads cache
+  'migrate-ai-inputs.js',       // Sprint 3: source columns + ai_reads cache
+  'migrate-ai-assistant.js'     // Sprint 4: complaint priority + reminder_log
 ];
 
 let failed = false;

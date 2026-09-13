@@ -1537,7 +1537,8 @@ router.get('/complaints', auth, async (req, res) => {
     const p = [];
     let q = 'SELECT * FROM complaints';
     if (COMPLAINT_STATUSES.includes(req.query.status)) { p.push(req.query.status); q += ' WHERE status=$1'; }
-    q += ` ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END, created_at DESC`;
+    q += ` ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END,
+                    CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, created_at DESC`;
     const r = await pool.query(q, p);
     res.json(r.rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1563,10 +1564,11 @@ router.post('/complaints', auth, async (req, res) => {
       }
     }
     const r = await pool.query(
-      `INSERT INTO complaints(guest_id, guest_name, room_number, category, description, status, raised_by, created_by, source)
-       VALUES($1,$2,$3,$4,$5,'open','staff',$6,$7) RETURNING *`,
+      `INSERT INTO complaints(guest_id, guest_name, room_number, category, description, status, raised_by, created_by, source, priority)
+       VALUES($1,$2,$3,$4,$5,'open','staff',$6,$7,$8) RETURNING *`,
       [guestId, guestName, roomNumber, (category || 'Other').trim(), String(description).trim(), req.user.id,
-       ['manual','voice','photo'].includes(req.body.source) ? req.body.source : 'manual']);
+       ['manual','voice','photo'].includes(req.body.source) ? req.body.source : 'manual',
+       ['low','medium','high'].includes(req.body.priority) ? req.body.priority : require('../services/assistant').rulePriority(category || 'Other', description)]);
     await logActivity(req, 'complaint_add', `${category || 'Other'}: ${String(description).trim().slice(0, 80)}`);
     res.status(201).json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1574,8 +1576,9 @@ router.post('/complaints', auth, async (req, res) => {
 
 // PUT /complaints/:id  { status, resolution_notes? }
 router.put('/complaints/:id', auth, async (req, res) => {
-  const { status, resolution_notes } = req.body;
+  const { status, resolution_notes, priority } = req.body;
   if (!COMPLAINT_STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status' });
+  if (priority !== undefined && !['low','medium','high'].includes(priority)) return res.status(400).json({ error: 'Invalid priority' });
   try {
     const r = await pool.query(
       `UPDATE complaints
@@ -1583,9 +1586,10 @@ router.put('/complaints/:id', auth, async (req, res) => {
               resolution_notes=COALESCE($2::text, resolution_notes),
               resolved_at=CASE WHEN $1::varchar='resolved' THEN COALESCE(resolved_at, NOW()) ELSE NULL END,
               resolved_by=CASE WHEN $1::varchar='resolved' THEN COALESCE(resolved_by, $3::int) ELSE NULL END,
+              priority=COALESCE($5::varchar, priority),
               updated_at=NOW()
         WHERE id=$4::int RETURNING *`,
-      [status, resolution_notes ? String(resolution_notes).trim() : null, req.user.id, req.params.id]);
+      [status, resolution_notes ? String(resolution_notes).trim() : null, req.user.id, req.params.id, priority || null]);
     if (!r.rows[0]) return res.status(404).json({ error: 'Complaint not found' });
     await logActivity(req, 'complaint_update', `#${req.params.id} → ${status}`);
     res.json(r.rows[0]);
@@ -1610,9 +1614,10 @@ router.post('/guest-complaint', guestAuth, async (req, res) => {
     const g = req.guest;
     const room = g.room_id ? await pool.query('SELECT room_number FROM rooms WHERE id=$1', [g.room_id]) : { rows: [{}] };
     const r = await pool.query(
-      `INSERT INTO complaints(guest_id, guest_name, room_number, category, description, status, raised_by)
-       VALUES($1,$2,$3,$4,$5,'open','guest') RETURNING id, category, description, status, created_at`,
-      [g.id, g.name, room.rows[0]?.room_number || null, (category || 'Other').trim(), String(description).trim()]);
+      `INSERT INTO complaints(guest_id, guest_name, room_number, category, description, status, raised_by, priority)
+       VALUES($1,$2,$3,$4,$5,'open','guest',$6) RETURNING id, category, description, status, created_at`,
+      [g.id, g.name, room.rows[0]?.room_number || null, (category || 'Other').trim(), String(description).trim(),
+       require('../services/assistant').rulePriority(category || 'Other', description)]);
     res.status(201).json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1774,3 +1779,9 @@ router.get('/guest-receipt/:id/pdf', guestAuth, async (req, res) => {
   try { await sendReceiptPdf(res, req.params.id, { guestId: req.guest.id }); }
   catch (err) { if (!res.headersSent) res.status(500).json({ error: err.message }); }
 });
+
+// Exposed for backend/services/*.js (Sprint 4). Same functions the routes
+// use, so the brief and reminders can never disagree with Rent Due.
+module.exports.computeRentDueList = computeRentDueList;
+module.exports.computeGuestLedger = computeGuestLedger;
+module.exports.istToday = istToday;
