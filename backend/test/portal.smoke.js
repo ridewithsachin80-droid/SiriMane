@@ -40,11 +40,29 @@ async function runAtWidth(browser, BASE, width, fixtures) {
   ok(await page.$('#login-section'), `${tag} /guest serves the portal`);
   ok(await page.$('#login-remember'), `${tag} "keep me signed in" offered`);
   eq(await page.$eval('link[rel=manifest]', e => e.getAttribute('href')), '/manifest-guest.json', `${tag} portal uses its own manifest`);
+  // Installability: every icon the manifest declares must exist and really be
+  // the size it claims (Chrome silently refuses "Add to home screen" otherwise).
+  const manifest = await (await fetch(BASE + '/manifest-guest.json')).json();
+  ok(manifest.icons.some(i => i.sizes === '192x192') && manifest.icons.some(i => i.sizes === '512x512'), `${tag} manifest declares 192 and 512 icons`);
+  for (const icon of manifest.icons) {
+    const buf = Buffer.from(await (await fetch(BASE + icon.src)).arrayBuffer());
+    eq(buf.subarray(1, 4).toString(), 'PNG', `${tag} ${icon.src} is a PNG`);
+    const w = buf.readUInt32BE(16), h = buf.readUInt32BE(20);
+    eq(`${w}x${h}`, icon.sizes, `${tag} ${icon.src} is really ${icon.sizes}`);
+    eq(w, h, `${tag} ${icon.src} is square`);
+  }
+  ok(manifest.icons.some(i => i.purpose === 'maskable'), `${tag} has a maskable icon for Android`);
+  ok(manifest.start_url.startsWith('/guest'), `${tag} start_url opens the portal`);
   await page.type('#login-mobile', PHONE);
   await page.type('#login-password', PHONE);
   await page.click('#login-btn');
   await page.waitForFunction(() => !document.getElementById('portal-section').classList.contains('hidden'), { timeout: 8000 });
   ok(true, `${tag} resident logs in`);
+  const headerH = await page.$eval('.header', e => e.getBoundingClientRect().height);
+  ok(headerH < 90, `${tag} header compacts after login (${Math.round(headerH)}px)`);
+  await page.waitForSelector('.dues-hero', { timeout: 8000 });
+  const duesTop = await page.evaluate(() => document.querySelector('.dues-hero').getBoundingClientRect().top);
+  ok(duesTop < 520, `${tag} dues visible without scrolling (top ${Math.round(duesTop)}px)`);
 
   // ── Dues card is first and shows the real balance ─────────────────────
   await page.waitForSelector('.dues-hero .dues-amount', { timeout: 8000 });

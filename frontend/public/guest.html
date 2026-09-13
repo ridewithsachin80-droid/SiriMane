@@ -129,6 +129,10 @@
     .menu-day h4 { font-size:13px; font-weight:700; margin-bottom:6px; display:flex; justify-content:space-between; }
     .menu-meal { font-size:13px; color:#475569; padding:3px 0; display:flex; gap:10px; }
     .menu-meal b { flex:0 0 82px; color:#94A3B8; font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; padding-top:2px; }
+    .header.compact { padding:10px 14px; display:flex; align-items:center; gap:12px; text-align:left; }
+    .header.compact img { height:40px !important; }
+    .header.compact h1 { font-size:20px; margin:0; }
+    .header.compact p { display:none; }
     .install-bar { display:none; align-items:center; gap:10px; background:#FFFBEB; border:1px solid #FDE68A; border-radius:12px; padding:12px 14px; margin-bottom:14px; }
     .install-bar.show { display:flex; }
     .install-bar p { flex:1; font-size:13px; color:#92400E; }
@@ -430,6 +434,7 @@ document.addEventListener('keypress', e => {
 });
 
 function guestLogout() {
+  document.querySelector('.header')?.classList.remove('compact');
   sessionClear();
   guestToken = null; guestData = null;
   document.getElementById('portal-section').classList.add('hidden');
@@ -440,6 +445,7 @@ function guestLogout() {
 
 // ── SHOW PORTAL ───────────────────────────────────
 function showPortal() {
+  document.querySelector('.header')?.classList.add('compact');
   document.getElementById('login-section').classList.add('hidden');
   document.getElementById('portal-section').classList.remove('hidden');
   document.getElementById('p-name').textContent = '👤 ' + (guestData.name || '');
