@@ -475,6 +475,12 @@ router.get('/collections/export/pdf', auth, requireAdmin, async (req, res) => {
 });
 
 router.post('/collections', auth, async (req, res) => {
+  // Once a day has been counted and closed, new money cannot be backdated into
+  // it — that would silently change a figure the warden already signed off.
+  const cDate = req.body && req.body.collection_date;
+  if (cDate && await require('../services/finance').isDayClosed(cDate)) {
+    return res.status(409).json({ error: `${cDate} has been closed and counted. Reopen the day first (Admin) or record this against today.` });
+  }
   const src = ['manual','voice','photo','copilot'].includes(req.body.source) ? req.body.source : 'manual';
   const { guest_id,guest_name,amount,collection_date,collection_month,collection_type,payment_mode,description,receipt_number } = req.body;
   if (!amount) return res.status(400).json({ error: 'Amount required' });

@@ -245,7 +245,7 @@ async function runAtWidth(browser, BASE, width, fixtures) {
 }
 
 (async () => {
-  await pool.query(`TRUNCATE complaints, guest_room_history, checklist_log, collections, guest_rent_history, deposit_refunds, guests, rooms RESTART IDENTITY CASCADE`);
+  await pool.query(`TRUNCATE complaints, guest_room_history, checklist_log, collections, guest_rent_history, deposit_refunds, guests, rooms, day_closings, collection_variances RESTART IDENTITY CASCADE`);
   const server = app.listen(0);
   const BASE = `http://127.0.0.1:${server.address().port}`;
   const login = await (await fetch(BASE + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'admin', password: process.env.ADMIN_PASSWORD || 'SiriMane@2024' }) })).json();

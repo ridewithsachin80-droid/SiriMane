@@ -169,7 +169,7 @@ async function run(mode) {
 }
 
 (async () => {
-  await pool.query(`TRUNCATE complaints, guest_room_history, checklist_log, collections, purchases, guest_rent_history, deposit_refunds, guests, rooms, owner_reports, ai_proposals, ai_actions, ai_reads, announcements RESTART IDENTITY CASCADE`);
+  await pool.query(`TRUNCATE complaints, guest_room_history, checklist_log, collections, purchases, guest_rent_history, deposit_refunds, guests, rooms, owner_reports, ai_proposals, ai_actions, ai_reads, announcements, day_closings, collection_variances RESTART IDENTITY CASCADE`);
   const server = app.listen(0);
   BASE = `http://127.0.0.1:${server.address().port}`;
   try {

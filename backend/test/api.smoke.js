@@ -41,7 +41,7 @@ const uniq = Date.now().toString().slice(-6);
 async function main() {
   // Clean slate for the tables this test touches (rooms/guests/etc. from a
   // previous run would break capacity assertions).
-  await pool.query(`TRUNCATE complaints, guest_room_history, checklist_log, collections, purchases, guest_rent_history, deposit_refunds, guests, rooms, ai_proposals, ai_actions RESTART IDENTITY CASCADE`);
+  await pool.query(`TRUNCATE complaints, guest_room_history, checklist_log, collections, purchases, guest_rent_history, deposit_refunds, guests, rooms, ai_proposals, ai_actions, day_closings, collection_variances RESTART IDENTITY CASCADE`);
   await pool.query(`DELETE FROM activity_log WHERE user_id IN (SELECT id FROM users WHERE username LIKE 'smoke_%')`);
   await pool.query(`DELETE FROM users WHERE username LIKE 'smoke_%'`);
 

@@ -110,7 +110,7 @@ const api = async (method, path, body, token) => {
 };
 
 (async () => {
-  await pool.query(`TRUNCATE complaints, guest_room_history, checklist_log, collections, guest_rent_history, deposit_refunds, guests, rooms RESTART IDENTITY CASCADE`);
+  await pool.query(`TRUNCATE complaints, guest_room_history, checklist_log, collections, guest_rent_history, deposit_refunds, guests, rooms, day_closings, collection_variances RESTART IDENTITY CASCADE`);
   const server = app.listen(0);
   BASE = `http://127.0.0.1:${server.address().port}`;
   try {

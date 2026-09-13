@@ -52,7 +52,7 @@ let currentPage = null;
 function navigate(page) {
   currentPage = page;
   document.querySelectorAll('.nav-item[data-page]').forEach(b => b.classList.toggle('active', b.dataset.page===page));
-  const titles = { dashboard:'Home', rooms:'Rooms', guests:'Residents', 'daily-menu':'Daily Menu', 'daily-checklist':'Daily Checklist', complaints:'Maintenance & Requests', payments:'Payments', 'guest-messages':'Announcements', inbox:'Inbox', purchases:'Purchases', collections:'Collections', 'rent-due':'Rent Due', reports:'Reports', 'balance-sheet':'Owner & Assets', admin:'Admin', collect:'Collect Rent', reminders:'Rent Reminders', finance:'Finance', operations:'Operations' };
+  const titles = { dashboard:'Home', rooms:'Rooms', guests:'Residents', 'daily-menu':'Daily Menu', 'daily-checklist':'Daily Checklist', complaints:'Maintenance & Requests', payments:'Payments', 'guest-messages':'Announcements', inbox:'Inbox', purchases:'Purchases', collections:'Collections', 'rent-due':'Rent Due', reports:'Reports', 'balance-sheet':'Owner & Assets', admin:'Admin', collect:'Collect Rent', reminders:'Rent Reminders', finance:'Finance', operations:'Operations', 'finance-overview':'Finance' };
   document.getElementById('page-title').textContent = titles[page]||page;
   document.getElementById('topbar-actions').innerHTML = '';
   document.getElementById('sidebar').classList.remove('open');
@@ -70,7 +70,7 @@ function navigate(page) {
     const cQ = document.getElementById('copilot-q');
     if (cQ) cQ.value = '';
   }
-  const pages = { dashboard:pgHome, rooms:pgRoomMap, 'rooms-table':pgRooms, guests:pgGuests, 'daily-menu':pgMenu, 'daily-checklist':pgChecklist, complaints:pgComplaints, payments:pgPayments, 'guest-messages':pgAnnouncements, inbox:pgInbox, purchases:pgPurchases, collections:pgCollections, 'rent-due':pgRentDue, reports:pgReports, 'balance-sheet':pgBalanceSheet, admin:pgAdmin, collect:pgCollect, reminders:pgReminders, finance:pgFinance, operations:pgOperations };
+  const pages = { dashboard:pgHome, rooms:pgRoomMap, 'rooms-table':pgRooms, guests:pgGuests, 'daily-menu':pgMenu, 'daily-checklist':pgChecklist, complaints:pgComplaints, payments:pgPayments, 'guest-messages':pgAnnouncements, inbox:pgInbox, purchases:pgPurchases, collections:pgCollections, 'rent-due':pgRentDue, reports:pgReports, 'balance-sheet':pgBalanceSheet, admin:pgAdmin, collect:pgCollect, reminders:pgReminders, finance:pgFinance, operations:pgOperations, 'finance-overview':pgFinanceOverview };
   if(!pages[page]) return;
   // Error boundary: a thrown error inside any screen shows a retry card
   // instead of a blank page.
@@ -2194,12 +2194,13 @@ async function pgRentDue() {
               ${rentDueSortHeader('deposit_pending','DEPOSIT PENDING')}
               ${rentDueSortHeader('total_payable','TOTAL PAYABLE')}
               <th>STATUS</th>
-              <th>ACTION</th>
+              <th>PAYS</th><th>ACTION</th>
             </tr></thead>
             <tbody id="rentdue-tb">${renderRentDueRows(sortRentDueRows(list))}</tbody>
           </table>
         </div>
       </div>`);
+    loadReliability();
   } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
 }
 
@@ -2255,6 +2256,7 @@ function renderRentDueRows(list) {
       <td class="${depPending>0?'text-red fw-600':''}">${depPending>0?fmt(depPending):'—'}</td>
       <td class="${totalPayable>0?'text-red fw-600':''}">${totalPayable>0?fmt(totalPayable):'—'}</td>
       <td><span class="badge ${anyPending?'badge-red':'badge-green'}">${anyPending?'Pending':credit>0?'Ahead':'Settled'}</span></td>
+      <td><span data-rel-for="${g.id}"></span></td>
       <td><div class="flex gap-2">
         ${anyPending ? `<button class="btn btn-primary btn-sm" onclick="collectFrom(${g.id})" title="Collect payment">${icon('rupee')} Collect</button>` : ''}
         ${anyPending
@@ -2281,6 +2283,7 @@ function filterRentDueList() {
   );
   rows = sortRentDueRows(rows);
   document.getElementById('rentdue-tb').innerHTML = renderRentDueRows(rows);
+  loadReliability();
 }
 
 // Turns a phone number into WhatsApp's expected format: digits only, with
@@ -3004,7 +3007,7 @@ async function renderAdminAuditTab() {
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>WHEN</th><th>USER</th><th>ACTION</th><th>DETAILS</th></tr></thead>
+            <thead><tr><th>WHEN</th><th>USER</th><th>PAYS</th><th>ACTION</th><th>DETAILS</th></tr></thead>
             <tbody id="audit-tb">
               ${log.length===0
                 ? `<tr class="empty-row"><td colspan="4">${emptyState('calendar', 'No activity yet', 'Actions taken in the app will be listed here.', '')}</td></tr>`
@@ -4034,6 +4037,7 @@ const icon = (name, cls = 'ic') => `<svg class="${cls}" aria-hidden="true"><use 
 // navigates, so bookmarks, the tab bar and navigate() calls keep working.
 const NAV_GROUPS = {
   finance: { label: 'Finance', tabs: [
+    { page: 'finance-overview', label: 'Overview', admin: true },
     { page: 'collect', label: 'Collect' }, { page: 'rent-due', label: 'Rent Due' }, { page: 'payments', label: 'Payments' },
     { page: 'reminders', label: 'Reminders' }, { page: 'purchases', label: 'Expenses' }, { page: 'collections', label: 'Collections' },
     { page: 'reports', label: 'Reports' }, { page: 'balance-sheet', label: 'Owner & Assets', admin: true } ] },
@@ -4055,7 +4059,7 @@ function renderSubtabs(group, active) {
     .map(t => `<button class="subtab ${t.page === active ? 'active' : ''}" onclick="navigate('${t.page}')">${t.label}</button>`).join('')}</div>`;
 }
 // Landing on a group opens its first tab; the strip then rides above it.
-async function pgFinance() { navigate(isAdmin() ? 'collect' : 'collect'); }
+async function pgFinance() { navigate(isAdmin() ? 'finance-overview' : 'collect'); }
 async function pgOperations() { navigate('daily-checklist'); }
 // Injected by navigate() after any grouped screen renders.
 function injectSubtabs(page) {
@@ -4714,4 +4718,124 @@ async function loadMyTasks() {
       </div>`;
     host.classList.remove('hidden');
   } catch { host.classList.add('hidden'); }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   SPRINT 10 — finance intelligence: KPIs, forecast, expense insight,
+   daily cash-up. Every figure is arithmetic; the screen says how.
+   ═══════════════════════════════════════════════════════════════ */
+let financeCache = null;
+async function pgFinanceOverview() {
+  skeleton('cards');
+  document.getElementById('topbar-actions').innerHTML = '';
+  const d = await apiFetch('/finance/overview');
+  financeCache = d;
+  const k = d.kpis, f = d.forecast.collections, o = d.forecast.occupancy, e = d.expenses, t = d.today;
+  const kpi = (label, value, sub) => `<div class="money-card"><div class="m-label">${label}</div><div class="m-value">${value}</div>${sub ? `<div class="t-sub">${sub}</div>` : ''}</div>`;
+  setContent(`
+    <div class="page-header"><h1>Finance</h1><p>${new Date(k.month + '-01T00:00:00Z').toLocaleDateString('en-IN', { month: 'long', year: 'numeric', timeZone: 'UTC' })}</p></div>
+
+    <div class="home-section-h">This month</div>
+    <div class="money-grid">
+      ${kpi('Collected', fmt(k.income))}
+      ${kpi('Spent', fmt(k.expenses), k.expense_ratio_pct != null ? `${k.expense_ratio_pct}% of income` : '')}
+      ${kpi('Net', fmt(k.net_operating_income))}
+      ${kpi('Rent collected', `${k.collection_rate_pct == null ? '—' : k.collection_rate_pct + '%'}`, `${fmt(k.rent_collected)} of ${fmt(k.rent_roll)}`)}
+      ${kpi('Per occupied bed', fmt(k.revenue_per_occupied_bed))}
+      ${kpi('Occupancy', k.occupancy_pct + '%')}
+    </div>
+
+    <div class="home-section-h">Expected by month end</div>
+    <div class="card"><div style="padding:14px 16px">
+      <div class="fin-bar"><span class="collected" style="width:${Math.min(100, Math.round(f.collected * 100 / (f.target || 1)))}%"></span><span class="expected" style="width:${Math.min(100, Math.round((f.expected - f.collected) * 100 / (f.target || 1)))}%"></span></div>
+      <div class="flex" style="justify-content:space-between;font-size:13px;margin-top:8px">
+        <span>Collected <strong>${fmt(f.collected)}</strong></span>
+        <span>Expected <strong>${fmt(f.expected)}</strong></span>
+        <span>Target <strong>${fmt(f.target)}</strong></span>
+      </div>
+      ${f.shortfall ? `<p style="font-size:14px;margin-top:10px">Likely shortfall <strong class="text-amber">${fmt(f.shortfall)}</strong>. ${f.at_risk.length} resident${f.at_risk.length === 1 ? '' : 's'} usually pay late.</p>` : '<p style="font-size:14px;margin-top:10px">On track for the full month.</p>'}
+      <p class="t-sub">${f.basis}</p>
+      ${f.at_risk.length ? `<div style="margin-top:10px">${f.at_risk.slice(0, 5).map(g => `<div class="today-row"><span class="t-main"><strong>${g.name}</strong>${g.room_number ? ' · Room ' + g.room_number : ''}<div class="t-sub">${g.why}</div></span>
+        <button class="btn btn-outline btn-sm" onclick="collectFrom(${g.id})">Collect</button></div>`).join('')}
+        <button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="navigate('reminders')">Draft reminders</button></div>` : ''}
+    </div></div>
+
+    <div class="home-section-h">Occupancy outlook</div>
+    <div class="card"><div style="padding:14px 16px">
+      <div class="r360-kv"><span>Now</span><strong>${o.occupied} of ${o.beds} beds</strong></div>
+      <div class="r360-kv"><span>Next 7 days</span><strong>${o.next7.low}–${o.next7.high}</strong></div>
+      <div class="r360-kv"><span>Next 30 days</span><strong>${o.next30.low}–${o.next30.high}</strong></div>
+      ${o.avg_stay_days ? `<div class="r360-kv"><span>Average stay so far</span><strong>${Math.round(o.avg_stay_days / 30)} months</strong></div>` : ''}
+      <p class="t-sub" style="margin-top:8px">${o.basis}</p>
+    </div></div>
+
+    ${(e.duplicates.length || e.spikes.length || e.changes.length) ? `<div class="home-section-h">Worth a look</div>
+    <div class="card"><div style="padding:4px 16px">
+      ${e.duplicates.map(x => `<div class="today-row">${icon('copy')}<span class="t-main"><strong>Possible duplicate</strong><div class="t-sub">${x.note} · ${fmtDate(x.purchase_date)}</div></span><button class="btn btn-outline btn-sm" onclick="navigate('purchases')">Check</button></div>`).join('')}
+      ${e.spikes.map(x => `<div class="today-row">${icon('chart')}<span class="t-main"><strong>Unusual ${x.category}</strong><div class="t-sub">${x.note}${x.paid_to ? ' · ' + x.paid_to : ''}</div></span><button class="btn btn-outline btn-sm" onclick="navigate('purchases')">Check</button></div>`).join('')}
+      ${e.changes.slice(0, 4).map(x => `<div class="today-row">${icon(x.change_pct > 0 ? 'chart' : 'chart')}<span class="t-main"><strong>${x.category} ${x.change_pct > 0 ? 'up' : 'down'} ${Math.abs(x.change_pct)}%</strong><div class="t-sub">${fmt(x.this_month)} this month vs a usual ${fmt(x.avg_month)}</div></span></div>`).join('')}
+    </div></div>` : ''}
+
+    ${e.recurring.length ? `<div class="home-section-h">Regular bills</div>
+    <div class="card"><div style="padding:4px 16px">${e.recurring.slice(0, 6).map(x => `<div class="today-row">${icon('calendar')}<span class="t-main">${x.note}</span><span class="t-sub">${x.months} months</span></div>`).join('')}</div></div>` : ''}
+
+    <div class="home-section-h">Today's cash-up</div>
+    <div class="card" id="closing-card"><div style="padding:14px 16px">${renderClosing(t)}</div></div>
+  `);
+}
+
+function renderClosing(t) {
+  const row = (mode, label) => `
+    <div class="close-row">
+      <span class="c-label">${label}</span>
+      <span class="c-exp">Recorded ${fmt(t.expected[mode])}</span>
+      ${t.closed
+        ? `<span class="c-cnt">Counted ${fmt(t.closing.counted[mode])}</span>
+           <span class="c-diff ${t.closing.difference[mode] === 0 ? '' : t.closing.difference[mode] < 0 ? 'text-red' : 'text-amber'}">${t.closing.difference[mode] === 0 ? '✓' : (t.closing.difference[mode] > 0 ? '+' : '') + fmt(t.closing.difference[mode])}</span>`
+        : `<input type="number" inputmode="numeric" id="close-${mode}" value="${t.expected[mode] || ''}" placeholder="0"/>`}
+    </div>`;
+  if (t.closed) {
+    const diffs = ['cash', 'upi', 'bank'].filter(m => t.closing.difference[m] !== 0);
+    return `
+      <div class="r360-status"><span class="badge badge-green">Closed</span><span class="t-sub">by ${t.closing.closed_by_username || 'someone'} · ${new Date(t.closing.closed_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span></div>
+      ${row('cash', 'Cash')}${row('upi', 'UPI')}${row('bank', 'Bank')}
+      ${diffs.length ? `<p style="font-size:13px;margin-top:8px" class="text-amber">${diffs.map(m => `${m.toUpperCase()} ${t.closing.difference[m] > 0 ? 'over' : 'short'} by ${fmt(Math.abs(t.closing.difference[m]))}`).join(' · ')} — recorded as a variance, nothing was changed.</p>` : '<p style="font-size:13px;margin-top:8px" class="text-green">Everything matched.</p>'}
+      ${t.closing.note ? `<p class="t-sub">"${t.closing.note}"</p>` : ''}
+      ${isAdmin() ? `<button class="btn btn-outline btn-sm" style="margin-top:10px" onclick="reopenDay('${t.date}')">Reopen the day</button>` : ''}`;
+  }
+  return `
+    <p class="t-sub" style="margin-bottom:10px">Count what you actually hold and enter it. Nothing recorded today is changed — a difference is kept as a variance.</p>
+    ${row('cash', 'Cash')}${row('upi', 'UPI')}${row('bank', 'Bank')}
+    ${t.pending_not_counted.n ? `<p style="font-size:13px" class="text-amber">${t.pending_not_counted.n} payment${t.pending_not_counted.n === 1 ? '' : 's'} (${fmt(t.pending_not_counted.total)}) still waiting for confirmation — not included above.</p>` : ''}
+    <div class="form-group" style="margin-top:8px"><label>Note (optional)</label><input id="close-note" placeholder="e.g. 200 short, checking with the cook"/></div>
+    <button class="btn btn-primary" style="width:100%" onclick="closeDay('${t.date}')">Close the day</button>
+    <div id="close-alert" class="alert alert-danger hidden" style="margin-top:10px"></div>`;
+}
+async function closeDay(date) {
+  const v = id => Number(document.getElementById(id)?.value || 0);
+  try {
+    const r = await apiFetch('/day-closing', { method: 'POST', body: { date, counted: { cash: v('close-cash'), upi: v('close-upi'), bank: v('close-bank') }, note: document.getElementById('close-note')?.value.trim() || undefined } });
+    toast(r.variances.length ? `Day closed with ${r.variances.length} variance` : 'Day closed — everything matched', 'ok');
+    pgFinanceOverview();
+  } catch (e) { const a = document.getElementById('close-alert'); if (a) showAlert(a, e.message); else toast(e.message); }
+}
+async function reopenDay(date) {
+  if (!confirm('Reopen this day? New entries will be allowed against it again.')) return;
+  try { await apiFetch('/day-closing/reopen', { method: 'POST', body: { date } }); toast('Day reopened', 'ok'); pgFinanceOverview(); }
+  catch (e) { toast(e.message); }
+}
+
+// Reliability shown beside each resident on Rent Due.
+let reliabilityCache = null;
+async function loadReliability() {
+  try { reliabilityCache = await apiFetch('/finance/reliability'); } catch { reliabilityCache = []; }
+  const map = new Map(reliabilityCache.map(r => [r.id, r]));
+  document.querySelectorAll('[data-rel-for]').forEach(el => {
+    const r = map.get(Number(el.dataset.relFor));
+    if (!r) return;
+    const label = { high: 'usually on time', medium: 'sometimes late', at_risk: 'often late', new: 'new resident' }[r.level];
+    const cls = { high: 'badge-green', medium: 'badge-amber', at_risk: 'badge-red', new: 'badge-gray' }[r.level];
+    el.innerHTML = `<span class="badge ${cls}" title="${r.why}">${label}</span>`;
+  });
 }

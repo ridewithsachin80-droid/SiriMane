@@ -858,12 +858,48 @@ async function runAtWidth(browser, BASE, width) {
   const cardShown = await page.$eval('#mytasks-card', e => !e.classList.contains('hidden')).catch(() => false);
   ok(cardShown === (myTasks.checklist.items.some(i => !i.is_checked) || myTasks.requests.length > 0), `${tag} "My day" card appears only when there is something in it`);
 
+  // ── Sprint 10: finance overview, cash-up, reliability ──────────────────
+  await page.evaluate(() => navigate('finance'));
+  await page.waitForSelector('.fin-bar', { timeout: 15000 });
+  const finTxt = await page.$eval('#page-content', e => e.textContent);
+  const finApi = await page.evaluate(() => apiFetch('/finance/overview'));
+  ok(finTxt.includes(String(finApi.kpis.occupancy_pct) + '%'), `${tag} KPI occupancy shown`);
+  ok(/Expected by month end/.test(finTxt), `${tag} forecast section shown`);
+  ok(finTxt.includes(finApi.forecast.collections.basis.slice(0, 30)), `${tag} the forecast states its method on screen`);
+  ok(/Today's cash-up/.test(finTxt), `${tag} cash-up section shown`);
+  await page.screenshot({ path: path.join(SHOTS, `finance-${width}.png`) });
+  await noHScroll('finance');
+  // Close the day and prove nothing moved
+  const beforeRows = (await page.evaluate(() => apiFetch('/collections'))).length;
+  const beforeDue = JSON.stringify(await page.evaluate(() => apiFetch('/rent-due')));
+  if (await page.$('#close-cash')) {
+    await page.evaluate(() => { document.getElementById('close-cash').value = 1; });
+    await page.evaluate(d => closeDay(d), finApi.today.date);
+    await page.waitForFunction(() => /Closed/.test(document.querySelector('#closing-card')?.textContent || ''), { timeout: 12000 });
+    ok(true, `${tag} day can be closed from the screen`);
+    eq((await page.evaluate(() => apiFetch('/collections'))).length, beforeRows, `${tag} MONEY: closing changed no collection`);
+    eq(JSON.stringify(await page.evaluate(() => apiFetch('/rent-due'))), beforeDue, `${tag} MONEY: closing changed no ledger`);
+    ok(await page.$eval('#closing-card', e => /variance|matched/i.test(e.textContent)), `${tag} the difference is explained`);
+    // A closed day refuses new entries by design, so reopen it for the rest of
+    // the run (and for the next viewport).
+    await page.evaluate(d => apiFetch('/day-closing/reopen', { method: 'POST', body: { date: d } }), finApi.today.date);
+    const reopened = await page.evaluate(() => apiFetch('/day-closing'));
+    eq(reopened.closed, false, `${tag} admin reopening restores normal entry`);
+  }
+  // Reliability badges on Rent Due
+  await page.evaluate(() => navigate('rent-due'));
+  await page.waitForFunction(() => document.querySelector('#rentdue-tb tr'), { timeout: 12000 });
+  await page.waitForFunction(() => document.querySelector('[data-rel-for] .badge'), { timeout: 12000 });
+  const relTxt = await page.$$eval('[data-rel-for] .badge', els => els.map(e => e.textContent));
+  ok(relTxt.length >= 1, `${tag} reliability badge per resident (${relTxt[0]})`);
+  ok(relTxt.every(t => /on time|late|new resident/.test(t)), `${tag} badges read as plain words, not scores`);
+
   eq(jsErrors.length, 0, `${tag} no uncaught JS errors (${jsErrors.join('; ')})`);
   await page.close(); await ctx.close();
 }
 
 (async () => {
-  await pool.query(`TRUNCATE complaints, guest_room_history, checklist_log, collections, guest_rent_history, deposit_refunds, guests, rooms RESTART IDENTITY CASCADE`);
+  await pool.query(`TRUNCATE complaints, guest_room_history, checklist_log, collections, guest_rent_history, deposit_refunds, guests, rooms, day_closings, collection_variances RESTART IDENTITY CASCADE`);
   const server = app.listen(0);
   const BASE = `http://127.0.0.1:${server.address().port}`;
   // Fixtures via API: two rooms, one guest, one confirmed collection

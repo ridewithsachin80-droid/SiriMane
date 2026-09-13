@@ -26,7 +26,7 @@ const A_ = (m, p, b) => api(m, p, b, adminTok);
 const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
 
 (async () => {
-  await pool.query(`TRUNCATE reminder_log, ai_reads, complaints, guest_room_history, checklist_log, collections, guest_rent_history, deposit_refunds, guests, rooms RESTART IDENTITY CASCADE`);
+  await pool.query(`TRUNCATE reminder_log, ai_reads, complaints, guest_room_history, checklist_log, collections, guest_rent_history, deposit_refunds, guests, rooms, day_closings, collection_variances RESTART IDENTITY CASCADE`);
   await pool.query(`DELETE FROM app_settings WHERE key IN ('brief_time','owner_phone','reminder_lang')`);
   const server = app.listen(0);
   BASE = `http://127.0.0.1:${server.address().port}`;

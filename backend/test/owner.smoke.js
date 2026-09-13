@@ -37,7 +37,7 @@ const thisMonth = istToday().slice(0, 7);
 const monthAgo = (n) => { const d = new Date(Date.now() + 5.5 * 3600 * 1000); d.setUTCMonth(d.getUTCMonth() - n); return d.toISOString().slice(0, 10); };
 
 (async () => {
-  await pool.query(`TRUNCATE complaints, guest_room_history, checklist_log, collections, purchases, guest_rent_history, deposit_refunds, guests, rooms, owner_reports, fixed_assets, capital_transactions, ai_reads RESTART IDENTITY CASCADE`);
+  await pool.query(`TRUNCATE complaints, guest_room_history, checklist_log, collections, purchases, guest_rent_history, deposit_refunds, guests, rooms, owner_reports, fixed_assets, capital_transactions, ai_reads, day_closings, collection_variances RESTART IDENTITY CASCADE`);
   const server = app.listen(0);
   BASE = `http://127.0.0.1:${server.address().port}`;
   try {
