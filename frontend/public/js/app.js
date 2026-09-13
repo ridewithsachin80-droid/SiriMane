@@ -57,8 +57,38 @@ function navigate(page) {
   document.getElementById('topbar-actions').innerHTML = '';
   document.getElementById('sidebar').classList.remove('open');
   const pages = { dashboard:pgDashboard, rooms:pgRooms, guests:pgGuests, 'daily-menu':pgMenu, 'daily-checklist':pgChecklist, complaints:pgComplaints, payments:pgPayments, 'guest-messages':pgAnnouncements, inbox:pgInbox, purchases:pgPurchases, collections:pgCollections, 'rent-due':pgRentDue, reports:pgReports, 'balance-sheet':pgBalanceSheet, admin:pgAdmin };
-  if(pages[page]) pages[page]();
+  if(!pages[page]) return;
+  // Error boundary: a thrown error inside any screen shows a retry card
+  // instead of a blank page.
+  Promise.resolve().then(() => pages[page]()).catch(e => {
+    console.error(e);
+    setContent(`<div class="card" style="padding:32px;text-align:center">
+      <div style="font-size:32px">⚠️</div>
+      <h3 style="margin:10px 0 6px">This screen could not load</h3>
+      <p class="text-muted" style="margin-bottom:16px">${(e && e.message) ? e.message : 'Unexpected error'}</p>
+      <button class="btn btn-primary" onclick="navigate('${page}')">↻ Retry</button>
+    </div>`);
+  });
 }
+
+// Small bottom toast for errors that happen outside a screen's own try/catch
+// (background badge refreshes, unhandled promise rejections, etc.).
+let toastTimer = null;
+function toast(msg, type='error') {
+  let el = document.getElementById('sm-toast');
+  if (!el) { el = document.createElement('div'); el.id = 'sm-toast'; document.body.appendChild(el); }
+  el.className = 'sm-toast sm-toast-' + type;
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 4000);
+}
+window.addEventListener('unhandledrejection', e => {
+  const msg = e.reason && e.reason.message ? e.reason.message : 'Something went wrong';
+  toast(msg);
+});
+window.addEventListener('offline', () => toast('You are offline — changes will not save until the connection returns'));
+window.addEventListener('online', () => toast('Back online', 'ok'));
 
 async function loadInboxCount() {
   try {

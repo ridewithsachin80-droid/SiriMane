@@ -1374,3 +1374,383 @@ router.post('/guest-upi-claim', guestAuth, async (req, res) => {
     res.status(201).json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SPRINT 0 (Sep 2026) — routes the frontend already calls but that were
+// missing from the deployed backend: Daily Checklist, Complaint / Maintenance
+// Register, Room Shift history, and the A5 payment receipt PDF.
+// Tables come from migrate-checklist.js, migrate-complaints.js and
+// migrate-room-shift.js (run `node backend/scripts/migrate-all.js`).
+// ═══════════════════════════════════════════════════════════════════════════
+
+const path = require('path');
+const fs = require('fs');
+const LOGO_PATH = path.join(__dirname, '..', 'assets', 'siri-mane-logo.jpg');
+
+// IST calendar date "YYYY-MM-DD" — the server runs in UTC on Railway, but the
+// warden's "today" is Indian time. Every date default below uses this.
+function istToday() {
+  return new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+const isIsoDate = s => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+const isYearMonth = s => typeof s === 'string' && /^\d{4}-\d{2}$/.test(s);
+const CHECKLIST_SECTIONS = ['Morning', 'Mid-Day', 'Evening', 'Night', 'Closing'];
+const COMPLAINT_STATUSES = ['open', 'in_progress', 'resolved'];
+
+// ── DAILY WARDEN CHECKLIST ───────────────────────────────────────────────────
+
+// GET /checklist?date=YYYY-MM-DD  → { date, summary:{checked,total,percent}, sections:[{label,items:[...]}] }
+router.get('/checklist', auth, async (req, res) => {
+  try {
+    const date = isIsoDate(req.query.date) ? req.query.date : istToday();
+    const r = await pool.query(
+      `SELECT i.id, i.section, i.time_label, i.task, i.sort_order,
+              COALESCE(l.is_checked,false) AS is_checked, l.checked_at,
+              u.username AS checked_by_username
+         FROM checklist_items i
+         LEFT JOIN checklist_log l ON l.item_id=i.id AND l.log_date=$1
+         LEFT JOIN users u ON u.id=l.checked_by
+        WHERE i.is_active=true
+        ORDER BY i.sort_order, i.id`, [date]);
+    const bySection = {};
+    for (const s of CHECKLIST_SECTIONS) bySection[s] = [];
+    for (const row of r.rows) {
+      if (!bySection[row.section]) bySection[row.section] = [];
+      bySection[row.section].push(row);
+    }
+    const sections = Object.keys(bySection)
+      .filter(label => CHECKLIST_SECTIONS.includes(label) || bySection[label].length > 0)
+      .map(label => ({ label, items: bySection[label] }));
+    const total = r.rows.length;
+    const checked = r.rows.filter(x => x.is_checked).length;
+    res.json({ date, summary: { checked, total, percent: total ? Math.round(checked * 100 / total) : 0 }, sections });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /checklist/summary?month=YYYY-MM   (or ?days=30)  → [{date,checked,total,percent}]
+// Must be declared before /checklist/:itemId so "summary" isn't read as an id.
+router.get('/checklist/summary', auth, async (req, res) => {
+  try {
+    let where, params;
+    if (isYearMonth(req.query.month)) {
+      where = `l.log_date >= $1::date AND l.log_date < ($1::date + INTERVAL '1 month')`;
+      params = [req.query.month + '-01'];
+    } else {
+      const days = Math.min(Math.max(parseInt(req.query.days) || 30, 1), 366);
+      where = `l.log_date >= ($1::date - ($2 || ' days')::interval) AND l.log_date <= $1::date`;
+      params = [istToday(), String(days)];
+    }
+    const [logs, totalRow] = await Promise.all([
+      pool.query(`SELECT l.log_date::text AS date, COUNT(*) FILTER (WHERE l.is_checked) AS checked
+                    FROM checklist_log l JOIN checklist_items i ON i.id=l.item_id AND i.is_active=true
+                   WHERE ${where} GROUP BY l.log_date ORDER BY l.log_date DESC`, params),
+      pool.query(`SELECT COUNT(*) AS total FROM checklist_items WHERE is_active=true`)
+    ]);
+    const total = parseInt(totalRow.rows[0].total) || 0;
+    res.json(logs.rows.map(x => {
+      const checked = parseInt(x.checked) || 0;
+      return { date: x.date, checked, total, percent: total ? Math.round(checked * 100 / total) : 0 };
+    }));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// PUT /checklist/:itemId  { date, checked }  — tick / untick one task for a day
+router.put('/checklist/:itemId', auth, async (req, res) => {
+  try {
+    const itemId = parseInt(req.params.itemId);
+    const date = isIsoDate(req.body.date) ? req.body.date : istToday();
+    const checked = !!req.body.checked;
+    if (!itemId) return res.status(400).json({ error: 'Invalid item' });
+    if (date > istToday()) return res.status(400).json({ error: 'Cannot tick a future date' });
+    const item = await pool.query('SELECT id, task FROM checklist_items WHERE id=$1 AND is_active=true', [itemId]);
+    if (!item.rows[0]) return res.status(404).json({ error: 'Task not found' });
+    const r = await pool.query(
+      `INSERT INTO checklist_log(item_id, log_date, is_checked, checked_by, checked_at)
+       VALUES($1::int,$2::date,$3::boolean,$4::int,CASE WHEN $3::boolean THEN NOW() ELSE NULL END)
+       ON CONFLICT (item_id, log_date) DO UPDATE
+         SET is_checked=EXCLUDED.is_checked,
+             checked_by=CASE WHEN EXCLUDED.is_checked THEN EXCLUDED.checked_by ELSE NULL END,
+             checked_at=CASE WHEN EXCLUDED.is_checked THEN NOW() ELSE NULL END
+       RETURNING *`, [itemId, date, checked, req.user.id]);
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Checklist task definitions (admin manages; staff can read)
+router.get('/checklist-items', auth, async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM checklist_items WHERE is_active=true ORDER BY sort_order, id');
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/checklist-items', auth, requireAdmin, async (req, res) => {
+  const { section, time_label, task } = req.body;
+  if (!task || !String(task).trim()) return res.status(400).json({ error: 'Task is required' });
+  if (!CHECKLIST_SECTIONS.includes(section)) return res.status(400).json({ error: 'Invalid section' });
+  try {
+    const next = await pool.query('SELECT COALESCE(MAX(sort_order),0)+1 AS n FROM checklist_items');
+    const r = await pool.query(
+      `INSERT INTO checklist_items(section, time_label, task, sort_order) VALUES($1,$2,$3,$4) RETURNING *`,
+      [section, (time_label || '—').trim() || '—', String(task).trim(), next.rows[0].n]);
+    await logActivity(req, 'checklist_item_add', `${section}: ${task}`);
+    res.status(201).json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.put('/checklist-items/:id', auth, requireAdmin, async (req, res) => {
+  const { section, time_label, task } = req.body;
+  if (!task || !String(task).trim()) return res.status(400).json({ error: 'Task is required' });
+  if (section && !CHECKLIST_SECTIONS.includes(section)) return res.status(400).json({ error: 'Invalid section' });
+  try {
+    const r = await pool.query(
+      `UPDATE checklist_items SET section=COALESCE($1,section), time_label=$2, task=$3 WHERE id=$4 AND is_active=true RETURNING *`,
+      [section || null, (time_label || '—').trim() || '—', String(task).trim(), req.params.id]);
+    if (!r.rows[0]) return res.status(404).json({ error: 'Task not found' });
+    await logActivity(req, 'checklist_item_edit', `#${req.params.id}: ${task}`);
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// "Delete" is a soft-delete so past days' ticks keep their history.
+router.delete('/checklist-items/:id', auth, requireAdmin, async (req, res) => {
+  try {
+    const r = await pool.query('UPDATE checklist_items SET is_active=false WHERE id=$1 AND is_active=true RETURNING task', [req.params.id]);
+    if (!r.rows[0]) return res.status(404).json({ error: 'Task not found' });
+    await logActivity(req, 'checklist_item_remove', r.rows[0].task);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── COMPLAINT / MAINTENANCE REGISTER ─────────────────────────────────────────
+
+// GET /complaints?status=open|in_progress|resolved
+router.get('/complaints', auth, async (req, res) => {
+  try {
+    const p = [];
+    let q = 'SELECT * FROM complaints';
+    if (COMPLAINT_STATUSES.includes(req.query.status)) { p.push(req.query.status); q += ' WHERE status=$1'; }
+    q += ` ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END, created_at DESC`;
+    const r = await pool.query(q, p);
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /complaints  { category, description, guest_name? }  (staff logging an issue seen on rounds)
+router.post('/complaints', auth, async (req, res) => {
+  const { category, description, guest_name } = req.body;
+  if (!description || !String(description).trim()) return res.status(400).json({ error: 'Description is required' });
+  try {
+    // The form has one free-text "Room / Guest" box. If it matches an active
+    // guest by name we link the record; if it looks like "Room 12" we keep the
+    // room number; otherwise it's stored as typed.
+    let guestId = null, guestName = guest_name ? String(guest_name).trim() : null, roomNumber = null;
+    if (guestName) {
+      const m = guestName.match(/^room\s*([a-z0-9-]+)$/i);
+      if (m) { roomNumber = m[1]; guestName = null; }
+      else {
+        const g = await pool.query(
+          `SELECT g.id, g.name, r.room_number FROM guests g LEFT JOIN rooms r ON r.id=g.room_id
+            WHERE g.is_active=true AND LOWER(g.name)=LOWER($1) LIMIT 1`, [guestName]);
+        if (g.rows[0]) { guestId = g.rows[0].id; guestName = g.rows[0].name; roomNumber = g.rows[0].room_number; }
+      }
+    }
+    const r = await pool.query(
+      `INSERT INTO complaints(guest_id, guest_name, room_number, category, description, status, raised_by, created_by)
+       VALUES($1,$2,$3,$4,$5,'open','staff',$6) RETURNING *`,
+      [guestId, guestName, roomNumber, (category || 'Other').trim(), String(description).trim(), req.user.id]);
+    await logActivity(req, 'complaint_add', `${category || 'Other'}: ${String(description).trim().slice(0, 80)}`);
+    res.status(201).json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// PUT /complaints/:id  { status, resolution_notes? }
+router.put('/complaints/:id', auth, async (req, res) => {
+  const { status, resolution_notes } = req.body;
+  if (!COMPLAINT_STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status' });
+  try {
+    const r = await pool.query(
+      `UPDATE complaints
+          SET status=$1::varchar,
+              resolution_notes=COALESCE($2::text, resolution_notes),
+              resolved_at=CASE WHEN $1::varchar='resolved' THEN COALESCE(resolved_at, NOW()) ELSE NULL END,
+              resolved_by=CASE WHEN $1::varchar='resolved' THEN COALESCE(resolved_by, $3::int) ELSE NULL END,
+              updated_at=NOW()
+        WHERE id=$4::int RETURNING *`,
+      [status, resolution_notes ? String(resolution_notes).trim() : null, req.user.id, req.params.id]);
+    if (!r.rows[0]) return res.status(404).json({ error: 'Complaint not found' });
+    await logActivity(req, 'complaint_update', `#${req.params.id} → ${status}`);
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.delete('/complaints/:id', auth, requireAdmin, async (req, res) => {
+  try {
+    const r = await pool.query('DELETE FROM complaints WHERE id=$1 RETURNING category, description', [req.params.id]);
+    if (!r.rows[0]) return res.status(404).json({ error: 'Complaint not found' });
+    await logActivity(req, 'complaint_delete', `#${req.params.id} ${r.rows[0].category}: ${r.rows[0].description.slice(0, 60)}`);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Resident portal: raise an issue / see my issues (guest JWT, not staff JWT)
+router.post('/guest-complaint', guestAuth, async (req, res) => {
+  const { category, description } = req.body;
+  if (!description || !String(description).trim()) return res.status(400).json({ error: 'Please describe the issue' });
+  if (String(description).length > 2000) return res.status(400).json({ error: 'Description too long' });
+  try {
+    const g = req.guest;
+    const room = g.room_id ? await pool.query('SELECT room_number FROM rooms WHERE id=$1', [g.room_id]) : { rows: [{}] };
+    const r = await pool.query(
+      `INSERT INTO complaints(guest_id, guest_name, room_number, category, description, status, raised_by)
+       VALUES($1,$2,$3,$4,$5,'open','guest') RETURNING id, category, description, status, created_at`,
+      [g.id, g.name, room.rows[0]?.room_number || null, (category || 'Other').trim(), String(description).trim()]);
+    res.status(201).json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.get('/guest-complaints', guestAuth, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT id, category, description, status, resolution_notes, created_at, resolved_at
+         FROM complaints WHERE guest_id=$1 ORDER BY created_at DESC LIMIT 50`, [req.guest.id]);
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── ROOM SHIFT (internal move, not a checkout) ───────────────────────────────
+
+router.get('/guests/:id/room-history', auth, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT h.*, u.username AS changed_by_username
+         FROM guest_room_history h LEFT JOIN users u ON u.id=h.changed_by
+        WHERE h.guest_id=$1 ORDER BY h.effective_from DESC, h.id DESC`, [req.params.id]);
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /guests/:id/shift-room  { room_id, bed_number?, effective_from, note? }
+// Moves the guest and records the move. Rent, deposit and ledger are untouched:
+// a room shift never changes money. (Rent changes go through PUT /guests/:id.)
+router.post('/guests/:id/shift-room', auth, async (req, res) => {
+  const { room_id, bed_number, effective_from, note } = req.body;
+  if (!room_id) return res.status(400).json({ error: 'Select the new room' });
+  if (!isIsoDate(effective_from)) return res.status(400).json({ error: 'Effective date is required' });
+  if (effective_from > istToday()) return res.status(400).json({ error: 'Effective date cannot be in the future' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const g = await client.query(
+      `SELECT g.*, (SELECT room_number FROM rooms WHERE id=g.room_id) AS room_number FROM guests g WHERE g.id=$1 FOR UPDATE OF g`, [req.params.id]);
+    const guest = g.rows[0];
+    if (!guest) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Guest not found' }); }
+    if (!guest.is_active) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Guest has already checked out' }); }
+    if (String(guest.room_id) === String(room_id)) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Guest is already in that room' }); }
+    if (guest.join_date && effective_from < new Date(guest.join_date).toISOString().slice(0, 10)) {
+      await client.query('ROLLBACK'); return res.status(400).json({ error: 'Effective date is before the guest joined' });
+    }
+    const room = await client.query(
+      `SELECT r.id, r.room_number, r.total_beds, COUNT(g.id) AS occupied
+         FROM rooms r LEFT JOIN guests g ON g.room_id=r.id AND g.is_active=true
+        WHERE r.id=$1 AND r.is_active=true GROUP BY r.id`, [room_id]);
+    const target = room.rows[0];
+    if (!target) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Room not found' }); }
+    if (parseInt(target.occupied) >= parseInt(target.total_beds)) {
+      await client.query('ROLLBACK'); return res.status(400).json({ error: `Room ${target.room_number} is full` });
+    }
+    const hist = await client.query(
+      `INSERT INTO guest_room_history(guest_id, from_room_number, from_bed_number, to_room_id, to_room_number, to_bed_number, effective_from, changed_by, note)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [guest.id, guest.room_number || null, guest.bed_number || null, target.id, target.room_number,
+       bed_number ? String(bed_number) : null, effective_from, req.user.id, note ? String(note).trim() || null : null]);
+    const upd = await client.query(
+      'UPDATE guests SET room_id=$1, bed_number=$2 WHERE id=$3 RETURNING *',
+      [target.id, bed_number ? String(bed_number) : null, guest.id]);
+    await client.query('COMMIT');
+    await logActivity(req, 'guest_room_shift',
+      `${guest.name}: Room ${guest.room_number || '—'} → Room ${target.room_number}${bed_number ? ' / Bed ' + bed_number : ''} (from ${effective_from})`);
+    res.json({ guest: upd.rows[0], history: hist.rows[0] });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    res.status(500).json({ error: err.message });
+  } finally { client.release(); }
+});
+
+// ── PAYMENT RECEIPT (A5 PDF) ─────────────────────────────────────────────────
+
+// GET /collections/:id/receipt/pdf — branded receipt for one confirmed collection.
+// Pending (staff-unapproved or guest-claimed) payments have no receipt yet:
+// a receipt is a promise that money was received and verified.
+router.get('/collections/:id/receipt/pdf', auth, async (req, res) => {
+  try {
+    const [c, s] = await Promise.all([
+      pool.query(
+        `SELECT c.*, g.name AS gname, g.phone AS gphone, r.room_number, u.username AS collected_by
+           FROM collections c LEFT JOIN guests g ON g.id=c.guest_id LEFT JOIN rooms r ON r.id=g.room_id
+           LEFT JOIN users u ON u.id=c.created_by
+          WHERE c.id=$1 AND c.is_deleted=false`, [req.params.id]),
+      pool.query(`SELECT key, value FROM app_settings WHERE key IN ('pg_name','pg_address','pg_phone','upi_vpa')`)
+    ]);
+    const col = c.rows[0];
+    if (!col) return res.status(404).json({ error: 'Payment not found' });
+    if (col.status && col.status !== 'confirmed') {
+      return res.status(400).json({ error: 'Receipt is available only after the payment is confirmed' });
+    }
+    const settings = Object.fromEntries(s.rows.map(x => [x.key, x.value]));
+    const pgName = settings.pg_name || 'Siri Mane PG';
+    const pgAddress = settings.pg_address || 'Tumakuru, Karnataka';
+    const pgPhone = settings.pg_phone || '';
+    const receiptNo = col.receipt_number || `SM-${String(col.id).padStart(5, '0')}`;
+    const guestName = col.gname || col.guest_name || '—';
+    const typeLabel = { rent: 'Rent', deposit: 'Security Deposit', advance: 'Advance' }[col.collection_type] || (col.collection_type || 'Payment');
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="receipt-${receiptNo}.pdf"`);
+    const doc = new PDFDocument({ size: 'A5', margin: 32 });
+    doc.pipe(res);
+    const W = doc.page.width - 64; // usable width
+    const gold = '#C9A96E', ink = '#1E293B', muted = '#64748B';
+
+    // Header
+    if (fs.existsSync(LOGO_PATH)) { try { doc.image(LOGO_PATH, 32, 28, { width: 70 }); } catch { /* logo optional */ } }
+    doc.fillColor(ink).font('Helvetica-Bold').fontSize(16).text(pgName, 112, 30, { width: W - 80 });
+    doc.font('Helvetica').fontSize(8.5).fillColor(muted).text(pgAddress, 112, 50, { width: W - 80 });
+    if (pgPhone) doc.text('Ph: ' + pgPhone, 112, 62, { width: W - 80 });
+    doc.moveTo(32, 84).lineTo(32 + W, 84).lineWidth(1.2).strokeColor(gold).stroke();
+
+    doc.fillColor(ink).font('Helvetica-Bold').fontSize(13).text('PAYMENT RECEIPT', 32, 94, { width: W, align: 'center' });
+    doc.font('Helvetica').fontSize(9).fillColor(muted)
+      .text(`Receipt No: ${receiptNo}`, 32, 112, { width: W / 2 })
+      .text(`Date: ${fmtD(col.collection_date)}`, 32 + W / 2, 112, { width: W / 2, align: 'right' });
+
+    // Detail rows
+    const rows = [
+      ['Received from', guestName],
+      ['Room', col.room_number ? `Room ${col.room_number}` : '—'],
+      ['Towards', typeLabel + (col.collection_month ? ` — ${col.collection_month}` : '')],
+      ['Payment mode', (col.payment_mode || 'cash').toUpperCase()],
+      ['Description', col.description || '—']
+    ];
+    let y = 136;
+    for (const [k, v] of rows) {
+      doc.font('Helvetica').fontSize(9).fillColor(muted).text(k, 32, y, { width: 90 });
+      doc.font('Helvetica-Bold').fontSize(9.5).fillColor(ink).text(String(v), 126, y, { width: W - 94 });
+      y += Math.max(18, doc.heightOfString(String(v), { width: W - 94 }) + 8);
+    }
+
+    // Amount box
+    y += 6;
+    doc.rect(32, y, W, 40).fillAndStroke('#FBF7EE', gold);
+    doc.fillColor(muted).font('Helvetica').fontSize(9).text('AMOUNT RECEIVED', 44, y + 8);
+    doc.fillColor(ink).font('Helvetica-Bold').fontSize(18).text(fmtMoney(col.amount), 44, y + 18, { width: W - 24, align: 'right' });
+    y += 54;
+
+    doc.font('Helvetica').fontSize(8.5).fillColor(muted)
+      .text(`Received by: ${col.collected_by || 'Management'}`, 32, y, { width: W });
+    y += 14;
+    doc.text('This is a computer-generated receipt and does not require a signature.', 32, y, { width: W });
+    doc.text('Thank you for your payment.', 32, doc.page.height - 56, { width: W, align: 'center' });
+    doc.end();
+  } catch (err) { if (!res.headersSent) res.status(500).json({ error: err.message }); }
+});

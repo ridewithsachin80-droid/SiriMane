@@ -2,7 +2,17 @@
 const API_BASE = '/api';
 function getToken() { return localStorage.getItem('sm_token'); }
 function setToken(t) { localStorage.setItem('sm_token', t); }
-function clearAuth() { localStorage.removeItem('sm_token'); localStorage.removeItem('sm_user'); window.location.href = '/index.html'; }
+function clearAuth() { localStorage.removeItem('sm_token'); localStorage.removeItem('sm_user'); window.location.href = '/management.html'; }
+
+// Turns any HTTP response into JSON safely. A non-JSON body (e.g. an HTML
+// error page from the proxy, or an empty 502) becomes a readable message
+// instead of "Unexpected token '<'".
+async function readJson(res) {
+  const text = await res.text();
+  if (!text) return {};
+  try { return JSON.parse(text); }
+  catch { return { error: res.ok ? 'Unexpected response from server' : `Server error (${res.status})` }; }
+}
 
 async function apiFetch(endpoint, options = {}) {
   const token = getToken();
@@ -11,8 +21,10 @@ async function apiFetch(endpoint, options = {}) {
     ...options
   };
   if (options.body && typeof options.body === 'object') config.body = JSON.stringify(options.body);
-  const res = await fetch(`${API_BASE}${endpoint}`, config);
-  const data = await res.json();
+  let res;
+  try { res = await fetch(`${API_BASE}${endpoint}`, config); }
+  catch { throw new Error('No connection. Check your internet and try again.'); }
+  const data = await readJson(res);
   if (res.status === 401) {
     if (endpoint === '/auth/login') {
       throw new Error(data.error || 'Invalid credentials');
@@ -20,7 +32,8 @@ async function apiFetch(endpoint, options = {}) {
     clearAuth();
     return;
   }
-  if (!res.ok) throw new Error(data.error || 'Request failed');
+  if (res.status === 429) throw new Error(data.error || 'Too many requests. Please wait a minute and try again.');
+  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
 }
 
@@ -100,9 +113,13 @@ const API = {
 API.downloadExport = async function(path, filename) {
   const res = await fetch('/api' + path, { headers: { 'Authorization': 'Bearer ' + getToken() } });
   if (!res.ok) {
-    const err = await res.json().catch(()=>({error:'Export failed'}));
+    const err = await readJson(res).catch(()=>({error:'Export failed'}));
     throw new Error(err.error || 'Export failed');
   }
+  // Guard against a non-PDF/CSV body being saved with a .pdf name (this is
+  // exactly what happened when the receipt route was missing).
+  const ct = res.headers.get('content-type') || '';
+  if (/text\/html/i.test(ct)) throw new Error('Server returned a web page instead of a file');
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

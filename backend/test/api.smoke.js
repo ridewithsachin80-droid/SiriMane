@@ -1,0 +1,195 @@
+// backend/test/api.smoke.js
+// Sprint 0 API gate. Runs against a REAL Postgres (rebuilt from the migration
+// scripts) and a real Express server started in-process. No test framework,
+// no extra dependencies — plain Node 20 fetch + assert.
+//
+//   DATABASE_URL=postgres://postgres@127.0.0.1:5434/sirimane_test \
+//   JWT_SECRET=test node backend/test/api.smoke.js
+//
+// Prints one line per assertion group and the total assertion count at the end.
+// Exit code 1 on any failure. Never run this against the production database:
+// it inserts rooms, guests, complaints and collections.
+const assert = require('assert');
+
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret';
+process.env.NODE_ENV = process.env.NODE_ENV || 'test';
+if (!process.env.DATABASE_URL) { console.error('DATABASE_URL is required'); process.exit(1); }
+
+const app = require('../server');
+const pool = require('../db');
+
+let count = 0;
+const ok = (cond, msg) => { assert.ok(cond, msg); count++; };
+const eq = (a, b, msg) => { assert.strictEqual(a, b, `${msg} (got ${JSON.stringify(a)}, expected ${JSON.stringify(b)})`); count++; };
+
+let BASE, adminTok, staffTok, guestTok;
+const api = async (method, path, body, token) => {
+  const res = await fetch(BASE + '/api' + path, {
+    method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const ct = res.headers.get('content-type') || '';
+  const data = ct.includes('application/json') ? await res.json() : await res.arrayBuffer();
+  return { status: res.status, ct, data };
+};
+const A = (m, p, b) => api(m, p, b, adminTok);
+const S = (m, p, b) => api(m, p, b, staffTok);
+const G = (m, p, b) => api(m, p, b, guestTok);
+const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+const uniq = Date.now().toString().slice(-6);
+
+async function main() {
+  // Clean slate for the tables this test touches (rooms/guests/etc. from a
+  // previous run would break capacity assertions).
+  await pool.query(`TRUNCATE complaints, guest_room_history, checklist_log, collections, guest_rent_history, deposit_refunds, guests, rooms RESTART IDENTITY CASCADE`);
+  await pool.query(`DELETE FROM activity_log WHERE user_id IN (SELECT id FROM users WHERE username LIKE 'smoke_%')`);
+  await pool.query(`DELETE FROM users WHERE username LIKE 'smoke_%'`);
+
+  const server = app.listen(0);
+  BASE = `http://127.0.0.1:${server.address().port}`;
+  try {
+    // ── Server plumbing ───────────────────────────────────────────────────
+    let r = await fetch(BASE + '/health'); eq(r.status, 200, 'health');
+    r = await api('GET', '/does-not-exist'); eq(r.status, 404, 'unknown /api → 404'); ok(r.ct.includes('json'), 'unknown /api answers JSON, not HTML');
+    r = await api('GET', '/checklist'); eq(r.status, 401, 'checklist without token → 401'); ok(r.ct.includes('json'), '401 is JSON');
+    for (const p of ['/management', '/siri-mane-management']) {
+      r = await fetch(BASE + p); const html = await r.text();
+      ok(html.includes('id="login-page"'), `${p} serves management.html`);
+    }
+    r = await fetch(BASE + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{bad json' });
+    eq(r.status, 400, 'malformed JSON → 400'); ok((await r.json()).error, 'malformed JSON has error message');
+    console.log('✓ server plumbing');
+
+    // ── Auth ──────────────────────────────────────────────────────────────
+    r = await api('POST', '/auth/login', { username: 'admin', password: 'wrong' }); eq(r.status, 401, 'bad password → 401');
+    r = await api('POST', '/auth/login', { username: 'admin', password: process.env.ADMIN_PASSWORD || 'SiriMane@2024' }); eq(r.status, 200, 'admin login'); adminTok = r.data.token; ok(adminTok, 'admin token');
+    r = await A('POST', '/users', { username: 'smoke_staff' + uniq, password: 'staff123', role: 'staff' }); eq(r.status, 201, 'create staff user');
+    r = await api('POST', '/auth/login', { username: 'smoke_staff' + uniq, password: 'staff123' }); eq(r.status, 200, 'staff login'); staffTok = r.data.token;
+    console.log('✓ auth');
+
+    // ── Fixtures: 2 rooms, 1 guest ────────────────────────────────────────
+    r = await A('POST', '/rooms', { room_number: 'S1', floor: 1, total_beds: 2, room_type: 'double', monthly_rent: 6000 }); eq(r.status, 201, 'room S1'); const room1 = r.data;
+    r = await A('POST', '/rooms', { room_number: 'S2', floor: 1, total_beds: 1, room_type: 'single', monthly_rent: 6000 }); eq(r.status, 201, 'room S2'); const room2 = r.data;
+    r = await A('POST', '/guests', { name: 'Smoke Guest', phone: '9' + uniq + '123', room_id: room1.id, bed_number: '1', join_date: '2026-06-01', monthly_rent: 6000, deposit_amount: 12000 });
+    eq(r.status, 201, 'guest created'); const guest = r.data;
+    console.log('✓ fixtures');
+
+    // ── Daily checklist ───────────────────────────────────────────────────
+    r = await S('GET', `/checklist?date=${today}`); eq(r.status, 200, 'GET checklist');
+    eq(r.data.summary.total, 33, '33 seeded tasks'); eq(r.data.summary.checked, 0, 'none ticked yet'); eq(r.data.summary.percent, 0, '0%');
+    ok(Array.isArray(r.data.sections) && r.data.sections.length >= 3, 'sections present');
+    ok(r.data.sections.every(s => typeof s.label === 'string' && Array.isArray(s.items)), 'section shape {label,items}');
+    const firstItem = r.data.sections.find(s => s.items.length)?.items[0]; ok(firstItem && firstItem.id, 'items have ids');
+    ok(['is_checked', 'task', 'time_label'].every(k => k in firstItem), 'item shape');
+
+    r = await S('PUT', `/checklist/${firstItem.id}`, { date: today, checked: true }); eq(r.status, 200, 'tick task'); eq(r.data.is_checked, true, 'log row checked');
+    r = await S('GET', `/checklist?date=${today}`); eq(r.data.summary.checked, 1, 'summary counts tick'); eq(r.data.summary.percent, 3, '1/33 = 3%');
+    const ticked = r.data.sections.flatMap(s => s.items).find(i => i.id === firstItem.id);
+    eq(ticked.is_checked, true, 'item shows checked'); ok(ticked.checked_by_username.startsWith('smoke_staff'), 'checked_by_username = staff'); ok(ticked.checked_at, 'checked_at set');
+    r = await S('PUT', `/checklist/${firstItem.id}`, { date: today, checked: true }); eq(r.status, 200, 'tick again is idempotent (no unique violation)');
+    r = await S('PUT', `/checklist/${firstItem.id}`, { date: today, checked: false }); eq(r.data.is_checked, false, 'untick'); eq(r.data.checked_by, null, 'untick clears checked_by');
+    r = await S('PUT', `/checklist/${firstItem.id}`, { date: '2099-01-01', checked: true }); eq(r.status, 400, 'future date rejected');
+    r = await S('PUT', `/checklist/999999`, { date: today, checked: true }); eq(r.status, 404, 'unknown task → 404');
+    r = await S('PUT', `/checklist/${firstItem.id}`, { date: today, checked: true }); eq(r.status, 200, 're-tick for summary');
+    r = await S('GET', `/checklist/summary?month=${today.slice(0, 7)}`); eq(r.status, 200, 'summary by month');
+    const todayRow = r.data.find(x => x.date === today); ok(todayRow, 'summary has today'); eq(todayRow.checked, 1, 'summary checked=1'); eq(todayRow.total, 33, 'summary total=33');
+    r = await S('GET', `/checklist/summary?days=7`); eq(r.status, 200, 'summary by days'); ok(r.data.find(x => x.date === today), 'days summary has today');
+    r = await S('GET', `/checklist/summary?month=not-a-month`); eq(r.status, 200, 'bad month falls back to days');
+    console.log('✓ daily checklist');
+
+    // ── Checklist items (admin manage) ────────────────────────────────────
+    r = await S('POST', '/checklist-items', { section: 'Morning', task: 'x' }); eq(r.status, 403, 'staff cannot add tasks');
+    r = await A('POST', '/checklist-items', { section: 'Night', time_label: '10:30 PM', task: 'Smoke: lock terrace door' }); eq(r.status, 201, 'admin adds task'); const newItem = r.data;
+    eq(newItem.section, 'Night', 'section saved'); eq(newItem.time_label, '10:30 PM', 'time saved');
+    r = await A('POST', '/checklist-items', { section: 'Nope', task: 'x' }); eq(r.status, 400, 'invalid section');
+    r = await A('POST', '/checklist-items', { section: 'Morning', task: '  ' }); eq(r.status, 400, 'blank task');
+    r = await S('GET', '/checklist-items'); eq(r.status, 200, 'staff can list items'); eq(r.data.length, 34, '34 items now');
+    r = await A('PUT', `/checklist-items/${newItem.id}`, { section: 'Closing', time_label: '', task: 'Smoke: lock terrace & gate' }); eq(r.status, 200, 'edit task'); eq(r.data.section, 'Closing', 'section edited'); eq(r.data.time_label, '—', 'empty time → —');
+    r = await S('GET', `/checklist?date=${today}`); ok(r.data.sections.find(s => s.label === 'Closing')?.items.some(i => i.id === newItem.id), 'edited item appears under Closing');
+    r = await A('DELETE', `/checklist-items/${newItem.id}`); eq(r.status, 200, 'remove task');
+    r = await A('DELETE', `/checklist-items/${newItem.id}`); eq(r.status, 404, 'remove twice → 404');
+    r = await S('GET', '/checklist-items'); eq(r.data.length, 33, 'back to 33 (soft-deleted)');
+    const dbItem = await pool.query('SELECT is_active FROM checklist_items WHERE id=$1', [newItem.id]); eq(dbItem.rows[0].is_active, false, 'soft delete keeps the row');
+    console.log('✓ checklist items');
+
+    // ── Complaints (staff side) ───────────────────────────────────────────
+    r = await S('POST', '/complaints', { category: 'Water', description: '' }); eq(r.status, 400, 'blank description');
+    r = await S('POST', '/complaints', { category: 'Water', description: 'Smoke: no hot water', guest_name: 'Smoke Guest' }); eq(r.status, 201, 'staff logs issue');
+    const c1 = r.data; eq(c1.guest_id, guest.id, 'linked to guest by name'); eq(c1.room_number, 'S1', 'room filled from guest'); eq(c1.status, 'open', 'starts open'); eq(c1.raised_by, 'staff', 'raised_by staff');
+    r = await S('POST', '/complaints', { category: 'Electrical', description: 'Smoke: fan noise', guest_name: 'Room S2' }); eq(r.status, 201, 'room-only issue');
+    const c2 = r.data; eq(c2.room_number, 'S2', '"Room S2" parsed to room_number'); eq(c2.guest_id, null, 'no guest linked'); eq(c2.guest_name, null, 'guest_name cleared');
+    r = await S('GET', '/complaints'); eq(r.status, 200, 'list all'); eq(r.data.length, 2, 'two complaints');
+    r = await S('GET', '/complaints?status=open'); eq(r.data.length, 2, 'filter open');
+    r = await S('PUT', `/complaints/${c1.id}`, { status: 'bogus' }); eq(r.status, 400, 'invalid status');
+    r = await S('PUT', `/complaints/${c1.id}`, { status: 'in_progress' }); eq(r.status, 200, 'to in_progress'); eq(r.data.resolved_at, null, 'not resolved yet');
+    r = await S('PUT', `/complaints/${c1.id}`, { status: 'resolved', resolution_notes: 'Geyser fixed' }); eq(r.data.status, 'resolved', 'resolved'); ok(r.data.resolved_at, 'resolved_at set'); eq(r.data.resolution_notes, 'Geyser fixed', 'notes saved');
+    r = await S('GET', '/complaints?status=open'); eq(r.data.length, 1, 'one open left');
+    r = await S('GET', '/complaints?status=resolved'); eq(r.data.length, 1, 'one resolved');
+    r = await S('GET', '/complaints'); eq(r.data[0].status, 'open', 'open sorted first');
+    r = await S('DELETE', `/complaints/${c1.id}`); eq(r.status, 403, 'staff cannot delete');
+    r = await A('DELETE', `/complaints/${c1.id}`); eq(r.status, 200, 'admin deletes');
+    r = await A('DELETE', `/complaints/${c1.id}`); eq(r.status, 404, 'delete twice → 404');
+    console.log('✓ complaints');
+
+    // ── Complaints (resident portal) ──────────────────────────────────────
+    r = await api('POST', '/guest-login', { mobile: guest.phone, password: guest.phone }); eq(r.status, 200, 'guest login (default password = mobile)'); guestTok = r.data.token;
+    r = await api('POST', '/guest-complaint', { category: 'Wifi/Internet', description: 'Smoke: wifi down' }); eq(r.status, 401, 'guest-complaint needs guest token');
+    r = await S('POST', '/guest-complaint', { category: 'Wifi/Internet', description: 'x' }); eq(r.status, 401, 'staff token is not a guest token');
+    r = await G('POST', '/guest-complaint', { category: 'Wifi/Internet', description: '' }); eq(r.status, 400, 'blank guest complaint');
+    r = await G('POST', '/guest-complaint', { category: 'Wifi/Internet', description: 'Smoke: wifi down' }); eq(r.status, 201, 'guest raises issue'); eq(r.data.status, 'open', 'open');
+    r = await G('GET', '/guest-complaints'); eq(r.status, 200, 'guest lists own'); eq(r.data.length, 1, 'sees exactly own issue'); eq(r.data[0].category, 'Wifi/Internet', 'category');
+    r = await S('GET', '/complaints'); const gc = r.data.find(x => x.raised_by === 'guest'); ok(gc, 'staff sees guest issue'); eq(gc.guest_id, guest.id, 'linked'); eq(gc.room_number, 'S1', 'room set');
+    console.log('✓ resident complaints');
+
+    // ── Room shift ────────────────────────────────────────────────────────
+    r = await S('GET', `/guests/${guest.id}/ledger`); eq(r.status, 200, 'ledger before'); const ledgerBefore = JSON.stringify(r.data);
+    r = await S('GET', `/guests/${guest.id}/room-history`); eq(r.status, 200, 'history empty'); eq(r.data.length, 0, 'no moves yet');
+    r = await S('POST', `/guests/${guest.id}/shift-room`, { room_id: room1.id, effective_from: today }); eq(r.status, 400, 'same room rejected');
+    r = await S('POST', `/guests/${guest.id}/shift-room`, { room_id: room2.id, effective_from: '2099-01-01' }); eq(r.status, 400, 'future date rejected');
+    r = await S('POST', `/guests/${guest.id}/shift-room`, { room_id: room2.id, effective_from: '2026-01-01' }); eq(r.status, 400, 'before join date rejected');
+    r = await S('POST', `/guests/${guest.id}/shift-room`, { room_id: room2.id, effective_from: '' }); eq(r.status, 400, 'missing date rejected');
+    r = await S('POST', `/guests/${guest.id}/shift-room`, { room_id: room2.id, bed_number: 1, effective_from: '2026-08-15', note: 'window bed' }); eq(r.status, 200, 'shift S1 → S2');
+    eq(r.data.guest.room_id, room2.id, 'guest now in S2'); eq(String(r.data.guest.bed_number), '1', 'bed updated');
+    eq(r.data.history.from_room_number, 'S1', 'history from'); eq(r.data.history.to_room_number, 'S2', 'history to'); eq(String(r.data.history.effective_from).slice(0, 10), '2026-08-15', 'backdated effective_from kept');
+    r = await S('GET', `/guests/${guest.id}/room-history`); eq(r.data.length, 1, 'one history row'); ok(r.data[0].changed_by_username.startsWith('smoke_staff'), 'changed_by recorded');
+    r = await S('GET', `/guests/${guest.id}`); eq(r.data.room_number, 'S2', 'GET guest reflects new room');
+    r = await S('GET', `/guests/${guest.id}/ledger`); eq(JSON.stringify(r.data), ledgerBefore, 'MONEY: ledger identical after room shift');
+    r = await A('POST', '/guests', { name: 'Smoke Guest 2', phone: '8' + uniq + '123', room_id: room1.id, bed_number: '1', join_date: '2026-07-01', monthly_rent: 6000, deposit_amount: 12000 }); const guest2 = r.data;
+    r = await S('POST', `/guests/${guest2.id}/shift-room`, { room_id: room2.id, effective_from: today }); eq(r.status, 400, 'full room rejected'); ok(/full/i.test(r.data.error), 'error says full');
+    r = await S('POST', `/guests/${guest2.id}/shift-room`, { room_id: 999999, effective_from: today }); eq(r.status, 404, 'unknown room → 404');
+    r = await A('GET', '/rooms'); eq(Number(r.data.find(x => x.room_number === 'S2').occupied_beds), 1, 'rooms occupancy updated');
+    console.log('✓ room shift');
+
+    // ── Receipt PDF ───────────────────────────────────────────────────────
+    r = await A('POST', '/collections', { guest_id: guest.id, guest_name: guest.name, amount: 6000, collection_date: today, collection_month: 'September 2026', collection_type: 'rent', payment_mode: 'upi' });
+    eq(r.status, 201, 'admin collection'); eq(r.data.status, 'confirmed', 'admin entry confirmed'); const col = r.data;
+    r = await fetch(`${BASE}/api/collections/${col.id}/receipt/pdf`); eq(r.status, 401, 'receipt needs auth');
+    r = await S('GET', `/collections/${col.id}/receipt/pdf`); eq(r.status, 200, 'staff can download receipt'); ok(r.ct.includes('application/pdf'), 'content-type pdf');
+    const bytes = Buffer.from(r.data); ok(bytes.length > 1500, `pdf has bytes (${bytes.length})`); eq(bytes.subarray(0, 4).toString(), '%PDF', 'starts with %PDF'); ok(bytes.subarray(-64).toString().includes('%%EOF'), 'ends with %%EOF (complete file)');
+    r = await S('POST', '/collections', { guest_id: guest.id, guest_name: guest.name, amount: 500, collection_date: today, collection_type: 'rent', payment_mode: 'cash' }); const pend = r.data; eq(pend.status, 'pending_approval', 'staff entry pending');
+    r = await S('GET', `/collections/${pend.id}/receipt/pdf`); eq(r.status, 400, 'no receipt for unconfirmed payment'); ok(r.ct.includes('json'), 'refusal is JSON');
+    r = await S('GET', `/collections/999999/receipt/pdf`); eq(r.status, 404, 'unknown collection → 404');
+    r = await A('DELETE', `/collections/${col.id}`); eq(r.status, 200, 'soft-delete collection');
+    r = await S('GET', `/collections/${col.id}/receipt/pdf`); eq(r.status, 404, 'deleted collection has no receipt');
+    console.log('✓ receipt pdf');
+
+    // ── Dashboard still works with the new tables ─────────────────────────
+    r = await S('GET', '/dashboard'); eq(r.status, 200, 'dashboard'); eq(r.data.todayChecklist.total, 33, 'dashboard checklist total'); eq(r.data.todayChecklist.checked, 1, 'dashboard checklist checked'); eq(r.data.openComplaints, 2, 'dashboard open complaints (1 staff room issue + 1 guest issue)');
+    console.log('✓ dashboard');
+
+    // ── Login rate limit (last: it burns attempts for this IP) ────────────
+    let last;
+    // Two failed attempts already happened (malformed JSON + bad password), so 8 more = 10 failures.
+    for (let i = 0; i < 8; i++) last = await api('POST', '/auth/login', { username: 'admin', password: 'nope' + i });
+    eq(last.status, 401, '10th bad attempt still 401');
+    last = await api('POST', '/auth/login', { username: 'admin', password: 'nope' }); eq(last.status, 429, '11th attempt → 429'); ok(last.ct.includes('json') && /wait/i.test(last.data.error), '429 is JSON with message');
+    console.log('✓ login rate limit');
+
+    console.log(`\n✅ API gate passed — ${count} assertions`);
+  } finally {
+    server.close();
+    await pool.end();
+  }
+}
+
+main().catch(e => { console.error(`\n❌ FAILED after ${count} assertions:\n`, e.message); process.exit(1); });
