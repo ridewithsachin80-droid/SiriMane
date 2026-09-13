@@ -183,7 +183,7 @@ router.get('/dashboard', auth, async (req, res) => {
       pool.query(`SELECT g.id, g.name, g.monthly_rent, r.room_number, r.monthly_rent as room_rent FROM guests g LEFT JOIN rooms r ON g.room_id=r.id WHERE g.is_active=true AND g.rent_variance_approved=false`),
       pool.query(`SELECT COUNT(*) as total FROM checklist_items WHERE is_active=true`),
       pool.query(`SELECT COUNT(*) as done FROM checklist_log WHERE log_date=$1 AND is_checked=true`, [today]),
-      pool.query(`SELECT COUNT(*) as open FROM complaints WHERE status != 'resolved'`)
+      pool.query(`SELECT COUNT(*) as open FROM complaints WHERE status NOT IN ('resolved','closed')`)
     ]);
     const totalBeds = parseInt(rooms.rows[0].total_beds) || 0;
     const availBeds = parseInt(beds.rows[0].available) || 0;
@@ -1590,8 +1590,8 @@ router.post('/complaints', auth, async (req, res) => {
       }
     }
     const r = await pool.query(
-      `INSERT INTO complaints(guest_id, guest_name, room_number, category, description, status, raised_by, created_by, source, priority)
-       VALUES($1,$2,$3,$4,$5,'open','staff',$6,$7,$8) RETURNING *`,
+      `INSERT INTO complaints(guest_id, guest_name, room_number, category, description, status, raised_by, created_by, source, priority, sla_due_at)
+       VALUES($1,$2,$3,$4,$5,'open','staff',$6,$7,$8, NOW() + (CASE $8::varchar WHEN 'high' THEN INTERVAL '2 hours' WHEN 'low' THEN INTERVAL '72 hours' ELSE INTERVAL '24 hours' END)) RETURNING *`,
       [guestId, guestName, roomNumber, (category || 'Other').trim(), String(description).trim(), req.user.id,
        ['manual','voice','photo','copilot'].includes(req.body.source) ? req.body.source : 'manual',
        ['low','medium','high'].includes(req.body.priority) ? req.body.priority : require('../services/assistant').rulePriority(category || 'Other', description)]);
@@ -1640,8 +1640,8 @@ router.post('/guest-complaint', guestAuth, async (req, res) => {
     const g = req.guest;
     const room = g.room_id ? await pool.query('SELECT room_number FROM rooms WHERE id=$1', [g.room_id]) : { rows: [{}] };
     const r = await pool.query(
-      `INSERT INTO complaints(guest_id, guest_name, room_number, category, description, status, raised_by, priority)
-       VALUES($1,$2,$3,$4,$5,'open','guest',$6) RETURNING id, category, description, status, created_at`,
+      `INSERT INTO complaints(guest_id, guest_name, room_number, category, description, status, raised_by, priority, sla_due_at)
+       VALUES($1,$2,$3,$4,$5,'open','guest',$6, NOW() + (CASE $6::varchar WHEN 'high' THEN INTERVAL '2 hours' WHEN 'low' THEN INTERVAL '72 hours' ELSE INTERVAL '24 hours' END)) RETURNING id, category, description, status, priority, sla_due_at, created_at`,
       [g.id, g.name, room.rows[0]?.room_number || null, (category || 'Other').trim(), String(description).trim(),
        require('../services/assistant').rulePriority(category || 'Other', description)]);
     res.status(201).json(r.rows[0]);

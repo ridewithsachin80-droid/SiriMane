@@ -855,3 +855,24 @@ button, input, select, textarea { color: inherit; }
 .sm-person .sm-person-sub, .search-item .s-sub { color: var(--text-muted); }
 .copilot-chip, .subtab:not(.active), .sm-tab:not(.active) { color: var(--text-muted); }
 .sm-person.selected { box-shadow: 0 0 0 2px var(--accent-soft-border); }
+
+/* ── Sprint 9: room map, request sheet, staff tasks ───────────── */
+.room-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px; margin-bottom: 8px; }
+.room-tile { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; text-align: left; cursor: pointer; font-family: inherit; color: var(--text); min-height: 92px; }
+.room-tile:hover { border-color: var(--accent); }
+.room-tile.is-maintenance { border-style: dashed; opacity: .8; }
+.room-tile.is-blocked { opacity: .55; }
+.rt-head { display: flex; justify-content: space-between; align-items: center; font-size: 16px; margin-bottom: 8px; }
+.rt-beds { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 8px; }
+.rt-sub { font-size: 12px; color: var(--text-muted); }
+.bed { width: 14px; height: 14px; border-radius: 4px; display: inline-block; border: 1px solid var(--border); }
+.bed.occupied { background: var(--accent); border-color: var(--accent); }
+.bed.free { background: transparent; }
+.bed.maintenance, .bed.blocked { background: repeating-linear-gradient(45deg, var(--border), var(--border) 3px, transparent 3px, transparent 6px); }
+.bed-key { font-size: 12px; color: var(--text-muted); display: inline-flex; align-items: center; gap: 6px; }
+.bed-key .bed { margin-left: 6px; }
+.rq-photos { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0; }
+.rq-photos img { width: 84px; height: 84px; object-fit: cover; border-radius: 10px; border: 1px solid var(--border); cursor: pointer; }
+.rq-photo-add { width: 84px; height: 84px; border: 1px dashed var(--border); border-radius: 10px; background: none; color: var(--text-muted); cursor: pointer; font-family: inherit; font-size: 11px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; }
+.rq-comment { background: var(--surface-2); border-radius: 10px; padding: 8px 10px; margin-bottom: 6px; font-size: 14px; }
+.rq-photo-fail { width: 84px; height: 84px; border: 1px dashed var(--border); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--text-muted); text-align: center; padding: 6px; }

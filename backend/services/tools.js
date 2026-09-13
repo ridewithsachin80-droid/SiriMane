@@ -92,7 +92,7 @@ const TOOLS = {
       if (!match) return { clarify: candidates.length ? 'Which resident?' : 'I could not find that resident.', candidates };
       const [g, issues] = await Promise.all([
         pool.query(`SELECT g.*, r.room_number FROM guests g LEFT JOIN rooms r ON r.id=g.room_id WHERE g.id=$1`, [match.id]),
-        pool.query(`SELECT id, category, status, priority, created_at FROM complaints WHERE guest_id=$1 AND status<>'resolved' ORDER BY created_at DESC`, [match.id])
+        pool.query(`SELECT id, category, status, priority, created_at FROM complaints WHERE guest_id=$1 AND status NOT IN ('resolved','closed') ORDER BY created_at DESC`, [match.id])
       ]);
       const ledger = await routes.computeGuestLedger(g.rows[0]);
       const x = g.rows[0];
@@ -113,7 +113,7 @@ const TOOLS = {
       const r = await pool.query(`SELECT r.id, r.room_number, r.floor, r.total_beds, r.monthly_rent,
           (SELECT COUNT(*) FROM guests g WHERE g.room_id=r.id AND g.is_active=true)::int AS occupied,
           (SELECT json_agg(json_build_object('id', g.id, 'name', g.name, 'bed', g.bed_number)) FROM guests g WHERE g.room_id=r.id AND g.is_active=true) AS residents,
-          (SELECT COUNT(*) FROM complaints c WHERE c.room_number=r.room_number AND c.status<>'resolved')::int AS open_issues
+          (SELECT COUNT(*) FROM complaints c WHERE c.room_number=r.room_number AND c.status NOT IN ('resolved','closed'))::int AS open_issues
         FROM rooms r WHERE r.is_active=true ${room ? 'AND r.room_number ILIKE $1' : ''} ORDER BY r.floor, r.room_number`, room ? [room] : []);
       let rows = r.rows.map(x => ({ ...x, vacant: Math.max(0, x.total_beds - x.occupied), residents: x.residents || [] }));
       if (a.only_vacant) rows = rows.filter(x => x.vacant > 0);
@@ -130,7 +130,7 @@ const TOOLS = {
     description: 'Open maintenance requests / complaints, optionally by priority, room, or age. Use for "which complaint is taking too long", "open issues on floor 2".',
     args: { priority: 'string?', room: 'string?', older_than_days: 'number?' }, role: 'staff', level: 'inform',
     async run(a) {
-      const p = []; let where = `status<>'resolved'`;
+      const p = []; let where = `status NOT IN ('resolved','closed')`;
       if (['low', 'medium', 'high'].includes(a.priority)) { p.push(a.priority); where += ` AND priority=$${p.length}`; }
       if (a.room) { p.push(String(a.room)); where += ` AND room_number ILIKE $${p.length}`; }
       if (a.older_than_days) { p.push(Number(a.older_than_days)); where += ` AND created_at < NOW() - ($${p.length} || ' days')::interval`; }
@@ -332,7 +332,7 @@ const TOOLS = {
       const outstanding = ledger.currentBalance < 0 ? -ledger.currentBalance : 0;
       const credit = ledger.currentBalance > 0 ? ledger.currentBalance : 0;
       const deposit = parseFloat(x.deposit_amount) || 0;
-      const openIssues = await pool.query(`SELECT COUNT(*)::int AS n FROM complaints WHERE guest_id=$1 AND status<>'resolved'`, [match.id]);
+      const openIssues = await pool.query(`SELECT COUNT(*)::int AS n FROM complaints WHERE guest_id=$1 AND status NOT IN ('resolved','closed')`, [match.id]);
       // Deductions are the warden's call; the preview shows the refund BEFORE
       // any deduction, exactly as the checkout screen computes it.
       const preview = {
@@ -354,7 +354,7 @@ const TOOLS = {
     args: { room: 'string' }, role: 'staff', level: 'inform',
     async run(a) {
       const r = await pool.query(`SELECT r.id, r.room_number, r.total_beds, (SELECT COUNT(*) FROM guests g WHERE g.room_id=r.id AND g.is_active=true)::int AS occupied,
-          (SELECT COUNT(*) FROM complaints c WHERE c.room_number=r.room_number AND c.status<>'resolved')::int AS issues
+          (SELECT COUNT(*) FROM complaints c WHERE c.room_number=r.room_number AND c.status NOT IN ('resolved','closed'))::int AS issues
         FROM rooms r WHERE r.is_active=true AND r.room_number ILIKE $1`, [String(a.room)]);
       if (!r.rows[0]) return { clarify: `I don't know a room "${a.room}".` };
       const x = r.rows[0];

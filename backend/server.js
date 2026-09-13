@@ -46,6 +46,8 @@ app.use('/api/guest-login', loginLimiter);
 // AI routes parse their own (larger) JSON body — mounted before the global
 // 10 kb parser so a bill photo is accepted there and nowhere else.
 app.use('/api/ai', require('./routes/ai'));
+// Request photos need a larger body than the global 10 kb limit.
+app.use('/api', require('./routes/rooms-requests'));
 
 app.use(express.json({ limit: '10kb' }));
 

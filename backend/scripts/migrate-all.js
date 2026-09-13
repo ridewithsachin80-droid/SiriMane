@@ -26,7 +26,8 @@ const ORDER = [
   'migrate-ai-assistant.js',    // Sprint 4: complaint priority + reminder_log
   'migrate-owner-reports.js',   // Sprint 5: owner_reports
   'migrate-copilot.js',         // Sprint 6: ai_proposals + ai_actions
-  'migrate-resident-360.js'     // Sprint 8: expected_checkout, resident_no, emergency contact name
+  'migrate-resident-360.js',    // Sprint 8: expected_checkout, resident_no, emergency contact name
+  'migrate-rooms-requests.js'   // Sprint 9: room status, request SLA/assignment/comments/photos, staff tasks
 ];
 
 let failed = false;

@@ -232,8 +232,81 @@ async function main() {
   const co = await pool.query('SELECT leave_date, is_active FROM guests WHERE id=$1', [guest2.id]);
   eq(new Date(co.rows[0].leave_date).toISOString().slice(0, 10), "2026-09-01", "leave_date is the date given, not today"); eq(co.rows[0].is_active, false, 'she is checked out');
 
+  // ── Sprint 9: room map, request workflow, staff tasks ─────────────────
+  r = await S('GET', '/room-map'); eq(r.status, 200, 'room map');
+  const allTiles = r.data.floors.flatMap(f => f.rooms);
+  eq(allTiles.length, 2, 'both rooms on the map');
+  eq(r.data.totals.beds, 3, 'bed total matches the rooms table');
+  const s1 = allTiles.find(x => x.room_number === 'S1'), s2 = allTiles.find(x => x.room_number === 'S2');
+  eq(s1.beds.length, 2, 'S1 draws one dot per bed');
+  eq(s2.occupied + s2.free, s2.total_beds, 'every bed is either taken or free');
+  eq(allTiles.reduce((t, x) => t + x.occupied, 0), r.data.totals.occupied, 'MAP: tiles agree with the headline count');
+  eq(r.data.totals.occupied + r.data.totals.free, r.data.totals.beds, 'MAP: occupied + free = total beds');
+  ok(typeof r.data.totals.unplaced === 'number', 'MAP: residents without a room are reported separately, not hidden');
+  const occupiedRoom = allTiles.find(x => x.occupied > 0);
+  if (occupiedRoom) {
+    r = await S('PUT', `/rooms/${occupiedRoom.id}/status`, { status: 'maintenance' });
+    eq(r.status, 400, 'cannot mothball a room someone lives in');
+  } else {
+    // Nobody is housed at this point in the run — create the situation.
+    const tmp = (await A('POST', '/guests', { name: 'Room Blocker', phone: '9' + uniq + '999', room_id: room1.id, join_date: today, monthly_rent: 1000, deposit_amount: 0 })).data;
+    r = await S('PUT', `/rooms/${room1.id}/status`, { status: 'maintenance' });
+    eq(r.status, 400, 'cannot mothball a room someone lives in');
+    await A('PUT', `/guests/${tmp.id}`, { is_active: false, leave_date: today });
+  }
+  r = await S('PUT', `/rooms/${room1.id}/status`, { status: 'nonsense' }); eq(r.status, 400, 'invalid room status refused');
+  r = await A('POST', '/rooms', { room_number: 'S3', floor: 2, total_beds: 1, monthly_rent: 5000 }); const room3 = r.data;
+  r = await S('PUT', `/rooms/${room3.id}/status`, { status: 'maintenance' }); eq(r.status, 200, 'empty room can go under maintenance');
+  r = await S('GET', '/room-map');
+  const t3 = r.data.floors.flatMap(f => f.rooms).find(x => x.room_number === 'S3');
+  eq(t3.beds[0].state, 'maintenance', 'its beds show as maintenance, not free');
+  eq(t3.free, 0, 'a room under maintenance offers no free bed');
+  r = await S('PUT', `/rooms/${room3.id}/status`, { last_inspected: today }); eq(r.status, 200, 'inspection recorded');
+
+  const rq = (await S('POST', '/complaints', { category: 'Water', description: 'SLA test leak', guest_name: 'Room S1' })).data;
+  ok(rq.sla_due_at, 'a new request gets a clock');
+  eq(rq.priority, 'high', 'water is high priority');
+  const slaHours = (new Date(rq.sla_due_at) - new Date(rq.created_at)) / 3600000;
+  ok(Math.abs(slaHours - 2) < 0.1, `high priority means 2 hours (${slaHours.toFixed(1)})`);
+  r = await S('PUT', `/requests/${rq.id}`, { priority: 'low' });
+  const lowHours = (new Date(r.data.sla_due_at) - new Date(rq.created_at)) / 3600000;
+  ok(Math.abs(lowHours - 72) < 0.1, 'lowering priority recomputes the clock from when it was raised, not from now');
+  r = await S('PUT', `/requests/${rq.id}`, { assigned_to: 999999 }); eq(r.status, 400, 'cannot assign to a non-existent user');
+  const staffId = (await A('GET', '/users')).data.find(u => u.username.startsWith('smoke_staff')).id;
+  r = await S('PUT', `/requests/${rq.id}`, { assigned_to: staffId });
+  eq(r.data.assigned_to, staffId, 'assigned'); eq(r.data.status, 'assigned', 'assigning an open request moves it to "assigned"');
+  r = await S('GET', '/requests?assigned_to=me'); eq(r.data.length, 1, 'staff sees it in their own queue');
+  r = await A('GET', '/requests?assigned_to=me'); eq(r.data.length, 0, 'admin does not');
+  await pool.query(`UPDATE complaints SET sla_due_at = NOW() - INTERVAL '3 hours' WHERE id=$1`, [rq.id]);
+  r = await S('GET', '/requests?overdue=1'); eq(r.data.length, 1, 'overdue filter'); eq(r.data[0].overdue, true, 'flagged overdue'); ok(r.data[0].hours_left < 0, 'hours_left goes negative');
+  r = await S('POST', `/requests/${rq.id}/comments`, { body: 'Plumber called' }); eq(r.status, 201, 'comment added');
+  r = await S('POST', `/requests/${rq.id}/comments`, { body: '   ' }); eq(r.status, 400, 'empty comment refused');
+  const tinyJpeg = 'data:image/jpeg;base64,' + Buffer.from([0xFF, 0xD8, 0xFF, 0xE0, 0, 16, 74, 70]).toString('base64');
+  r = await S('POST', `/requests/${rq.id}/photos`, { image: tinyJpeg }); eq(r.status, 201, 'photo stored'); ok(r.data.bytes > 0, 'byte count recorded');
+  const photoId = r.data.id;
+  r = await S('POST', `/requests/${rq.id}/photos`, { image: 'data:image/jpeg;base64,' + 'A'.repeat(400 * 1024) }); eq(r.status, 400, 'oversized photo refused');
+  r = await S('POST', `/requests/${rq.id}/photos`, { image: 'data:text/plain;base64,QUJD' }); eq(r.status, 400, 'non-image refused');
+  const pr = await fetch(`${BASE}/api/requests/${rq.id}/photos/${photoId}`, { headers: { Authorization: 'Bearer ' + staffTok } });
+  eq(pr.status, 200, 'photo served'); ok((pr.headers.get('content-type') || '').startsWith('image/'), 'served as an image');
+  const anon = await fetch(`${BASE}/api/requests/${rq.id}/photos/${photoId}`);
+  eq(anon.status, 401, 'PRIVACY: a request photo needs a login');
+  r = await S('DELETE', `/requests/${rq.id}/photos/${photoId}`); eq(r.status, 403, 'staff cannot delete a photo');
+  r = await A('DELETE', `/requests/${rq.id}/photos/${photoId}`); eq(r.status, 200, 'admin can');
+  r = await S('GET', `/requests/${rq.id}`); eq(r.data.photos.length, 0, 'photo gone'); eq(r.data.comments.length, 1, 'comment still there');
+  r = await S('GET', '/my-tasks'); eq(r.status, 200, 'my tasks');
+  ok(r.data.checklist.total >= 33, 'checklist included'); eq(r.data.requests.length, 1, 'my request included'); eq(r.data.overdue, 1, 'overdue counted');
+  const taskToAssign = (await S('GET', '/checklist-items')).data[0];
+  r = await S('PUT', `/checklist-items/${taskToAssign.id}/assign`, { assigned_to: staffId }); eq(r.status, 403, 'staff cannot reassign tasks');
+  r = await A('PUT', `/checklist-items/${taskToAssign.id}/assign`, { assigned_to: staffId, due_time: '07:30' }); eq(r.status, 200, 'admin assigns a task');
+  r = await S('GET', '/my-tasks'); eq(r.data.checklist.mine, 1, 'the assigned task is mine');
+  const adminTasks = (await A('GET', '/my-tasks')).data;
+  ok(!adminTasks.checklist.items.some(i => i.id === taskToAssign.id), "a task assigned to someone else is not on the admin's list");
+  r = await S('PUT', `/requests/${rq.id}`, { status: 'closed', note: 'Washer replaced' });
+  eq(r.data.status, 'closed', 'closed'); ok(r.data.closed_at, 'closed_at stamped'); ok(r.data.resolved_at, 'resolved_at stamped');
+  r = await S('GET', '/requests?overdue=1'); eq(r.data.length, 0, 'a closed request is no longer overdue');
+
   // ── Dashboard still works with the new tables ─────────────────────────
-    r = await S('GET', '/dashboard'); eq(r.status, 200, 'dashboard'); eq(r.data.todayChecklist.total, 33, 'dashboard checklist total'); eq(r.data.todayChecklist.checked, 1, 'dashboard checklist checked'); eq(r.data.openComplaints, 2, 'dashboard open complaints (1 staff room issue + 1 guest issue)');
+    r = await S('GET', '/dashboard'); eq(r.status, 200, 'dashboard'); eq(r.data.todayChecklist.total, 33, 'dashboard checklist total'); eq(r.data.todayChecklist.checked, 1, 'dashboard checklist checked'); eq(r.data.openComplaints, (await S('GET', "/requests?status=open")).data.length, 'dashboard open-request count equals the requests list');
     console.log('✓ dashboard');
 
     // ── Login rate limit (last: it burns attempts for this IP) ────────────

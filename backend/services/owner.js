@@ -44,8 +44,8 @@ async function computeOwnerFacts(yyyymm) {
     pool.query(`SELECT COUNT(*)::int AS n, COALESCE(SUM(refund_amount),0) AS total FROM deposit_refunds WHERE created_at::date BETWEEN $1 AND $2`, [from, to]),
     pool.query(`SELECT COUNT(*) FILTER (WHERE created_at::date BETWEEN $1 AND $2)::int AS raised,
                        COUNT(*) FILTER (WHERE resolved_at::date BETWEEN $1 AND $2)::int AS resolved,
-                       COUNT(*) FILTER (WHERE status <> 'resolved')::int AS open_now,
-                       COUNT(*) FILTER (WHERE status <> 'resolved' AND priority='high')::int AS open_high
+                       COUNT(*) FILTER (WHERE status NOT IN ('resolved','closed'))::int AS open_now,
+                       COUNT(*) FILTER (WHERE status NOT IN ('resolved','closed') AND priority='high')::int AS open_high
                   FROM complaints`, [from, to]),
     pool.query(`SELECT COALESCE(AVG(EXTRACT(EPOCH FROM (resolved_at - created_at))/86400),0) AS days
                   FROM complaints WHERE resolved_at::date BETWEEN $1 AND $2`, [from, to]),
@@ -166,6 +166,25 @@ async function computeAnomalies() {
     title: `${approvals.rows[0].n} staff entr${approvals.rows[0].n === 1 ? 'y' : 'ies'} waiting for approval`,
     detail: `${fmt(approvals.rows[0].total)} entered by staff more than 2 days ago.`,
     action: 'payments'
+  });
+  // Same trouble, same room, three times in 30 days: the fix isn't holding.
+  const repeats = await pool.query(`
+    SELECT room_number, category, COUNT(*)::int AS n FROM complaints
+     WHERE room_number IS NOT NULL AND created_at >= NOW() - INTERVAL '30 days'
+     GROUP BY room_number, category HAVING COUNT(*) >= 3 ORDER BY COUNT(*) DESC`);
+  for (const x of repeats.rows) flags.push({
+    id: 'repeat_request', level: 'medium',
+    title: `${x.category} reported ${x.n}× in Room ${x.room_number} this month`,
+    detail: 'Repairing the same thing repeatedly usually means the underlying cause is still there — worth an inspection rather than another patch.',
+    action: 'complaints'
+  });
+  // Requests past their SLA.
+  const breached = await pool.query(`SELECT COUNT(*)::int AS n, MIN(sla_due_at) AS oldest FROM complaints WHERE sla_due_at < NOW() AND status NOT IN ('resolved','closed')`);
+  if (breached.rows[0].n) flags.push({
+    id: 'sla_breach', level: 'high',
+    title: `${breached.rows[0].n} request${breached.rows[0].n === 1 ? '' : 's'} past the promised time`,
+    detail: `The oldest was due ${routes.fmtD(breached.rows[0].oldest)}.`,
+    action: 'complaints'
   });
   const order = { high: 0, medium: 1, low: 2 };
   flags.sort((a, b) => order[a.level] - order[b.level]);

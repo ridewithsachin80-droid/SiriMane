@@ -32,7 +32,7 @@ router.get('/home', auth, async (req, res) => {
       pool.query(`SELECT meal_type, items FROM daily_menu WHERE day_of_week=$1`, [new Date(Date.now() + 5.5 * 3600 * 1000).toLocaleDateString('en-IN', { weekday: 'long', timeZone: 'UTC' })]),
       pool.query(`SELECT COUNT(*)::int AS n FROM checklist_log l JOIN checklist_items i ON i.id=l.item_id AND i.is_active=true WHERE l.log_date=$1 AND l.is_checked=true`, [today]),
       pool.query(`SELECT COUNT(*)::int AS n FROM checklist_items WHERE is_active=true`),
-      pool.query(`SELECT id, category, description, room_number, priority, created_at FROM complaints WHERE status<>'resolved' AND priority='high' ORDER BY created_at LIMIT 5`),
+      pool.query(`SELECT id, category, description, room_number, priority, created_at FROM complaints WHERE status NOT IN ('resolved','closed') AND priority='high' ORDER BY created_at LIMIT 5`),
       pool.query(`SELECT COUNT(*)::int AS n, COALESCE(SUM(amount),0)::float AS t FROM collections WHERE is_deleted=false AND status='confirmed' AND collection_date=$1`, [today]),
       isAdmin ? pool.query(`SELECT
             (SELECT COALESCE(SUM(amount),0) FROM collections WHERE is_deleted=false AND status='confirmed' AND date_trunc('month', collection_date)=date_trunc('month', $1::date))::float AS income,

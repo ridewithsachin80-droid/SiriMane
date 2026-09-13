@@ -618,8 +618,9 @@ async function runAtWidth(browser, BASE, width) {
     await page.waitForFunction(() => { const c = document.getElementById('page-content'); return c && c.textContent.trim() && !c.querySelector('.sm-skel'); }, { timeout: 12000 });
     await contrastSweep(pg);
   }
-  // Hover must not turn a row into a white slab in dark mode.
-  await page.evaluate(() => navigate('rooms'));
+  // Hover must not turn a row into a white slab in dark mode. (Rooms is a map
+  // from Sprint 9 on, so use a screen that still has a table.)
+  await page.evaluate(() => navigate('guests'));
   await page.waitForFunction(() => document.querySelector('#page-content tbody tr'), { timeout: 10000 });
   const hoverBg = await page.evaluate(() => {
     const td = document.querySelector('#page-content tbody tr td');
@@ -791,6 +792,69 @@ async function runAtWidth(browser, BASE, width) {
   await page.evaluate(() => navigate('guests'));
   await page.waitForFunction(() => document.querySelector('#page-content table.sm-cards tbody tr'), { timeout: 10000 });
   ok(await page.$eval('#page-content', e => /Leaving soon/.test(e.textContent)), `${tag} Residents has a "Leaving soon" filter`);
+
+  // ── Sprint 9: room map, request workflow, staff tasks ──────────────────
+  await page.evaluate(() => navigate('rooms'));
+  await page.waitForSelector('.room-tile', { timeout: 12000 });
+  const tiles = await page.$$eval('.room-tile', els => els.length);
+  const mapApi = await page.evaluate(() => apiFetch('/room-map'));
+  eq(tiles, mapApi.floors.flatMap(f => f.rooms).length, `${tag} a tile per room (${tiles})`);
+  const dots = await page.$$eval('.room-tile .bed', els => els.length);
+  eq(dots, mapApi.totals.beds, `${tag} MAP: a dot per bed (${dots})`);
+  eq(await page.$$eval('.room-tile .bed.occupied', els => els.length), mapApi.totals.occupied, `${tag} MAP: occupied dots match the API`);
+  await page.screenshot({ path: path.join(SHOTS, `room-map-${width}.png`) });
+  await noHScroll('room map');
+  await page.evaluate(() => document.querySelector('.room-tile').click());
+  await page.waitForSelector('.modal .r360-kv', { timeout: 8000 });
+  ok(await page.$eval('.modal-body', e => /Bed 1/.test(e.textContent)), `${tag} room sheet lists its beds`);
+  await page.evaluate(() => closeModal());
+
+  // Request detail: clock, assignment, comment, photo
+  await page.evaluate(() => navigate('complaints'));
+  await page.waitForFunction(() => document.querySelector('#page-content table.sm-cards tbody tr'), { timeout: 10000 });
+  const openReq = (await page.evaluate(() => apiFetch('/requests?status=open')))[0];
+  ok(openReq, `${tag} there is an open request to work with`);
+  ok(openReq.sla_due_at, `${tag} it has a clock`);
+  await page.evaluate(id => requestSheet(id), openReq.id);
+  await page.waitForSelector('#rq-status', { timeout: 10000 });
+  ok(await page.$eval('.modal-body .badge', e => /h (left|overdue)|resolved|closed/.test(e.textContent)), `${tag} request sheet shows time left or overdue`);
+  await page.type('#rq-comment', 'Checked the tap');
+  await page.evaluate(id => addRequestComment(id), openReq.id);
+  await page.waitForFunction(() => /Checked the tap/.test(document.querySelector('.modal-body')?.textContent || ''), { timeout: 8000 });
+  ok(true, `${tag} comment posted and shown`);
+  const withPhoto = await page.evaluate(async (id) => {
+    const c = document.createElement('canvas'); c.width = 60; c.height = 60;
+    const x = c.getContext('2d'); x.fillStyle = '#888'; x.fillRect(0, 0, 60, 60);
+    await apiFetch(`/requests/${id}/photos`, { method: 'POST', body: { image: c.toDataURL('image/jpeg', 0.7) } });
+    return (await apiFetch(`/requests/${id}`)).photos.length;
+  }, openReq.id);
+  eq(withPhoto, 1, `${tag} a photo can be attached`);
+  await page.evaluate(id => requestSheet(id), openReq.id);
+  await page.waitForSelector('.rq-photos img', { timeout: 8000 });
+  await page.waitForFunction(() => { const i = document.querySelector('.rq-photos img'); return i && i.dataset.loaded === '1'; }, { timeout: 10000 });
+  await sleep(300);
+  const imgOk = await page.$eval('.rq-photos img', img => img.complete && img.naturalWidth > 0);
+  ok(imgOk, `${tag} the photo actually loads (authenticated image request)`);
+  await page.screenshot({ path: path.join(SHOTS, `request-sheet-${width}.png`) });
+  // Assign and close
+  const staffList = await page.evaluate(() => API.getUsers());
+  const someStaff = staffList.find(u => u.role === 'staff');
+  if (someStaff) {
+    await page.select('#rq-assign', String(someStaff.id));
+    await page.evaluate(id => saveRequest(id), openReq.id);
+    await page.waitForFunction(() => !document.querySelector('#rq-status'), { timeout: 10000 });
+    const after = await page.evaluate(id => apiFetch(`/requests/${id}`), openReq.id);
+    eq(after.request.assigned_to, someStaff.id, `${tag} assignment saved`);
+    eq(after.request.status, 'assigned', `${tag} assigning moves it out of "open"`);
+  }
+  // Staff "My day" on Home
+  await page.evaluate(() => navigate('dashboard'));
+  await page.waitForSelector('.home-greeting', { timeout: 15000 });
+  await sleep(800);
+  const myTasks = await page.evaluate(() => apiFetch('/my-tasks'));
+  ok(myTasks.checklist.total >= 1, `${tag} my-tasks returns the checklist`);
+  const cardShown = await page.$eval('#mytasks-card', e => !e.classList.contains('hidden')).catch(() => false);
+  ok(cardShown === (myTasks.checklist.items.some(i => !i.is_checked) || myTasks.requests.length > 0), `${tag} "My day" card appears only when there is something in it`);
 
   eq(jsErrors.length, 0, `${tag} no uncaught JS errors (${jsErrors.join('; ')})`);
   await page.close(); await ctx.close();

@@ -70,7 +70,7 @@ function navigate(page) {
     const cQ = document.getElementById('copilot-q');
     if (cQ) cQ.value = '';
   }
-  const pages = { dashboard:pgHome, rooms:pgRooms, guests:pgGuests, 'daily-menu':pgMenu, 'daily-checklist':pgChecklist, complaints:pgComplaints, payments:pgPayments, 'guest-messages':pgAnnouncements, inbox:pgInbox, purchases:pgPurchases, collections:pgCollections, 'rent-due':pgRentDue, reports:pgReports, 'balance-sheet':pgBalanceSheet, admin:pgAdmin, collect:pgCollect, reminders:pgReminders, finance:pgFinance, operations:pgOperations };
+  const pages = { dashboard:pgHome, rooms:pgRoomMap, 'rooms-table':pgRooms, guests:pgGuests, 'daily-menu':pgMenu, 'daily-checklist':pgChecklist, complaints:pgComplaints, payments:pgPayments, 'guest-messages':pgAnnouncements, inbox:pgInbox, purchases:pgPurchases, collections:pgCollections, 'rent-due':pgRentDue, reports:pgReports, 'balance-sheet':pgBalanceSheet, admin:pgAdmin, collect:pgCollect, reminders:pgReminders, finance:pgFinance, operations:pgOperations };
   if(!pages[page]) return;
   // Error boundary: a thrown error inside any screen shows a retry card
   // instead of a blank page.
@@ -1163,7 +1163,7 @@ async function pgComplaints(filter) {
                   <td>${priorityBadge(c.priority)}</td>
                   <td><span class="badge ${c.status==='resolved'?'badge-green':c.status==='in_progress'?'badge-blue':'badge-red'}">${c.status.replace('_',' ')}</span></td>
                   <td>
-                    ${c.status!=='resolved' ? `<button class="btn btn-outline btn-sm" onclick="complaintStatusModal(${c.id},'${c.status}')">Update</button>` : ''}
+                    <button class="btn btn-outline btn-sm" onclick="requestSheet(${c.id})">Open</button>
                     ${isAdmin() ? `<button class="btn btn-outline btn-sm" onclick="deleteComplaint(${c.id})">Delete</button>` : ''}
                   </td>
                 </tr>`).join('')}
@@ -4175,6 +4175,7 @@ async function pgHome(force) {
       </div>
     </div>
 
+    <div class="card mb-6 hidden" id="mytasks-card"></div>
     ${hasAttention ? `<div class="home-section-h">Needs attention</div>
     <div class="card"><div style="padding:4px 16px">
       ${level(h.attention.high, '🔴')}${level(h.attention.medium, '🟠')}${level(h.attention.low, '🟢')}
@@ -4224,6 +4225,7 @@ async function pgHome(force) {
     </div></div>` : ''}
   `);
   briefCache = { text: h.brief.text, computed_at: h.brief.computed_at, cached: h.brief.cached };
+  loadMyTasks();
 }
 async function loadHome(force) { if (force) { await apiFetch('/copilot/brief?force=1'); } navigate('dashboard'); }
 
@@ -4511,4 +4513,197 @@ function openWizardFromCopilot(w) {
   if (!w) return;
   if (w.kind === 'move-in') moveInWizard(w.fields);
   if (w.kind === 'checkout') checkoutWizard(w.fields.guest_id, w.fields);
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   SPRINT 9 — room & bed map, request workflow, staff tasks
+   ═══════════════════════════════════════════════════════════════ */
+
+// ── Room & bed map ──────────────────────────────────────────────
+let roomMapCache = null;
+async function pgRoomMap() {
+  skeleton('cards');
+  document.getElementById('topbar-actions').innerHTML = isAdmin()
+    ? `<button class="btn btn-primary btn-sm" onclick="roomModal()">${icon('plus')} Add room</button>` : '';
+  const m = await apiFetch('/room-map');
+  roomMapCache = m;
+  setContent(`
+    <div class="page-header"><h1>Rooms</h1><p>${m.totals.occupied} of ${m.totals.beds} beds taken · ${m.totals.free} free</p></div>
+    <div class="flex gap-2 mb-5" style="flex-wrap:wrap">
+      <button class="btn btn-primary btn-sm" onclick="pgRoomMap()">Map</button>
+      <button class="btn btn-outline btn-sm" onclick="pgRooms()">Table</button>
+      <span class="bed-key"><i class="bed occupied"></i> occupied <i class="bed free"></i> free <i class="bed maintenance"></i> maintenance</span>
+    </div>
+    ${m.floors.map(f => `
+      <div class="home-section-h">Floor ${f.floor}</div>
+      <div class="room-grid">
+        ${f.rooms.map(r => `
+          <button class="room-tile ${r.status !== 'active' ? 'is-' + r.status : ''}" onclick="roomSheet(${r.id})">
+            <div class="rt-head"><strong>${r.room_number}</strong>${r.high_issues ? `<span class="badge badge-red">${r.high_issues}!</span>` : r.open_issues ? `<span class="badge badge-amber">${r.open_issues}</span>` : ''}</div>
+            <div class="rt-beds">${r.beds.map(b => `<i class="bed ${b.state}" title="${b.resident ? b.resident.name : b.state}"></i>`).join('')}</div>
+            <div class="rt-sub">${r.occupied}/${r.total_beds} · ${fmt(r.monthly_rent)}</div>
+          </button>`).join('')}
+      </div>`).join('')}
+  `);
+}
+
+function roomSheet(id) {
+  const r = roomMapCache.floors.flatMap(f => f.rooms).find(x => String(x.id) === String(id));
+  if (!r) return;
+  const staffCanEdit = isAdmin();
+  openModal(`<div class="modal">
+    <div class="modal-header"><h3>Room ${r.room_number}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+    <div class="modal-body">
+      <div class="r360-kv"><span>Floor</span><strong>${r.floor}</strong></div>
+      <div class="r360-kv"><span>Beds</span><strong>${r.occupied} of ${r.total_beds} taken</strong></div>
+      <div class="r360-kv"><span>Rent</span><strong>${fmt(r.monthly_rent)}</strong></div>
+      <div class="r360-kv"><span>Condition</span><strong>${r.status}</strong></div>
+      <div class="r360-kv"><span>Last inspected</span><strong>${r.last_inspected ? fmtDate(r.last_inspected) : 'Never'}</strong></div>
+      <div class="r360-h">Beds</div>
+      ${r.beds.map(b => `<div class="r360-row"><span>Bed ${b.bed}</span>${b.resident
+        ? `<button class="btn btn-outline btn-sm" onclick="closeModal();residentProfile(${b.resident.id})">${b.resident.name}</button>`
+        : `<span class="badge badge-green">free</span>`}</div>`).join('')}
+      ${r.open_issues ? `<div class="r360-h">Requests</div><button class="btn btn-outline btn-sm" onclick="closeModal();navigate('complaints')">${r.open_issues} open — open the register</button>` : ''}
+      <div class="flex gap-2" style="flex-wrap:wrap;margin-top:14px">
+        ${r.free > 0 ? `<button class="btn btn-primary btn-sm" onclick="closeModal();moveInWizard({ room_id: ${r.id} })">Move someone in</button>` : ''}
+        <button class="btn btn-outline btn-sm" onclick="markInspected(${r.id})">Mark inspected today</button>
+        ${staffCanEdit ? `<button class="btn btn-outline btn-sm" onclick="setRoomStatus(${r.id}, '${r.status === 'maintenance' ? 'active' : 'maintenance'}')">${r.status === 'maintenance' ? 'Back in service' : 'Under maintenance'}</button>` : ''}
+      </div>
+      <div id="rs-alert" class="alert alert-danger hidden" style="margin-top:10px"></div>
+    </div></div>`);
+}
+async function setRoomStatus(id, status) {
+  try { await apiFetch(`/rooms/${id}/status`, { method: 'PUT', body: { status } }); closeModal(); toast(`Room marked ${status}`, 'ok'); pgRoomMap(); }
+  catch (e) { const a = document.getElementById('rs-alert'); if (a) showAlert(a, e.message); else toast(e.message); }
+}
+async function markInspected(id) {
+  try { await apiFetch(`/rooms/${id}/status`, { method: 'PUT', body: { last_inspected: nowDate() } }); closeModal(); toast('Inspection recorded', 'ok'); pgRoomMap(); }
+  catch (e) { toast(e.message); }
+}
+
+// ── Request detail: owner, clock, comments, photos ──────────────
+let staffUsersCache = null;
+async function requestSheet(id) {
+  openModal(`<div class="modal modal-lg"><div class="modal-header"><h3>Request</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+    <div class="modal-body"><div class="sm-skel"><div class="sm-skel-line"></div><div class="sm-skel-card"></div></div></div></div>`);
+  try {
+    const [d, staff] = await Promise.all([
+      apiFetch(`/requests/${id}`),
+      staffUsersCache ? Promise.resolve(staffUsersCache) : (isAdmin() ? API.getUsers().then(u => (staffUsersCache = u)).catch(() => []) : Promise.resolve([]))
+    ]);
+    renderRequestSheet(d, staff || []);
+  } catch (e) { toast(e.message); closeModal(); }
+}
+function slaLabel(r) {
+  if (['resolved', 'closed'].includes(r.status)) return `<span class="badge badge-green">${r.status}</span>`;
+  if (!r.sla_due_at) return '';
+  const hrs = (new Date(r.sla_due_at) - Date.now()) / 3600000;
+  if (hrs < 0) return `<span class="badge badge-red">${Math.round(-hrs)}h overdue</span>`;
+  if (hrs < 4) return `<span class="badge badge-amber">${Math.round(hrs)}h left</span>`;
+  return `<span class="badge badge-gray">${Math.round(hrs)}h left</span>`;
+}
+function renderRequestSheet(d, staff) {
+  const r = d.request;
+  openModal(`<div class="modal modal-lg">
+    <div class="modal-header"><h3>${r.category}${r.room_number ? ` · Room ${r.room_number}` : ''}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+    <div class="modal-body">
+      <div class="r360-status">${slaLabel(r)}<span class="badge badge-${r.priority === 'high' ? 'red' : r.priority === 'low' ? 'gray' : 'amber'}">${r.priority}</span>
+        ${r.assigned_username ? `<span class="badge badge-blue">${r.assigned_username}</span>` : '<span class="badge badge-gray">unassigned</span>'}</div>
+      <p style="font-size:15px;margin-bottom:6px">${r.description}</p>
+      ${r.likely_issue ? `<p class="text-muted" style="font-size:13px">Likely: ${r.likely_issue}</p>` : ''}
+      <div class="form-row" style="margin-top:12px">
+        <div class="form-group"><label>Status</label><select id="rq-status">${['open', 'assigned', 'in_progress', 'resolved', 'closed'].map(x => `<option value="${x}" ${r.status === x ? 'selected' : ''}>${x.replace('_', ' ')}</option>`).join('')}</select></div>
+        <div class="form-group"><label>Priority</label><select id="rq-priority">${['low', 'medium', 'high'].map(x => `<option value="${x}" ${r.priority === x ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
+      </div>
+      ${staff.length ? `<div class="form-group"><label>Assigned to</label><select id="rq-assign"><option value="">— nobody —</option>${staff.map(u => `<option value="${u.id}" ${String(r.assigned_to) === String(u.id) ? 'selected' : ''}>${u.username}</option>`).join('')}</select></div>` : ''}
+      <div class="form-group"><label>Resolution note</label><textarea id="rq-note" rows="2" placeholder="What was done">${r.resolution_notes || ''}</textarea></div>
+      <button class="btn btn-primary" style="width:100%" onclick="saveRequest(${r.id})">Save</button>
+
+      <div class="r360-h">Photos</div>
+      <div class="rq-photos">
+        ${d.photos.map(p => `<img data-req="${r.id}" data-photo="${p.id}" alt="Request photo" onclick="window.open(this.src,'_blank')"/>`).join('')}
+        <button class="rq-photo-add" onclick="requestAddPhoto(${r.id})">${icon('camera', 'ic ic-lg')}<span>Add</span></button>
+      </div>
+      <div id="rq-photo-status" class="text-muted" style="font-size:12px"></div>
+
+      <div class="r360-h">Comments</div>
+      ${d.comments.length ? d.comments.map(c => `<div class="rq-comment"><div class="t-sub">${c.username || c.guest_name || 'Someone'} · ${fmtDate(c.created_at)}</div>${c.body}</div>`).join('') : '<p class="text-muted" style="font-size:13px">No comments yet.</p>'}
+      <div class="flex gap-2" style="margin-top:8px">
+        <input id="rq-comment" placeholder="Add a note…" style="flex:1;margin:0" onkeydown="if(event.key==='Enter')addRequestComment(${r.id})"/>
+        <button class="btn btn-outline btn-sm" onclick="addRequestComment(${r.id})">Post</button>
+      </div>
+      <div id="rq-alert" class="alert alert-danger hidden" style="margin-top:10px"></div>
+    </div></div>`);
+  loadRequestPhotos();
+}
+// A browser does not attach the Authorization header to <img src>, so every
+// photo is fetched with the token and shown from an object URL. The endpoint
+// stays behind auth — no public photo links.
+async function loadRequestPhotos() {
+  const imgs = [...document.querySelectorAll('img[data-photo]')];
+  for (const img of imgs) {
+    if (img.dataset.loaded) continue;
+    try {
+      const res = await fetch(`/api/requests/${img.dataset.req}/photos/${img.dataset.photo}`, { headers: { Authorization: 'Bearer ' + getToken() } });
+      if (!res.ok) throw new Error('photo failed');
+      const url = URL.createObjectURL(await res.blob());
+      img.src = url; img.dataset.loaded = '1';
+      img.addEventListener('load', () => setTimeout(() => URL.revokeObjectURL(url), 60000), { once: true });
+    } catch { img.replaceWith(Object.assign(document.createElement('div'), { className: 'rq-photo-fail', textContent: 'Photo unavailable' })); }
+  }
+}
+
+async function saveRequest(id) {
+  const body = {
+    status: document.getElementById('rq-status').value,
+    priority: document.getElementById('rq-priority').value,
+    note: document.getElementById('rq-note').value.trim() || undefined
+  };
+  const a = document.getElementById('rq-assign');
+  if (a) body.assigned_to = a.value ? Number(a.value) : undefined;
+  try { await apiFetch(`/requests/${id}`, { method: 'PUT', body }); closeModal(); toast('Request updated', 'ok'); navigate('complaints'); }
+  catch (e) { const al = document.getElementById('rq-alert'); if (al) showAlert(al, e.message); else toast(e.message); }
+}
+async function addRequestComment(id) {
+  const input = document.getElementById('rq-comment');
+  const body = input.value.trim();
+  if (!body) return;
+  try { await apiFetch(`/requests/${id}/comments`, { method: 'POST', body: { body } }); requestSheet(id); }
+  catch (e) { toast(e.message); }
+}
+async function requestAddPhoto(id) {
+  const status = document.getElementById('rq-photo-status');
+  const file = await smPickPhoto();
+  if (!file) return;
+  if (status) status.textContent = 'Compressing…';
+  try {
+    // 1000px / 0.7 quality keeps a readable photo of a leak or a meter under
+    // 150 kB, which matters on the warden's data plan.
+    const image = await smDownscale(file, 1000, 0.7);
+    await apiFetch(`/requests/${id}/photos`, { method: 'POST', body: { image } });
+    requestSheet(id);
+  } catch (e) { if (status) status.textContent = e.message; }
+}
+
+// ── Staff "My day" ──────────────────────────────────────────────
+async function loadMyTasks() {
+  const host = document.getElementById('mytasks-card');
+  if (!host) return;
+  try {
+    const t = await apiFetch('/my-tasks');
+    const pending = t.checklist.items.filter(i => !i.is_checked);
+    if (!pending.length && !t.requests.length) { host.classList.add('hidden'); return; }
+    host.innerHTML = `
+      <div class="card-header"><h3>${icon('check-square')} My day</h3>
+        <span class="text-muted" style="font-size:12px">${t.checklist.done}/${t.checklist.total} done${t.overdue ? ` · ${t.overdue} overdue` : ''}</span></div>
+      <div style="padding:4px 16px">
+        ${t.requests.map(r => `<div class="today-row">${icon('wrench')}<span class="t-main"><strong>${r.category}</strong>${r.room_number ? ' · Room ' + r.room_number : ''}
+          <div class="t-sub">${r.description.slice(0, 60)}</div></span>${r.overdue ? `<span class="badge badge-red">${Math.round(-r.hours_left)}h over</span>` : `<span class="badge badge-gray">${Math.round(r.hours_left)}h</span>`}
+          <button class="btn btn-outline btn-sm" onclick="requestSheet(${r.id})">Open</button></div>`).join('')}
+        ${pending.slice(0, 6).map(i => `<div class="today-row">${icon('calendar')}<span class="t-main">${i.task}<div class="t-sub">${i.due_time || i.time_label || ''}${i.assigned_to ? ' · yours' : ''}</div></span></div>`).join('')}
+        ${pending.length > 6 ? `<div class="t-sub" style="padding:8px 0">…and ${pending.length - 6} more</div>` : ''}
+      </div>`;
+    host.classList.remove('hidden');
+  } catch { host.classList.add('hidden'); }
 }

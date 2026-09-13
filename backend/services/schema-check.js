@@ -7,9 +7,9 @@ const pool = require('../db');
 const REQUIRED = {
   tables: ['users', 'rooms', 'guests', 'collections', 'purchases', 'guest_rent_history', 'guest_room_history', 'deposit_refunds',
     'fixed_assets', 'capital_transactions', 'app_settings', 'daily_menu', 'announcements', 'inbox_messages', 'activity_log',
-    'checklist_items', 'checklist_log', 'complaints', 'ai_reads', 'reminder_log', 'owner_reports', 'ai_proposals', 'ai_actions'],
+    'checklist_items', 'checklist_log', 'complaints', 'ai_reads', 'reminder_log', 'owner_reports', 'ai_proposals', 'ai_actions', 'request_comments', 'request_photos'],
   columns: { guests: ['password_hash', 'address', 'advance_required', 'rent_variance_approved', 'expected_checkout', 'resident_no'], collections: ['status', 'source'],
-    purchases: ['status', 'source'], complaints: ['source', 'priority'] }
+    purchases: ['status', 'source'], complaints: ['source', 'priority', 'assigned_to', 'sla_due_at'], rooms: ['status'], checklist_items: ['assigned_to'] }
 };
 
 let last = { checkedAt: null, missing: [], ok: null };
