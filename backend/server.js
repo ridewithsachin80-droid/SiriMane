@@ -40,6 +40,10 @@ const loginLimiter = rateLimit({
 app.use('/api/auth/login', loginLimiter);
 app.use('/api/guest-login', loginLimiter);
 
+// AI routes parse their own (larger) JSON body — mounted before the global
+// 10 kb parser so a bill photo is accepted there and nowhere else.
+app.use('/api/ai', require('./routes/ai'));
+
 app.use(express.json({ limit: '10kb' }));
 
 app.use('/api', require('./routes/index'));

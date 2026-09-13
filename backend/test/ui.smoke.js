@@ -18,6 +18,15 @@ if (!process.env.DATABASE_URL) { console.error('DATABASE_URL is required'); proc
 const CHROME = process.env.CHROME_PATH;
 if (!CHROME) { console.error('CHROME_PATH is required'); process.exit(1); }
 
+// Sprint 3: stub the AI providers so the browser flows run without keys/network.
+delete process.env.GEMINI_API_KEY; delete process.env.GROQ_API_KEY;
+const ai = require('../routes/ai');
+ai.providers._stub = true;
+ai.providers.geminiVision = async ({ prompt }) => /identity/i.test(prompt)
+  ? '{"name":"Scan Test","id_proof_type":"Aadhaar","id_proof_number":"9999 8888 7777","address":"5th Cross, Tumakuru","confidence":"high"}'
+  : '{"amount":845,"paid_to":"Nandini Milk Parlour","purchase_date":"2026-09-11","category":"Groceries","description":"Milk and curd for the week","payment_mode":"Cash","confidence":"high"}';
+ai.providers.geminiText = async () => 'OK';
+ai.providers.groqText = async ({ user }) => user === 'ping' ? 'OK' : JSON.stringify({ guest_id: null, amount: null, mode: null, type: 'rent', category: 'Water', priority: 'high', description: user });
 const app = require('../server');
 const pool = require('../db');
 let count = 0;
@@ -205,6 +214,96 @@ async function runAtWidth(browser, BASE, width) {
   const hasCollect = await page.$('button[onclick^="collectFrom"]');
   ok(hasCollect, `${tag} Rent Due has a per-resident Collect button`);
   await noHScroll('rent-due');
+
+  // ── Sprint 3: voice → preview → confirm on Collect ────────────────────
+  await page.evaluate(() => navigate('collect'));
+  await page.waitForSelector('#collect-mic', { timeout: 8000 });
+  ok(await page.$('#collect-mic'), `${tag} Collect has a mic`);
+  ok(typeof (await page.evaluate(() => typeof SMParse)) === 'string' && (await page.evaluate(() => typeof SMParse.parseCollection)) === 'function', `${tag} shared parser loaded in the browser`);
+  const spoken = `${target.name} ${target.room_number ? 'room ' + target.room_number : ''} two thousand five hundred gpay`;
+  await page.evaluate(t => collectApplyVoice(t), spoken);
+  await page.waitForSelector('#collect-preview:not(.hidden) .btn-primary', { timeout: 8000 });
+  const previewText = await page.$eval('#collect-preview', e => e.innerText);
+  ok(previewText.includes(target.name) && previewText.includes('2,500') && previewText.includes('UPI'), `${tag} voice preview shows resident, ₹2,500, UPI`);
+  const rowsBefore = (await page.evaluate(() => apiFetch('/collections'))).length;
+  eq(await page.$eval('#collect-amount', e => e.value).catch(() => ''), '', `${tag} nothing filled before "Use this"`);
+  eq((await page.evaluate(() => apiFetch('/collections'))).length, rowsBefore, `${tag} nothing saved by the preview`);
+  await page.evaluate(() => collectUseVoice());
+  await page.waitForSelector('#collect-amount', { timeout: 5000 });
+  eq(await page.$eval('#collect-amount', e => e.value), '2500', `${tag} "Use this" fills the amount`);
+  ok(await page.$eval('#collect-modes .sm-chip[data-mode="UPI"]', e => e.classList.contains('selected')), `${tag} and the mode`);
+  eq((await page.evaluate(() => apiFetch('/collections'))).length, rowsBefore, `${tag} still nothing saved until Save is tapped`);
+  await page.evaluate(() => saveCollectEntry());
+  await page.waitForFunction(() => document.body.innerText.includes('recorded'), { timeout: 8000 });
+  const voiceRow = (await page.evaluate(() => apiFetch('/collections'))).find(c => parseFloat(c.amount) === 2500);
+  ok(voiceRow, `${tag} voice entry saved on confirm`); eq(voiceRow.source, 'voice', `${tag} saved with source=voice`);
+  await page.screenshot({ path: path.join(SHOTS, `collect-voice-${width}.png`) });
+  // Ambiguous phrase → asks, never guesses
+  await page.evaluate(() => navigate('collect'));
+  await page.waitForSelector('#collect-mic', { timeout: 8000 });
+  await page.evaluate(() => collectApplyVoice('somebody paid three thousand'));
+  await page.waitForSelector('#collect-preview:not(.hidden)', { timeout: 8000 });
+  ok((await page.$eval('#collect-preview', e => e.innerText)).includes("couldn't tell which resident"), `${tag} unknown resident → asks instead of guessing`);
+
+  // ── Sprint 3: complaint by voice ──────────────────────────────────────
+  await page.evaluate(() => navigate('complaints'));
+  await page.waitForFunction(() => document.querySelector('#page-content h1')?.textContent.includes('Complaint'), { timeout: 8000 });
+  await page.evaluate(() => complaintModal());
+  await page.waitForSelector('#cp-mic', { timeout: 5000 });
+  await page.evaluate(() => complaintApplyVoice('geyser leaking in bathroom room 2'));
+  await page.waitForSelector('#cp-preview:not(.hidden) .btn-primary', { timeout: 8000 });
+  ok((await page.$eval('#cp-preview', e => e.innerText)).includes('Water'), `${tag} complaint preview categorised as Water`);
+  eq(await page.$eval('#cp-desc', e => e.value), '', `${tag} form untouched before confirm`);
+  await page.evaluate(() => document.querySelector('#cp-preview .btn-primary').click());
+  eq(await page.$eval('#cp-category', e => e.value), 'Water', `${tag} category filled on confirm`);
+  eq(await page.$eval('#cp-desc', e => e.value), 'geyser leaking in bathroom room 2', `${tag} description filled`);
+  eq(await page.$eval('#cp-room', e => e.value), 'Room 2', `${tag} room filled`);
+  await page.evaluate(() => saveComplaint());
+  await page.waitForFunction(() => document.body.innerText.includes('geyser leaking'), { timeout: 8000 });
+  const cRow = (await page.evaluate(() => apiFetch('/complaints'))).find(c => /geyser leaking/.test(c.description));
+  eq(cRow.source, 'voice', `${tag} complaint saved with source=voice`);
+
+  // ── Sprint 3: bill photo → purchase (stubbed reader) ──────────────────
+  await page.evaluate(() => navigate('purchases'));
+  await page.waitForFunction(() => document.querySelector('#page-content h1'), { timeout: 8000 });
+  await page.evaluate(() => purchaseModal());
+  await page.waitForSelector('#pu-scan-btn', { timeout: 5000 });
+  ok(await page.$('#pu-scan-btn'), `${tag} purchase modal has a scan-bill button`);
+  // Drive the same code path as the camera, with a canvas-made image instead of a file picker.
+  const scanned = await page.evaluate(async () => {
+    const c = document.createElement('canvas'); c.width = 40; c.height = 40; c.getContext('2d').fillStyle = '#fff'; c.getContext('2d').fillRect(0, 0, 40, 40);
+    const image = c.toDataURL('image/jpeg', 0.8);
+    return apiFetch('/ai/vision', { method: 'POST', body: { kind: 'bill', image } });
+  });
+  eq(scanned.fields.amount, 845, `${tag} bill scan returns fields`);
+  await page.evaluate(f => { const b = document.getElementById('pu-preview'); b.classList.remove('hidden'); purchaseUseScan(f); }, scanned.fields);
+  eq(await page.$eval('#pu-amt', e => e.value), '845', `${tag} amount filled from bill`);
+  eq(await page.$eval('#pu-paid', e => e.value), 'Nandini Milk Parlour', `${tag} vendor filled`);
+  eq(await page.$eval('#pu-cat', e => e.value), 'Groceries', `${tag} category filled`);
+  eq(await page.$eval('#pu-date', e => e.value), '2026-09-11', `${tag} date filled`);
+  await page.evaluate(() => savePurchase());
+  await sleep(800);
+  const pRow = (await page.evaluate(() => apiFetch('/purchases'))).find(p => parseFloat(p.amount) === 845);
+  ok(pRow, `${tag} purchase saved`); eq(pRow.source, 'photo', `${tag} saved with source=photo`);
+
+  // ── Sprint 3: ID photo → guest fields ─────────────────────────────────
+  await page.evaluate(() => navigate('guests'));
+  await page.waitForFunction(() => document.querySelector('#page-content table'), { timeout: 8000 });
+  await page.evaluate(() => guestModal());
+  await page.waitForSelector('#gf-scan-btn', { timeout: 5000 });
+  ok(await page.$('#gf-idnum'), `${tag} guest form now has an ID number field`);
+  await page.evaluate(() => guestUseScan({ name: 'Scan Test', id_proof_type: 'Aadhaar', id_proof_number: '999988887777', address: '5th Cross, Tumakuru', confidence: 'high' }));
+  eq(await page.$eval('#gf-name', e => e.value), 'Scan Test', `${tag} name filled from ID`);
+  eq(await page.$eval('#gf-idtype', e => e.value), 'Aadhaar', `${tag} ID type mapped to the form's list`);
+  eq(await page.$eval('#gf-idnum', e => e.value), '999988887777', `${tag} ID number filled`);
+  eq(await page.$eval('#gf-address', e => e.value), '5th Cross, Tumakuru', `${tag} address filled`);
+  await page.evaluate(() => { document.getElementById('gf-join').value = '2026-09-01'; document.getElementById('gf-phone').value = '9' + String(Date.now()).slice(-9); });
+  await page.evaluate(() => saveGuest());
+  await page.waitForFunction(() => !document.querySelector('#gf-name'), { timeout: 8000 });
+  const saved2 = (await page.evaluate(() => API.getGuests())).find(g => g.name === 'Scan Test');
+  ok(saved2, `${tag} guest saved from scanned fields`);
+  const full = await page.evaluate(id => API.getGuest(id), saved2.id);
+  eq(full.address, '5th Cross, Tumakuru', `${tag} LINKAGE: address actually persisted`); eq(full.id_proof_number, '999988887777', `${tag} ID number persisted`);
 
   eq(jsErrors.length, 0, `${tag} no uncaught JS errors (${jsErrors.join('; ')})`);
   await page.close(); await ctx.close();

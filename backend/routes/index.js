@@ -275,7 +275,7 @@ router.get('/guests/:id', auth, async (req, res) => {
 });
 
 router.post('/guests', auth, async (req, res) => {
-  const { name,phone,email,emergency_contact,id_proof_type,id_proof_number,room_id,bed_number,join_date,monthly_rent,deposit_amount,notes } = req.body;
+  const { name,phone,email,emergency_contact,id_proof_type,id_proof_number,room_id,bed_number,join_date,monthly_rent,deposit_amount,notes,address } = req.body;
   if (!name || !join_date) return res.status(400).json({ error: 'Name and join date required' });
   try {
     // If this guest's rent doesn't match their room's standard per-bed rate,
@@ -290,8 +290,8 @@ router.post('/guests', auth, async (req, res) => {
     }
 
     const r = await pool.query(
-      `INSERT INTO guests(name,phone,email,emergency_contact,id_proof_type,id_proof_number,room_id,bed_number,join_date,monthly_rent,deposit_amount,notes,created_by,rent_variance_approved) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
-      [name,phone,email,emergency_contact,id_proof_type,id_proof_number,room_id||null,bed_number||null,join_date,monthly_rent||0,deposit_amount||0,notes,req.user.id,rentVarianceApproved]);
+      `INSERT INTO guests(name,phone,email,emergency_contact,id_proof_type,id_proof_number,room_id,bed_number,join_date,monthly_rent,deposit_amount,notes,created_by,rent_variance_approved,address) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+      [name,phone,email,emergency_contact,id_proof_type||null,id_proof_number||null,room_id||null,bed_number||null,join_date,monthly_rent||0,deposit_amount||0,notes,req.user.id,rentVarianceApproved,address||null]);
     if (parseFloat(monthly_rent) > 0) {
       await pool.query(
         `INSERT INTO guest_rent_history(guest_id, monthly_rent, effective_from, changed_by, note) VALUES($1,$2,$3,$4,$5)`,
@@ -315,7 +315,7 @@ router.post('/guests', auth, async (req, res) => {
 });
 
 router.put('/guests/:id', auth, async (req, res) => {
-  const { name,phone,email,emergency_contact,room_id,bed_number,monthly_rent,deposit_amount,notes,leave_date,is_active,rent_effective_from } = req.body;
+  const { name,phone,email,emergency_contact,room_id,bed_number,monthly_rent,deposit_amount,notes,leave_date,is_active,rent_effective_from,address,id_proof_type,id_proof_number } = req.body;
   try {
     const existing = await pool.query('SELECT monthly_rent,deposit_amount FROM guests WHERE id=$1', [req.params.id]);
     if (!existing.rows[0]) return res.status(404).json({ error: 'Not found' });
@@ -336,8 +336,11 @@ router.put('/guests/:id', auth, async (req, res) => {
     }
 
     const r = await pool.query(
-      `UPDATE guests SET name=COALESCE($1,name),phone=COALESCE($2,phone),email=COALESCE($3,email),emergency_contact=COALESCE($4,emergency_contact),room_id=$5,bed_number=$6,monthly_rent=COALESCE($7,monthly_rent),deposit_amount=COALESCE($8,deposit_amount),notes=COALESCE($9,notes),leave_date=$10,is_active=COALESCE($11,is_active),rent_variance_approved=$12 WHERE id=$13 RETURNING *`,
-      [name,phone,email,emergency_contact,room_id||null,bed_number||null,monthly_rent,deposit_amount,notes,leave_date||null,is_active,rentVarianceApproved,req.params.id]);
+      `UPDATE guests SET name=COALESCE($1,name),phone=COALESCE($2,phone),email=COALESCE($3,email),emergency_contact=COALESCE($4,emergency_contact),room_id=$5,bed_number=$6,monthly_rent=COALESCE($7,monthly_rent),deposit_amount=COALESCE($8,deposit_amount),notes=COALESCE($9,notes),leave_date=$10,is_active=COALESCE($11,is_active),rent_variance_approved=$12,
+              address=COALESCE($14,address),id_proof_type=COALESCE($15,id_proof_type),id_proof_number=COALESCE($16,id_proof_number)
+        WHERE id=$13 RETURNING *`,
+      [name,phone,email,emergency_contact,room_id||null,bed_number||null,monthly_rent,deposit_amount,notes,leave_date||null,is_active,rentVarianceApproved,req.params.id,
+       address === undefined ? null : address, id_proof_type === undefined ? null : id_proof_type, id_proof_number === undefined ? null : id_proof_number]);
     if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
 
     if (newRent !== oldRent && newRent > 0) {
@@ -460,6 +463,7 @@ router.get('/collections/export/pdf', auth, requireAdmin, async (req, res) => {
 });
 
 router.post('/collections', auth, async (req, res) => {
+  const src = ['manual','voice','photo'].includes(req.body.source) ? req.body.source : 'manual';
   const { guest_id,guest_name,amount,collection_date,collection_month,collection_type,payment_mode,description,receipt_number } = req.body;
   if (!amount) return res.status(400).json({ error: 'Amount required' });
   try {
@@ -468,8 +472,8 @@ router.post('/collections', auth, async (req, res) => {
     // from the guest UPI self-reporting flow, which uses 'pending_verification'.
     const status = req.user.role === 'admin' ? 'confirmed' : 'pending_approval';
     const r = await pool.query(
-      `INSERT INTO collections(guest_id,guest_name,amount,collection_date,collection_month,collection_type,payment_mode,description,receipt_number,created_by,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-      [guest_id||null,guest_name,amount,collection_date||new Date(),collection_month,collection_type||'rent',payment_mode||'cash',description,receipt_number,req.user.id,status]);
+      `INSERT INTO collections(guest_id,guest_name,amount,collection_date,collection_month,collection_type,payment_mode,description,receipt_number,created_by,status,source) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+      [guest_id||null,guest_name,amount,collection_date||new Date(),collection_month,collection_type||'rent',payment_mode||'cash',description,receipt_number,req.user.id,status, src]);
     await logActivity(req, 'collection_add', `₹${amount} ${collection_type||'rent'} from ${guest_name||'guest #'+guest_id}${status==='pending_approval'?' (pending approval)':''}`);
     res.status(201).json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -545,6 +549,7 @@ router.get('/purchases/export/pdf', auth, requireAdmin, async (req, res) => {
 });
 
 router.post('/purchases', auth, async (req, res) => {
+  const src = ['manual','voice','photo'].includes(req.body.source) ? req.body.source : 'manual';
   const { amount,category,description,purchase_date,paid_to,payment_mode,receipt_number } = req.body;
   if (!amount || !category) return res.status(400).json({ error: 'Amount and category required' });
   try {
@@ -552,8 +557,8 @@ router.post('/purchases', auth, async (req, res) => {
     // spend; admin's own entries are trusted immediately.
     const status = req.user.role === 'admin' ? 'confirmed' : 'pending_approval';
     const r = await pool.query(
-      `INSERT INTO purchases(amount,category,description,purchase_date,paid_to,payment_mode,receipt_number,created_by,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-      [amount,category,description,purchase_date||new Date(),paid_to,payment_mode||'cash',receipt_number,req.user.id,status]);
+      `INSERT INTO purchases(amount,category,description,purchase_date,paid_to,payment_mode,receipt_number,created_by,status,source) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      [amount,category,description,purchase_date||new Date(),paid_to,payment_mode||'cash',receipt_number,req.user.id,status, src]);
     await logActivity(req, 'purchase_add', `₹${amount} ${category}${paid_to ? ' to '+paid_to : ''}${status==='pending_approval'?' (pending approval)':''}`);
     res.status(201).json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1558,9 +1563,10 @@ router.post('/complaints', auth, async (req, res) => {
       }
     }
     const r = await pool.query(
-      `INSERT INTO complaints(guest_id, guest_name, room_number, category, description, status, raised_by, created_by)
-       VALUES($1,$2,$3,$4,$5,'open','staff',$6) RETURNING *`,
-      [guestId, guestName, roomNumber, (category || 'Other').trim(), String(description).trim(), req.user.id]);
+      `INSERT INTO complaints(guest_id, guest_name, room_number, category, description, status, raised_by, created_by, source)
+       VALUES($1,$2,$3,$4,$5,'open','staff',$6,$7) RETURNING *`,
+      [guestId, guestName, roomNumber, (category || 'Other').trim(), String(description).trim(), req.user.id,
+       ['manual','voice','photo'].includes(req.body.source) ? req.body.source : 'manual']);
     await logActivity(req, 'complaint_add', `${category || 'Other'}: ${String(description).trim().slice(0, 80)}`);
     res.status(201).json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }

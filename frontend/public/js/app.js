@@ -527,6 +527,11 @@ async function guestModal(gData=null, id=null) {
       <div class="modal-header"><h3>${g.id?'Edit Guest':'Add New Guest'}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
       <div class="modal-body">
         <div id="gf-alert" class="alert alert-danger hidden"></div>
+        <div class="voice-row">
+          <button type="button" id="gf-scan-btn" class="mic-btn" style="background:var(--amber)" onclick="guestScanId()" title="Photograph the ID proof" aria-label="Scan ID">📷</button>
+          <span id="gf-scan-status" class="voice-status">Tap 📷 to photograph her Aadhaar / ID — name, address and ID number fill in for you to check. The photo is never stored.</span>
+        </div>
+        <div id="gf-preview" class="hidden"></div>
         <div class="form-row">
           <div class="form-group"><label>Full Name *</label><input id="gf-name" value="${g.name||''}" placeholder="Full name"/></div>
           <div class="form-group"><label>Phone</label><input id="gf-phone" value="${g.phone||''}" placeholder="Mobile"/></div>
@@ -561,6 +566,7 @@ async function guestModal(gData=null, id=null) {
             <select id="gf-idtype">${['','Aadhaar','PAN Card','Passport','Driving License','Voter ID'].map(t=>`<option value="${t}" ${g.id_proof_type===t?'selected':''}>${t||'— Select —'}</option>`).join('')}</select>
           </div>
         </div>
+        <div class="form-group"><label>ID Proof Number</label><input id="gf-idnum" value="${g.id_proof_number||''}" placeholder="As printed on the document" autocomplete="off"/></div>
         <div class="form-group"><label>Notes</label><textarea id="gf-notes" rows="2">${g.notes||''}</textarea></div>
       </div>
       <div class="modal-footer">
@@ -611,6 +617,7 @@ async function saveGuest(id) {
     monthly_rent:document.getElementById('gf-rent').value||0,
     deposit_amount:document.getElementById('gf-dep').value||0,
     id_proof_type:document.getElementById('gf-idtype').value,
+    id_proof_number:document.getElementById('gf-idnum').value.trim(),
     notes:document.getElementById('gf-notes').value,
     rent_effective_from: rentEffectiveEl ? rentEffectiveEl.value : null
   };
@@ -1124,11 +1131,17 @@ async function pgComplaints(filter) {
 }
 
 function complaintModal() {
+  window.complaintSource = 'manual';
   openModal(`
     <div class="modal">
       <div class="modal-header"><h3>🛠️ Log an Issue</h3><button class="modal-close" onclick="closeModal()">×</button></div>
       <div class="modal-body">
         <div id="cp-alert" class="alert alert-danger hidden"></div>
+        <div class="voice-row">
+          <button type="button" id="cp-mic" class="mic-btn" onclick="complaintVoiceToggle()" aria-label="Describe by voice">🎤</button>
+          <span id="cp-voice-status" class="voice-status">Tap the mic and say the problem, e.g. "geyser not working room 5"</span>
+        </div>
+        <div id="cp-preview" class="hidden"></div>
         <div class="form-row">
           <div class="form-group"><label>Category</label>
             <select id="cp-category">${COMPLAINT_CATEGORIES.map(c=>`<option value="${c}">${c}</option>`).join('')}</select>
@@ -1149,7 +1162,8 @@ async function saveComplaint() {
   const description = document.getElementById('cp-desc').value.trim();
   if (!description) { showAlert(al, 'Enter a description'); return; }
   try {
-    await API.createComplaint({ category: document.getElementById('cp-category').value, guest_name: document.getElementById('cp-room').value.trim() || null, description });
+    await API.createComplaint({ category: document.getElementById('cp-category').value, guest_name: document.getElementById('cp-room').value.trim() || null, description, source: window.complaintSource || 'manual' });
+    window.complaintSource = 'manual';
     closeModal(); pgComplaints(complaintsCurrentFilter); loadComplaintsCount();
   } catch(e) { showAlert(al, e.message); }
 }
@@ -1541,6 +1555,7 @@ function onPurchasesRangeChange() {
 }
 
 function purchaseModal() {
+  window.purchaseSource = 'manual';
   openModal(`
     <div class="modal">
       <div class="modal-header"><h3>🛒 Add Purchase</h3><button class="modal-close" onclick="closeModal()">×</button></div>
@@ -1548,8 +1563,10 @@ function purchaseModal() {
         <div id="pu-alert" class="alert alert-danger hidden"></div>
         <div class="voice-row">
           <button type="button" id="pu-mic-btn" class="mic-btn" onclick="togglePurchaseVoice()" title="Speak to fill this form" aria-label="Fill purchase by voice">🎤</button>
-          <span id="pu-voice-status" class="voice-status">Tap the mic and say something like "500 rupees groceries paid to Ramesh cash"</span>
+          <button type="button" id="pu-scan-btn" class="mic-btn" style="background:var(--amber)" onclick="purchaseScanBill()" title="Photograph the bill" aria-label="Scan bill">📷</button>
+          <span id="pu-voice-status" class="voice-status">Tap 🎤 and say "500 rupees groceries paid to Ramesh cash", or 📷 to photograph the bill</span>
         </div>
+        <div id="pu-preview" class="hidden"></div>
         <div class="form-row">
           <div class="form-group"><label>Amount (₹) *</label><input id="pu-amt" type="number" placeholder="e.g. 500"/></div>
           <div class="form-group"><label>Date</label><input id="pu-date" type="date" value="${nowDate()}"/></div>
@@ -1654,7 +1671,7 @@ async function confirmPendingPurchase(id) {
 
 async function savePurchase() {
   const al = document.getElementById('pu-alert');
-  const d = { amount:document.getElementById('pu-amt').value, purchase_date:document.getElementById('pu-date').value, category:document.getElementById('pu-cat').value, description:document.getElementById('pu-desc').value, paid_to:document.getElementById('pu-paid').value, payment_mode:document.getElementById('pu-mode').value };
+  const d = { amount:document.getElementById('pu-amt').value, purchase_date:document.getElementById('pu-date').value, category:document.getElementById('pu-cat').value, description:document.getElementById('pu-desc').value, paid_to:document.getElementById('pu-paid').value, payment_mode:document.getElementById('pu-mode').value, source: window.purchaseSource || 'manual' };
   if(!d.amount) { showAlert(al,'Amount required'); return; }
   try {
     await API.createPurchase(d);
@@ -2769,6 +2786,17 @@ async function renderAdminSettingsTab() {
     const settings = await API.getSettings();
     document.getElementById('admin-tab-content').innerHTML = `
       <div class="card mb-6">
+        <div class="card-header"><h3>AI inputs</h3></div>
+        <div style="padding:16px 20px">
+          <p style="font-size:13px;color:var(--text-muted,#64748B);margin-bottom:10px">
+            Photo scanning (bills, ID proof): <strong>${aiStatus.vision ? 'enabled' : 'not enabled — set GEMINI_API_KEY on Railway'}</strong> ·
+            Voice fallback: <strong>${aiStatus.text ? 'enabled' : 'not enabled — set GROQ_API_KEY on Railway'}</strong>
+          </p>
+          <button class="btn btn-outline btn-sm" id="ai-probe-btn" onclick="runAiProbe()">🔌 Test AI connection</button>
+          <div id="ai-probe-result" style="font-size:13px;margin-top:10px"></div>
+        </div>
+      </div>
+      <div class="card mb-6">
         <div class="card-header"><h3>PG Details (used on printed receipts)</h3></div>
         <div style="padding:20px;max-width:480px">
           <div id="pg-settings-alert" class="alert alert-danger hidden"></div>
@@ -2954,6 +2982,7 @@ const SM_PHONE = () => window.matchMedia('(max-width: 640px)').matches;
 // twice — every piece checks whether it already exists.
 function initPhoneChrome() {
   try { initTabBar(); initTopbarMore(); initMobileCards(); } catch (e) { console.error(e); }
+  loadAiStatus();
 }
 
 // ── Tables → cards on phones ────────────────────────────────────
@@ -3107,9 +3136,12 @@ async function pgCollect() {
   collectState.guest = null;
   collectState.mode = 'Cash';
   collectState.type = 'rent';
+  collectState.source = 'manual';
+  collectState.voiceProposal = null;
   setContent(`
     <div class="page-header"><h1>💵 Collect</h1><p>Rent · <span class="sm-kn">ಬಾಡಿಗೆ ಸಂಗ್ರಹ</span></p></div>
     <div class="card" style="padding:16px">
+      ${collectVoiceRow()}
       <div class="sm-collect-step">
         <h4>1 · Who is paying? <span class="sm-kn">ಯಾರು</span></h4>
         <input type="text" id="collect-search" placeholder="🔍 Search name, room or phone…" oninput="renderCollectPeople()" autocomplete="off"/>
@@ -3213,7 +3245,8 @@ async function saveCollectEntry() {
       collection_type: collectState.type,
       payment_mode: collectState.mode,
       collection_month: document.getElementById('collect-month').value || '',
-      description: ''
+      description: '',
+      source: collectState.source || 'manual'
     });
     showCollectDone(g, amount, saved);
   } catch (e) {
@@ -3245,4 +3278,276 @@ function showCollectDone(g, amount, saved) {
 async function collectFrom(guestId) {
   await pgCollect();
   selectCollectGuest(guestId);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SPRINT 3 — AI-first inputs: voice + photo, always preview → confirm
+   Nothing in this block writes to the server. It only fills forms; the
+   existing Save buttons do the writing, exactly as if the warden typed.
+   ═══════════════════════════════════════════════════════════════ */
+
+let aiStatus = { vision: false, text: false };
+async function loadAiStatus() {
+  try { aiStatus = await apiFetch('/ai/status'); } catch { aiStatus = { vision: false, text: false }; }
+}
+
+// ── Generic on-device voice engine (Web Speech API) ─────────────
+// One engine for Collect and Complaints; the Purchase modal keeps its own
+// (older) copy untouched.
+let smRec = null;
+function smVoice(btnId, statusId, onText, hint) {
+  const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+  const btn = document.getElementById(btnId);
+  const status = document.getElementById(statusId);
+  if (!btn || !status) return;
+  const say = (msg, err) => { status.textContent = msg; status.classList.toggle('voice-error', !!err); };
+  if (!Ctor) { say('Voice needs Chrome on Android. Please type instead.', true); return; }
+  if (smRec) { try { smRec.stop(); } catch {} smRec = null; return; }
+  try {
+    const rec = new Ctor();
+    smRec = rec;
+    rec.lang = 'en-IN'; rec.continuous = false; rec.interimResults = false; rec.maxAlternatives = 1;
+    rec.onstart = () => { btn.classList.add('listening'); btn.textContent = '⏹'; say('Listening… ' + (hint || 'speak now')); };
+    rec.onresult = e => {
+      const t = e.results && e.results[0] && e.results[0][0] ? e.results[0][0].transcript : '';
+      if (!t) { say('Didn\'t catch that — tap the mic and try again', true); return; }
+      say(`Heard: "${t}"`);
+      try { onText(t); } catch (err) { console.error(err); say('Couldn\'t understand that — please fill the form', true); }
+    };
+    rec.onerror = e => {
+      const m = { 'no-speech': 'Didn\'t hear anything — tap the mic and try again', 'audio-capture': 'No microphone found', 'not-allowed': 'Microphone permission denied — allow it in Chrome settings', 'network': 'Network error — check your signal', 'aborted': '' };
+      const msg = e && e.error in m ? m[e.error] : 'Voice input failed — please fill the form';
+      if (msg) say(msg, true);
+    };
+    rec.onend = () => { smRec = null; btn.classList.remove('listening'); btn.textContent = '🎤'; };
+    rec.start();
+  } catch { smRec = null; say('Could not start voice on this device', true); }
+}
+
+// ── Camera capture → downscaled JPEG data URL ───────────────────
+// Phones produce 3–8 MB photos; a bill is perfectly readable at 1280px and
+// ~200 kB, which matters on 4G and keeps us well under the server's limit.
+function smPickPhoto() {
+  return new Promise(resolve => {
+    const input = document.createElement('input');
+    input.type = 'file'; input.accept = 'image/*'; input.capture = 'environment';
+    input.style.display = 'none';
+    input.onchange = () => { const f = input.files && input.files[0]; input.remove(); resolve(f || null); };
+    document.body.appendChild(input);
+    input.click();
+  });
+}
+function smDownscale(file, maxSide = 1280, quality = 0.82) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      resolve(c.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not read that image')); };
+    img.src = url;
+  });
+}
+async function smScan(kind, statusEl) {
+  const file = await smPickPhoto();
+  if (!file) return null;
+  if (statusEl) statusEl.textContent = 'Reading the photo…';
+  const image = await smDownscale(file);
+  // The image goes to the server for one request and is discarded there.
+  return apiFetch('/ai/vision', { method: 'POST', body: { kind, image } });
+}
+
+// Small helper: fill a field and flash it so the warden sees what changed.
+function smFill(id, value) {
+  const el = document.getElementById(id);
+  if (!el || value === null || value === undefined || value === '') return false;
+  el.value = value;
+  el.classList.add('voice-filled');
+  setTimeout(() => el.classList.remove('voice-filled'), 1200);
+  return true;
+}
+
+// ── COLLECT by voice ─────────────────────────────────────────────
+function collectVoiceRow() {
+  return `
+    <div class="voice-row" style="margin-bottom:12px">
+      <button type="button" id="collect-mic" class="mic-btn" onclick="collectVoiceToggle()" aria-label="Fill by voice">🎤</button>
+      <span id="collect-voice-status" class="voice-status">Tap the mic and say e.g. "Priya room 12 six thousand UPI" · <span class="sm-kn">ಹೇಳಿ</span></span>
+    </div>
+    <div id="collect-preview" class="hidden"></div>`;
+}
+function collectVoiceToggle() {
+  smVoice('collect-mic', 'collect-voice-status', collectApplyVoice, 'name, room, amount, mode');
+}
+async function collectApplyVoice(text) {
+  const residents = collectState.list.map(g => ({ id: g.id, name: g.name, room_number: g.room_number }));
+  let p = SMParse.parseCollection(text, residents);
+  // The on-device parser handles almost everything; only fall back to the
+  // server (Groq) when it could not identify the resident.
+  if (!p.guest && aiStatus.text) {
+    try {
+      const r = await apiFetch('/ai/parse', { method: 'POST', body: { kind: 'collection', text } });
+      if (r.guest_id) p.guest = collectState.list.find(g => g.id === r.guest_id) || null;
+      if (!p.amount && r.amount) p.amount = r.amount;
+      if (!p.mode && r.mode) p.mode = r.mode;
+      if (r.type) p.type = r.type;
+    } catch { /* stay with local result */ }
+  }
+  showCollectPreview(text, p);
+}
+function showCollectPreview(text, p) {
+  const box = document.getElementById('collect-preview');
+  if (!box) return;
+  box.classList.remove('hidden');
+  if (!p.guest) {
+    box.innerHTML = `<div class="alert alert-warning" style="display:block">I heard <em>"${text}"</em> but couldn't tell which resident. Tap her name below, then say it again or type the amount.</div>`;
+    return;
+  }
+  const due = parseFloat(p.guest.amount_due) || 0;
+  box.innerHTML = `
+    <div class="card" style="padding:14px;border:2px solid var(--primary);background:#F5F3FF">
+      <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted,#64748B)">AI heard — please check</div>
+      <div style="font-size:16px;font-weight:700;margin:6px 0 2px">${p.guest.name}${p.guest.room_number ? ' · Room ' + p.guest.room_number : ''}</div>
+      <div style="font-size:14px">${p.amount ? '<strong>' + fmt(p.amount) + '</strong>' : '<span class="text-red">amount not heard</span>'} · ${p.mode || 'mode not heard'} · ${p.type}</div>
+      ${p.amount && due > 0 && Math.abs(p.amount - due) > 0.5 ? `<div style="font-size:12px;color:var(--amber);margin-top:4px">Her running balance is ${fmt(due)} — different from what was said.</div>` : ''}
+      <div class="flex gap-2" style="margin-top:10px">
+        <button class="btn btn-primary btn-sm" onclick="collectUseVoice()">✓ Use this</button>
+        <button class="btn btn-outline btn-sm" onclick="document.getElementById('collect-preview').classList.add('hidden')">✗ Ignore</button>
+      </div>
+    </div>`;
+  collectState.voiceProposal = p;
+}
+function collectUseVoice() {
+  const p = collectState.voiceProposal;
+  if (!p || !p.guest) return;
+  selectCollectGuest(p.guest.id);
+  if (p.amount) setCollectAmount(p.amount, p.type);
+  else collectState.type = p.type;
+  if (p.mode) setCollectMode(p.mode);
+  collectState.source = 'voice';
+  document.getElementById('collect-preview').classList.add('hidden');
+  const btn = document.getElementById('collect-save');
+  if (btn) btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+// ── COMPLAINT by voice ───────────────────────────────────────────
+function complaintVoiceToggle() {
+  smVoice('cp-mic', 'cp-voice-status', complaintApplyVoice, 'describe the problem');
+}
+async function complaintApplyVoice(text) {
+  const p = SMParse.parseComplaint(text);
+  let category = p.category, description = p.description;
+  if (category === 'Other' && aiStatus.text) {
+    try { const r = await apiFetch('/ai/parse', { method: 'POST', body: { kind: 'complaint', text } }); if (r.category) category = r.category; } catch {}
+  }
+  const box = document.getElementById('cp-preview');
+  box.classList.remove('hidden');
+  box.innerHTML = `
+    <div class="card" style="padding:12px;border:2px solid var(--primary);background:#F5F3FF;margin-bottom:12px">
+      <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted,#64748B)">AI heard — please check</div>
+      <div style="font-size:14px;margin:6px 0"><strong>${category}</strong>${p.room ? ' · Room ' + p.room : ''}<br>${description}</div>
+      <div class="flex gap-2">
+        <button class="btn btn-primary btn-sm" onclick="complaintUseVoice(${JSON.stringify({ category, description, room: p.room }).replace(/"/g, '&quot;')})">✓ Use this</button>
+        <button class="btn btn-outline btn-sm" onclick="document.getElementById('cp-preview').classList.add('hidden')">✗ Ignore</button>
+      </div>
+    </div>`;
+}
+function complaintUseVoice(p) {
+  const sel = document.getElementById('cp-category');
+  if (sel && [...sel.options].some(o => o.value === p.category)) smFill('cp-category', p.category);
+  smFill('cp-desc', p.description);
+  if (p.room) smFill('cp-room', 'Room ' + p.room);
+  window.complaintSource = 'voice';
+  document.getElementById('cp-preview').classList.add('hidden');
+}
+
+// ── PURCHASE from a bill photo ───────────────────────────────────
+async function purchaseScanBill() {
+  const status = document.getElementById('pu-voice-status');
+  try {
+    const r = await smScan('bill', status);
+    if (!r) return;
+    const f = r.fields;
+    const box = document.getElementById('pu-preview');
+    box.classList.remove('hidden');
+    box.innerHTML = `
+      <div class="card" style="padding:12px;border:2px solid var(--primary);background:#F5F3FF;margin-bottom:12px">
+        <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted,#64748B)">Read from the bill (${f.confidence} confidence) — please check</div>
+        <div style="font-size:14px;margin:6px 0">
+          <strong>${f.amount ? fmt(f.amount) : 'amount not found'}</strong>${f.paid_to ? ' · ' + f.paid_to : ''}${f.purchase_date ? ' · ' + fmtDate(f.purchase_date) : ''}<br>
+          ${f.category || 'category?'}${f.description ? ' — ' + f.description : ''}${f.payment_mode ? ' · ' + f.payment_mode : ''}
+        </div>
+        <div class="flex gap-2">
+          <button class="btn btn-primary btn-sm" onclick='purchaseUseScan(${JSON.stringify(f).replace(/'/g, "&#39;")})'>✓ Use this</button>
+          <button class="btn btn-outline btn-sm" onclick="document.getElementById('pu-preview').classList.add('hidden')">✗ Ignore</button>
+        </div>
+      </div>`;
+    if (status) status.textContent = 'Bill read. Check the preview and tap "Use this".';
+  } catch (e) {
+    if (status) { status.textContent = e.message; status.classList.add('voice-error'); }
+  }
+}
+function purchaseUseScan(f) {
+  smFill('pu-amt', f.amount); smFill('pu-paid', f.paid_to); smFill('pu-date', f.purchase_date);
+  smFill('pu-desc', f.description);
+  const cat = document.getElementById('pu-cat');
+  if (cat && f.category && [...cat.options].some(o => o.value === f.category)) smFill('pu-cat', f.category);
+  const mode = document.getElementById('pu-mode');
+  if (mode && f.payment_mode && [...mode.options].some(o => o.value === f.payment_mode)) smFill('pu-mode', f.payment_mode);
+  window.purchaseSource = 'photo';
+  document.getElementById('pu-preview').classList.add('hidden');
+}
+
+// ── GUEST fields from an ID photo ────────────────────────────────
+async function guestScanId() {
+  const status = document.getElementById('gf-scan-status');
+  if (!confirm('The ID photo is sent once to the AI reader to fill the form, then discarded. It is never stored. Continue?')) return;
+  try {
+    const r = await smScan('id', status);
+    if (!r) return;
+    const f = r.fields;
+    const box = document.getElementById('gf-preview');
+    box.classList.remove('hidden');
+    box.innerHTML = `
+      <div class="card" style="padding:12px;border:2px solid var(--primary);background:#F5F3FF;margin-bottom:12px">
+        <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted,#64748B)">Read from the ID (${f.confidence} confidence) — please check</div>
+        <div style="font-size:14px;margin:6px 0">
+          <strong>${f.name || 'name not found'}</strong>${f.id_proof_type ? ' · ' + f.id_proof_type : ''}${f.id_proof_number ? ' · ' + f.id_proof_number.replace(/.(?=.{4})/g, '•') : ''}<br>
+          <span style="font-size:13px;color:var(--text-muted,#64748B)">${f.address || 'address not found'}</span>
+        </div>
+        <div class="flex gap-2">
+          <button class="btn btn-primary btn-sm" onclick='guestUseScan(${JSON.stringify(f).replace(/'/g, "&#39;")})'>✓ Use this</button>
+          <button class="btn btn-outline btn-sm" onclick="document.getElementById('gf-preview').classList.add('hidden')">✗ Ignore</button>
+        </div>
+      </div>`;
+    if (status) status.textContent = 'ID read. Check the preview and tap "Use this".';
+  } catch (e) {
+    if (status) { status.textContent = e.message; status.classList.add('voice-error'); }
+  }
+}
+const ID_TYPE_MAP = { 'Aadhaar': 'Aadhaar', 'PAN': 'PAN Card', 'Passport': 'Passport', 'Driving Licence': 'Driving License', 'Voter ID': 'Voter ID' };
+function guestUseScan(f) {
+  smFill('gf-name', f.name); smFill('gf-address', f.address); smFill('gf-idnum', f.id_proof_number);
+  const t = ID_TYPE_MAP[f.id_proof_type];
+  if (t) smFill('gf-idtype', t);
+  document.getElementById('gf-preview').classList.add('hidden');
+}
+
+// Admin → Settings → "Test AI connection": one live call to each provider so a
+// wrong key or a retired model name shows up here, not in the warden's hands.
+async function runAiProbe() {
+  const btn = document.getElementById('ai-probe-btn');
+  const out = document.getElementById('ai-probe-result');
+  btn.disabled = true; out.textContent = 'Testing…';
+  try {
+    const r = await apiFetch('/ai/probe');
+    const line = (name, x) => `${x.ok ? '✅' : '❌'} ${name} <code>${x.model}</code>${x.ok ? ` — ${x.ms} ms` : ` — ${x.error || 'unexpected reply: ' + (x.reply || '')}`}`;
+    out.innerHTML = line('Gemini', r.gemini) + '<br>' + line('Groq', r.groq);
+  } catch (e) { out.textContent = e.message; }
+  finally { btn.disabled = false; }
 }

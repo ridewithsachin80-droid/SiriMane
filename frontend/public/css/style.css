@@ -582,3 +582,7 @@ input, select, textarea { font-size: 16px; }
   table.sm-cards td.sm-card-actions > div { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   table.sm-cards td.sm-card-actions > .btn { width: 100%; justify-content: center; }
 }
+
+/* ── Sprint 3 ─────────────────────────────────────────────────── */
+.alert-warning { background: #FFFBEB; color: #92400E; border: 1px solid #FDE68A; padding: 10px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; }
+@media (max-width: 640px) { .mic-btn { width: 44px; height: 44px; min-width: 44px; font-size: 18px; } }

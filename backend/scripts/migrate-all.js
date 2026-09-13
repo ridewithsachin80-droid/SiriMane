@@ -21,7 +21,8 @@ const ORDER = [
   'migrate-guest-address.js',   // guests.address
   'migrate-room-shift.js',      // guest_room_history
   'migrate-checklist.js',       // checklist_items + checklist_log (+ default tasks on first run)
-  'migrate-complaints.js'       // complaints
+  'migrate-complaints.js',      // complaints
+  'migrate-ai-inputs.js'        // Sprint 3: source columns + ai_reads cache
 ];
 
 let failed = false;
