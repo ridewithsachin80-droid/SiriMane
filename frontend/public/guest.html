@@ -19,9 +19,10 @@
   <meta property="og:image" content="https://sirimane.in/images/logo.png"/>
   <meta name="theme-color" content="#F59E0B"/>
   <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
   <meta name="apple-mobile-web-app-title" content="Siri Mane"/>
   <link rel="icon" type="image/png" href="/favicon.png"/>
-  <link rel="manifest" href="/manifest.json"/>
+  <link rel="manifest" href="/manifest-guest.json"/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300;1,400&display=swap" rel="stylesheet"/>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
@@ -103,6 +104,36 @@
     .text-red { color: #EF4444; }
     textarea { width: 100%; padding: 10px 12px; border: 1.5px solid #E2E8F0; border-radius: 10px; font-size: 13px; font-family: inherit; outline: none; resize: vertical; }
     textarea:focus { border-color: #F59E0B; }
+
+    /* ── Sprint 2 ─────────────────────────────────────────────── */
+    .dues-hero { text-align:center; padding:22px 16px 18px; }
+    .dues-hero .dues-label { font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:#94A3B8; }
+    .dues-hero .dues-amount { font-size:40px; font-weight:800; line-height:1.1; margin:6px 0 2px; }
+    .dues-hero .dues-kn { font-size:13px; color:#64748B; }
+    .dues-actions { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:16px; }
+    .dues-actions .btn { margin:0; }
+    @media (max-width:360px) { .dues-actions { grid-template-columns:1fr; } }
+    .btn { min-height:46px; }
+    input, select, textarea { font-size:16px; }
+    .timeline { list-style:none; margin:8px 0 0; padding:0; }
+    .timeline li { position:relative; padding:0 0 14px 20px; border-left:2px solid #E2E8F0; }
+    .timeline li:last-child { border-left-color:transparent; padding-bottom:0; }
+    .timeline li::before { content:''; position:absolute; left:-6px; top:2px; width:10px; height:10px; border-radius:50%; background:#E2E8F0; }
+    .timeline li.done::before { background:#10B981; }
+    .timeline li.current::before { background:#4F46E5; box-shadow:0 0 0 3px rgba(79,70,229,.18); }
+    .timeline .t-label { font-size:13px; font-weight:600; }
+    .timeline .t-sub { font-size:11px; color:#94A3B8; }
+    .notice-card { border:1px solid #E2E8F0; border-radius:12px; padding:14px; margin-bottom:10px; background:#fff; }
+    .menu-day { border:1px solid #E2E8F0; border-radius:12px; padding:12px 14px; margin-bottom:10px; background:#fff; }
+    .menu-day.today { border-color:#F59E0B; box-shadow:0 0 0 2px rgba(245,158,11,.16); }
+    .menu-day h4 { font-size:13px; font-weight:700; margin-bottom:6px; display:flex; justify-content:space-between; }
+    .menu-meal { font-size:13px; color:#475569; padding:3px 0; display:flex; gap:10px; }
+    .menu-meal b { flex:0 0 82px; color:#94A3B8; font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; padding-top:2px; }
+    .install-bar { display:none; align-items:center; gap:10px; background:#FFFBEB; border:1px solid #FDE68A; border-radius:12px; padding:12px 14px; margin-bottom:14px; }
+    .install-bar.show { display:flex; }
+    .install-bar p { flex:1; font-size:13px; color:#92400E; }
+    .receipt-line { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid #F1F5F9; }
+    .receipt-line:last-child { border-bottom:none; }
   </style>
 </head>
 <body>
@@ -130,6 +161,10 @@
           <input type="password" id="login-password" placeholder="Enter your password"/>
           <p style="font-size:11px;color:#94A3B8;margin-top:4px">Default password is your mobile number</p>
         </div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#475569;margin-bottom:12px">
+          <input type="checkbox" id="login-remember" style="width:auto;min-height:auto;margin:0" checked/>
+          Keep me signed in on this phone
+        </label>
         <button class="btn btn-amber" id="login-btn" onclick="guestLogin()">🔐 Login</button>
         <div style="text-align:center;margin-top:14px">
           <a href="/" style="font-size:12px;color:#64748B;text-decoration:none">← Back to Home</a>
@@ -148,6 +183,13 @@
         <div class="room" id="p-room"></div>
       </div>
       <button class="btn btn-outline btn-sm" onclick="guestLogout()">Logout</button>
+    </div>
+
+    <!-- Add to home screen -->
+    <div class="install-bar" id="install-bar">
+      <p>Add Siri Mane to your home screen for one-tap access.</p>
+      <button class="btn btn-amber btn-sm" style="width:auto;margin:0" onclick="installPortal()">Add</button>
+      <button class="btn btn-outline btn-sm" style="width:auto;margin:0" onclick="dismissInstall()">Not now</button>
     </div>
 
     <!-- Tab bar -->
@@ -196,17 +238,7 @@
 
     <!-- DAILY MENU TAB -->
     <div id="tab-menu" class="hidden">
-      <div class="card">
-        <div class="card-h">🍽️ Weekly Menu</div>
-        <div style="overflow-x:auto">
-          <table class="menu-table">
-            <thead><tr><th>Day</th><th>Breakfast</th><th>Lunch</th><th>Dinner</th></tr></thead>
-            <tbody id="p-menu-tb">
-              <tr><td colspan="4" style="text-align:center;padding:20px;color:#94A3B8">No menu added yet</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <div id="p-menu-host"></div>
     </div>
 
     <!-- NOTICES TAB -->
@@ -299,16 +331,62 @@ let guestData = null;
 let guestToken = null;
 
 // ── INIT ──────────────────────────────────────────
+// Session store: "keep me signed in" puts the token in localStorage with a
+// 30-day expiry (her own phone); otherwise it stays in sessionStorage and dies
+// with the tab. Either way the server JWT is still the real gate.
+const SESSION_KEYS = ['guest_token', 'guest_data', 'guest_expires'];
+function sessionRead(k) { return localStorage.getItem(k) || sessionStorage.getItem(k); }
+function sessionClear() { SESSION_KEYS.forEach(k => { localStorage.removeItem(k); sessionStorage.removeItem(k); }); }
+function sessionSave(token, data, remember) {
+  sessionClear();
+  const store = remember ? localStorage : sessionStorage;
+  store.setItem('guest_token', token);
+  store.setItem('guest_data', JSON.stringify(data));
+  if (remember) store.setItem('guest_expires', String(Date.now() + 30 * 24 * 60 * 60 * 1000));
+}
+
 window.onload = () => {
-  const saved = sessionStorage.getItem('guest_token');
-  const savedData = sessionStorage.getItem('guest_data');
+  const saved = sessionRead('guest_token');
+  const savedData = sessionRead('guest_data');
+  const expires = sessionRead('guest_expires');
+  if (expires && Date.now() > Number(expires)) { sessionClear(); registerPortalSW(); return; }
   if (saved && savedData) {
     guestToken = saved;
     guestData = JSON.parse(savedData);
     showPortal();
     loadGuestData();
   }
+  registerPortalSW();
 };
+
+// ── PWA ───────────────────────────────────────────────────────────
+let deferredInstall = null;
+function registerPortalSW() {
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw-guest.js', { scope: '/' }).catch(e => console.warn('SW failed', e));
+  }
+}
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  deferredInstall = e;
+  // Only offered once she's actually signed in, and not if she said "not now".
+  if (guestToken && localStorage.getItem('install_dismissed') !== '1') showInstallBar();
+});
+function showInstallBar() {
+  const bar = document.getElementById('install-bar');
+  if (bar && deferredInstall) bar.classList.add('show');
+}
+async function installPortal() {
+  if (!deferredInstall) return;
+  deferredInstall.prompt();
+  try { await deferredInstall.userChoice; } catch {}
+  deferredInstall = null;
+  document.getElementById('install-bar').classList.remove('show');
+}
+function dismissInstall() {
+  localStorage.setItem('install_dismissed', '1');
+  document.getElementById('install-bar').classList.remove('show');
+}
 
 // ── LOGIN ─────────────────────────────────────────
 async function guestLogin() {
@@ -334,11 +412,11 @@ async function guestLogin() {
 
     guestToken = data.token;
     guestData = data.guest;
-    sessionStorage.setItem('guest_token', guestToken);
-    sessionStorage.setItem('guest_data', JSON.stringify(guestData));
+    sessionSave(guestToken, guestData, document.getElementById('login-remember')?.checked);
     al.classList.add('hidden');
     showPortal();
     loadGuestData();
+    showInstallBar();
   } catch(e) {
     showAl(al, 'Connection error. Try again.', 'danger');
   } finally {
@@ -352,8 +430,7 @@ document.addEventListener('keypress', e => {
 });
 
 function guestLogout() {
-  sessionStorage.removeItem('guest_token');
-  sessionStorage.removeItem('guest_data');
+  sessionClear();
   guestToken = null; guestData = null;
   document.getElementById('portal-section').classList.add('hidden');
   document.getElementById('login-section').classList.remove('hidden');
@@ -378,7 +455,7 @@ async function loadGuestData() {
     if (res.status === 401) { guestLogout(); return; }
     const data = await res.json();
     guestData = data;
-    sessionStorage.setItem('guest_data', JSON.stringify(data));
+    (localStorage.getItem('guest_token') ? localStorage : sessionStorage).setItem('guest_data', JSON.stringify(data));
     renderPayTab(data);
     renderDetails(data);
     renderMenu(data.menu || []);
@@ -392,39 +469,76 @@ function renderPayTab(g) {
   const balance = parseFloat(g.current_balance || 0);
   const due = balance < -0.5 ? Math.abs(balance) : 0;
   const credit = balance > 0.5 ? balance : 0;
+  const pending = (g.payments || []).filter(p => p.status && p.status !== 'confirmed');
+  const lastConfirmed = (g.payments || []).filter(p => !p.status || p.status === 'confirmed')[0];
 
-  if (!g.upi_vpa) {
-    el.innerHTML = `
-      <div style="text-align:center;padding:12px 0">
-        ${due>0?`<p style="font-size:13px;color:#64748B;margin-bottom:6px">Amount Due</p><p style="font-size:28px;font-weight:700;color:#EF4444">${fmt(due)}</p>`:credit>0?`<p style="font-size:13px;color:#64748B;margin-bottom:6px">You're ahead by</p><p style="font-size:24px;font-weight:700;color:#10B981">${fmt(credit)}</p>`:`<p style="font-size:15px;color:#10B981;font-weight:600">✅ All settled up</p>`}
+  const hero = due > 0
+    ? `<div class="dues-hero">
+         <div class="dues-label">Amount due</div>
+         <div class="dues-amount text-red">${fmt(due)}</div>
+         <div class="dues-kn">ಬಾಕಿ ಮೊತ್ತ</div>
+       </div>`
+    : credit > 0
+      ? `<div class="dues-hero">
+           <div class="dues-label">You are ahead by</div>
+           <div class="dues-amount text-green">${fmt(credit)}</div>
+           <div class="dues-kn">ಮುಂಗಡ · nothing to pay right now</div>
+         </div>`
+      : `<div class="dues-hero">
+           <div style="font-size:38px">✅</div>
+           <div class="dues-amount text-green" style="font-size:22px">All settled</div>
+           <div class="dues-kn">ಎಲ್ಲಾ ಪಾವತಿಯಾಗಿದೆ</div>
+         </div>`;
+
+  const pendingNote = pending.length
+    ? `<div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:10px;padding:10px 12px;font-size:12px;color:#92400E;margin-bottom:12px">
+         ⏳ ${fmt(pending.reduce((t, p) => t + parseFloat(p.amount || 0), 0))} reported and waiting for the warden to confirm. It will show in your balance once verified.
+       </div>` : '';
+
+  let actions = '';
+  if (due > 0 && g.upi_vpa) {
+    actions = `
+      <div class="dues-actions">
+        <button class="btn btn-amber" onclick="payViaUpi(${due})">📱 Pay via UPI</button>
+        <button class="btn btn-outline" style="border-color:#10B981;color:#10B981" onclick="claimUpiPayment(${due})">✅ I've paid</button>
       </div>
-      <p style="font-size:12px;color:#94A3B8;text-align:center;background:#F8FAFC;padding:10px;border-radius:8px">Online payment isn't set up yet — please pay via cash or bank transfer and let management know.</p>`;
-    return;
-  }
-
-  if (due <= 0) {
-    el.innerHTML = `
-      <div style="text-align:center;padding:20px 0">
-        <p style="font-size:32px;margin-bottom:8px">🎉</p>
-        ${credit>0?`<p style="font-size:14px;color:#64748B">You're ahead by</p><p style="font-size:24px;font-weight:700;color:#10B981;margin-bottom:6px">${fmt(credit)}</p><p style="font-size:12px;color:#94A3B8">No payment needed right now</p>`:`<p style="font-size:15px;color:#10B981;font-weight:600">All settled up — nothing due!</p>`}
+      <p style="font-size:11px;color:#94A3B8;text-align:center;margin-top:8px">UPI opens Google Pay / PhonePe / Paytm with the amount filled in. Tap "I've paid" only after the payment succeeds.</p>
+      <div id="p-pay-claimed" class="hidden" style="text-align:center;margin-top:14px;padding:12px;background:#ECFDF5;border-radius:10px">
+        <p style="font-size:13px;color:#065F46;font-weight:600">Thanks! The warden will confirm it shortly.</p>
       </div>`;
-    return;
+  } else if (due > 0) {
+    actions = `<p style="font-size:12px;color:#94A3B8;text-align:center;background:#F8FAFC;padding:10px;border-radius:8px">Online payment isn't set up yet — please pay by cash or bank transfer and tell the warden.</p>`;
   }
 
-  el.innerHTML = `
-    <div style="text-align:center;margin-bottom:16px">
-      <p style="font-size:13px;color:#64748B;margin-bottom:6px">Amount Due</p>
-      <p style="font-size:32px;font-weight:700;color:#EF4444">${fmt(due)}</p>
-    </div>
-    <button class="btn btn-amber" onclick="payViaUpi(${due})">📱 Pay via UPI</button>
-    <p style="font-size:11px;color:#94A3B8;text-align:center;margin-top:8px">Opens your UPI app (Google Pay, PhonePe, Paytm, etc.) with the amount already filled in</p>
-    <div id="p-pay-confirm" class="hidden" style="margin-top:16px;padding-top:16px;border-top:1px solid #F1F5F9">
-      <p style="font-size:12px;color:#475569;text-align:center;margin-bottom:10px">Completed the payment?</p>
-      <button class="btn btn-outline" style="border-color:#10B981;color:#10B981" onclick="claimUpiPayment(${due})">✅ Yes, I've Paid ${fmt(due)}</button>
-    </div>
-    <div id="p-pay-claimed" class="hidden" style="text-align:center;margin-top:14px;padding:12px;background:#ECFDF5;border-radius:10px">
-      <p style="font-size:13px;color:#065F46;font-weight:600">Thanks! We'll confirm once it's verified.</p>
-    </div>`;
+  const receipt = lastConfirmed
+    ? `<div style="margin-top:18px;padding-top:14px;border-top:1px solid #F1F5F9">
+         <div class="receipt-line">
+           <span>
+             <strong style="font-size:13px">${fmt(lastConfirmed.amount)}</strong>
+             <span style="font-size:11px;color:#94A3B8"> · ${fmtDate(lastConfirmed.collection_date)}${lastConfirmed.collection_month ? ' · ' + lastConfirmed.collection_month : ''}</span>
+           </span>
+           <button class="btn btn-outline btn-sm" style="width:auto;margin:0" onclick="downloadGuestReceipt(${lastConfirmed.id})">🧾 Receipt</button>
+         </div>
+       </div>` : '';
+
+  const warden = whatsappWardenLink('Hello, this is ' + (g.name || '') + (g.room_number ? ' from Room ' + g.room_number : '') + '. ');
+  const wardenBtn = warden
+    ? `<a class="btn btn-outline" style="margin-top:12px;display:block;text-align:center;text-decoration:none" href="${warden}" target="_blank" rel="noopener">💬 WhatsApp the warden</a>` : '';
+
+  el.innerHTML = hero + pendingNote + actions + receipt + wardenBtn;
+}
+
+// Builds a wa.me link to the PG's own number from Settings; returns null when
+// no number is configured, so callers can hide the button instead of showing
+// a broken link.
+function whatsappWardenLink(prefill) {
+  const phone = guestData && guestData.pg_phone;
+  if (!phone) return null;
+  let digits = String(phone).replace(/\D/g, '');
+  if (digits.length === 10) digits = '91' + digits;
+  else if (digits.length === 11 && digits.startsWith('0')) digits = '91' + digits.slice(1);
+  if (digits.length < 11) return null;
+  return `https://wa.me/${digits}?text=${encodeURIComponent(prefill || '')}`;
 }
 
 function payViaUpi(amount) {
@@ -433,8 +547,6 @@ function payViaUpi(amount) {
   const note = 'Rent payment - ' + (guestData.name || '');
   const link = `upi://pay?pa=${encodeURIComponent(vpa)}&pn=${encodeURIComponent(name)}&am=${amount}&cu=INR&tn=${encodeURIComponent(note)}`;
   window.location.href = link;
-  const confirmBox = document.getElementById('p-pay-confirm');
-  if (confirmBox) confirmBox.classList.remove('hidden');
 }
 
 async function claimUpiPayment(amount) {
@@ -444,8 +556,9 @@ async function claimUpiPayment(amount) {
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + guestToken },
       body: JSON.stringify({ amount })
     });
-    document.getElementById('p-pay-confirm').classList.add('hidden');
-    document.getElementById('p-pay-claimed').classList.remove('hidden');
+    const claimed = document.getElementById('p-pay-claimed');
+    if (claimed) claimed.classList.remove('hidden');
+    loadGuestData();
   } catch(e) {
     alert('Could not submit — check your connection and try again.');
   }
@@ -499,18 +612,29 @@ async function downloadGuestReceipt(id) {
 }
 
 // ── RENDER MENU ───────────────────────────────────
+function istWeekday() {
+  // The server stores plain weekday names; "today" must be Indian time, not
+  // the phone's timezone or UTC.
+  return new Date(Date.now() + (5.5 * 60 + new Date().getTimezoneOffset()) * 60000)
+    .toLocaleDateString('en-IN', { weekday: 'long' });
+}
+
 function renderMenu(menu) {
   const days = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
   const meals = ['Breakfast','Lunch','Dinner'];
   const byDay = {};
   menu.forEach(m => { if(!byDay[m.day_of_week]) byDay[m.day_of_week]={}; byDay[m.day_of_week][m.meal_type]=m.items; });
-  const tb = document.getElementById('p-menu-tb');
-  if (!menu.length) { tb.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:20px;color:#94A3B8">No menu added yet</td></tr>'; return; }
-  tb.innerHTML = days.map(d => `
-    <tr>
-      <td><strong>${d.substr(0,3)}</strong></td>
-      ${meals.map(ml => `<td>${byDay[d]&&byDay[d][ml]?byDay[d][ml]:'—'}</td>`).join('')}
-    </tr>`).join('');
+  const host = document.getElementById('p-menu-host');
+  if (!host) return;
+  if (!menu.length) { host.innerHTML = '<div class="card"><div class="card-b" style="text-align:center;color:#94A3B8;padding:28px">🍽️ No menu added yet</div></div>'; return; }
+  const today = istWeekday();
+  // Today first, then the rest of the week in order.
+  const ordered = [...days.slice(days.indexOf(today)), ...days.slice(0, days.indexOf(today))];
+  host.innerHTML = ordered.map(d => `
+    <div class="menu-day ${d === today ? 'today' : ''}">
+      <h4>${d}${d === today ? '<span style="color:#F59E0B">Today</span>' : ''}</h4>
+      ${meals.map(ml => `<div class="menu-meal"><b>${ml}</b><span>${(byDay[d] && byDay[d][ml]) ? byDay[d][ml] : '—'}</span></div>`).join('')}
+    </div>`).join('');
 }
 
 // ── RENDER NOTICES ────────────────────────────────
@@ -519,15 +643,13 @@ function renderNotices(notices) {
   c.innerHTML = notices.length === 0
     ? '<div class="card"><div class="card-b" style="text-align:center;color:#94A3B8;padding:32px">📢 No notices at the moment</div></div>'
     : notices.map(a => `
-      <div class="card" style="margin-bottom:12px">
-        <div style="padding:12px 16px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #E2E8F0">
+      <div class="notice-card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
           <span class="badge ${a.priority==='urgent'?'badge-red':a.priority==='important'?'badge-amber':'badge-blue'}">${a.priority}</span>
-          <span style="font-size:11px;color:#64748B">${fmtDate(a.created_at)}</span>
+          <span style="font-size:11px;color:#94A3B8">${fmtDate(a.created_at)}</span>
         </div>
-        <div style="padding:14px 16px">
-          <strong style="font-size:14px">${a.title}</strong>
-          <p style="margin-top:6px;font-size:13px;color:#475569">${a.message}</p>
-        </div>
+        <strong style="font-size:14px">${a.title}</strong>
+        <p style="margin-top:6px;font-size:13px;color:#475569">${a.message}</p>
       </div>`).join('');
 }
 
@@ -563,19 +685,34 @@ async function loadComplaintHistory() {
     const res = await fetch('/api/guest-complaints', { headers: { 'Authorization': 'Bearer ' + guestToken } });
     const list = await res.json();
     if (!res.ok || !list.length) { el.innerHTML = '<p style="text-align:center;color:#94A3B8;font-size:13px">No issues reported yet</p>'; return; }
-    const statusColor = { open: '#EF4444', in_progress: '#4F46E5', resolved: '#16A34A' };
-    const statusLabel = { open: 'Open', in_progress: 'In Progress', resolved: 'Resolved' };
     el.innerHTML = list.map(c => `
-      <div class="info-row" style="display:block;padding:10px 0">
-        <div style="display:flex;justify-content:space-between;align-items:center">
+      <div style="padding:12px 0;border-bottom:1px solid #F1F5F9">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
           <strong style="font-size:13px">${c.category}</strong>
-          <span style="font-size:11px;font-weight:700;color:${statusColor[c.status]||'#64748B'}">${statusLabel[c.status]||c.status}</span>
+          <span style="font-size:11px;color:#94A3B8">${fmtDate(c.created_at)}</span>
         </div>
-        <div style="font-size:12px;color:#475569;margin-top:2px">${c.description}</div>
-        ${c.resolution_notes ? `<div style="font-size:11px;color:#16A34A;margin-top:2px">✔ ${c.resolution_notes}</div>` : ''}
-        <div style="font-size:10px;color:#94A3B8;margin-top:2px">${fmtDate(c.created_at)}</div>
+        <div style="font-size:13px;color:#475569;margin:4px 0 10px">${c.description}</div>
+        ${complaintTimeline(c)}
       </div>`).join('');
   } catch(e) { /* silent */ }
+}
+
+// Raised → In progress → Resolved, with the warden's closing note attached to
+// the last step so she can see what was actually done.
+function complaintTimeline(c) {
+  const order = ['open', 'in_progress', 'resolved'];
+  const at = order.indexOf(c.status);
+  const steps = [
+    { label: 'Raised', sub: fmtDate(c.created_at) },
+    { label: 'In progress', sub: at >= 1 ? 'The warden is on it' : 'Waiting to be picked up' },
+    { label: 'Resolved', sub: c.resolved_at ? fmtDate(c.resolved_at) : 'Not yet' }
+  ];
+  return `<ul class="timeline">${steps.map((st, i) => `
+    <li class="${i < at ? 'done' : i === at ? 'current' : ''}">
+      <div class="t-label">${st.label}</div>
+      <div class="t-sub">${st.sub}</div>
+      ${(i === 2 && c.resolution_notes) ? `<div style="font-size:12px;color:#16A34A;margin-top:3px">✔ ${c.resolution_notes}</div>` : ''}
+    </li>`).join('')}</ul>`;
 }
 
 // ── SEND MESSAGE ──────────────────────────────────

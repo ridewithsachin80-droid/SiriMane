@@ -173,7 +173,35 @@ async function main() {
     r = await S('GET', `/collections/${col.id}/receipt/pdf`); eq(r.status, 404, 'deleted collection has no receipt');
     console.log('✓ receipt pdf');
 
-    // ── Dashboard still works with the new tables ─────────────────────────
+    // ── Sprint 2: resident's own receipt + portal payload ─────────────────
+  r = await A('POST', '/collections', { guest_id: guest.id, guest_name: guest.name, amount: 6000, collection_date: today, collection_month: 'September 2026', collection_type: 'rent', payment_mode: 'cash' });
+  const mine = r.data;
+  r = await A('POST', '/collections', { guest_id: guest2.id, guest_name: 'Smoke Guest 2', amount: 6000, collection_date: today, collection_type: 'rent', payment_mode: 'cash' });
+  const hers = r.data;
+  r = await api('GET', `/guest-receipt/${mine.id}/pdf`); eq(r.status, 401, 'guest receipt needs a guest token');
+  r = await S('GET', `/guest-receipt/${mine.id}/pdf`); eq(r.status, 401, 'staff token is not a guest token here');
+  r = await G('GET', `/guest-receipt/${mine.id}/pdf`); eq(r.status, 200, 'resident downloads her own receipt');
+  ok(r.ct.includes('application/pdf'), 'guest receipt is a PDF');
+  const gb = Buffer.from(r.data); eq(gb.subarray(0, 4).toString(), '%PDF', 'guest receipt starts with %PDF'); ok(gb.subarray(-64).toString().includes('%%EOF'), 'guest receipt is complete');
+  r = await G('GET', `/guest-receipt/${hers.id}/pdf`); eq(r.status, 404, 'PRIVACY: cannot download another resident\'s receipt');
+  r = await G('GET', `/guest-receipt/999999/pdf`); eq(r.status, 404, 'unknown receipt → 404');
+  r = await G('GET', '/guest-portal'); eq(r.status, 200, 'portal payload');
+  ok('pg_phone' in r.data, 'portal exposes PG phone for the WhatsApp button');
+  ok('pg_name' in r.data, 'portal exposes PG name');
+  eq(r.data.password_hash, undefined, 'PRIVACY: portal never returns the password hash');
+  const balBefore = r.data.current_balance;
+  r = await G('POST', '/guest-upi-claim', { amount: 505 }); ok(r.status === 200 || r.status === 201, 'resident can claim a UPI payment');
+  r = await G('GET', '/guest-portal');
+  eq(r.data.current_balance, balBefore, 'MONEY: a claim does not move her balance until confirmed');
+  const claimRow = r.data.payments.find(p => parseFloat(p.amount) === 505);
+  eq(claimRow.status, 'pending_verification', 'MONEY: claim stored as pending_verification');
+  r = await G('GET', `/guest-receipt/${claimRow.id}/pdf`); eq(r.status, 400, 'no receipt for an unconfirmed claim');
+  r = await A('GET', '/balance-sheet');
+  const sheetWithClaim = JSON.stringify(r.data);
+  r = await A('DELETE', `/collections/${mine.id}`); eq(r.status, 200, 'cleanup');
+  ok(sheetWithClaim.length > 0, 'balance sheet still computes with a pending claim present');
+
+  // ── Dashboard still works with the new tables ─────────────────────────
     r = await S('GET', '/dashboard'); eq(r.status, 200, 'dashboard'); eq(r.data.todayChecklist.total, 33, 'dashboard checklist total'); eq(r.data.todayChecklist.checked, 1, 'dashboard checklist checked'); eq(r.data.openComplaints, 2, 'dashboard open complaints (1 staff room issue + 1 guest issue)');
     console.log('✓ dashboard');
 

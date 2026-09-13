@@ -1318,7 +1318,7 @@ router.get('/guest-portal', guestAuth, async (req, res) => {
       pool.query('SELECT * FROM collections WHERE guest_id=$1 AND is_deleted=false ORDER BY collection_date DESC LIMIT 24', [g.id]),
       pool.query('SELECT * FROM daily_menu ORDER BY CASE day_of_week WHEN \'Monday\' THEN 1 WHEN \'Tuesday\' THEN 2 WHEN \'Wednesday\' THEN 3 WHEN \'Thursday\' THEN 4 WHEN \'Friday\' THEN 5 WHEN \'Saturday\' THEN 6 WHEN \'Sunday\' THEN 7 END'),
       pool.query('SELECT * FROM announcements WHERE is_active=true ORDER BY created_at DESC LIMIT 10'),
-      pool.query(`SELECT key, value FROM app_settings WHERE key IN ('upi_vpa','upi_name')`),
+      pool.query(`SELECT key, value FROM app_settings WHERE key IN ('upi_vpa','upi_name','pg_name','pg_phone')`),
       computeGuestLedger(g)
     ]);
     const settings = {};
@@ -1332,6 +1332,8 @@ router.get('/guest-portal', guestAuth, async (req, res) => {
       announcements: announcements.rows,
       upi_vpa: settings.upi_vpa || null,
       upi_name: settings.upi_name || null,
+      pg_name: settings.pg_name || 'Siri Mane PG',
+      pg_phone: settings.pg_phone || null,
       current_balance: ledgerResult.currentBalance
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1682,75 +1684,87 @@ router.post('/guests/:id/shift-room', auth, async (req, res) => {
 // GET /collections/:id/receipt/pdf — branded receipt for one confirmed collection.
 // Pending (staff-unapproved or guest-claimed) payments have no receipt yet:
 // a receipt is a promise that money was received and verified.
+// Shared by the staff download and the resident's own download so the two can
+// never drift apart. Writes the PDF straight to res.
+async function sendReceiptPdf(res, collectionId, opts = {}) {
+  const [c, s] = await Promise.all([
+    pool.query(
+      `SELECT c.*, g.name AS gname, g.phone AS gphone, r.room_number, u.username AS collected_by
+         FROM collections c LEFT JOIN guests g ON g.id=c.guest_id LEFT JOIN rooms r ON r.id=g.room_id
+         LEFT JOIN users u ON u.id=c.created_by
+        WHERE c.id=$1 AND c.is_deleted=false`, [collectionId]),
+    pool.query(`SELECT key, value FROM app_settings WHERE key IN ('pg_name','pg_address','pg_phone','upi_vpa')`)
+  ]);
+  const col = c.rows[0];
+  if (!col) return res.status(404).json({ error: 'Payment not found' });
+  // A resident may only ever download her own receipt.
+  if (opts.guestId && String(col.guest_id) !== String(opts.guestId)) {
+    return res.status(404).json({ error: 'Payment not found' });
+  }
+  if (col.status && col.status !== 'confirmed') {
+    return res.status(400).json({ error: 'Receipt is available only after the payment is confirmed' });
+  }
+  const settings = Object.fromEntries(s.rows.map(x => [x.key, x.value]));
+  const pgName = settings.pg_name || 'Siri Mane PG';
+  const pgAddress = settings.pg_address || 'Tumakuru, Karnataka';
+  const pgPhone = settings.pg_phone || '';
+  const receiptNo = col.receipt_number || `SM-${String(col.id).padStart(5, '0')}`;
+  const guestName = col.gname || col.guest_name || '—';
+  const typeLabel = { rent: 'Rent', deposit: 'Security Deposit', advance: 'Advance' }[col.collection_type] || (col.collection_type || 'Payment');
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="receipt-${receiptNo}.pdf"`);
+  const doc = new PDFDocument({ size: 'A5', margin: 32 });
+  doc.pipe(res);
+  const W = doc.page.width - 64;
+  const gold = '#C9A96E', ink = '#1E293B', muted = '#64748B';
+
+  if (fs.existsSync(LOGO_PATH)) { try { doc.image(LOGO_PATH, 32, 28, { width: 70 }); } catch { /* logo optional */ } }
+  doc.fillColor(ink).font('Helvetica-Bold').fontSize(16).text(pgName, 112, 30, { width: W - 80 });
+  doc.font('Helvetica').fontSize(8.5).fillColor(muted).text(pgAddress, 112, 50, { width: W - 80 });
+  if (pgPhone) doc.text('Ph: ' + pgPhone, 112, 62, { width: W - 80 });
+  doc.moveTo(32, 84).lineTo(32 + W, 84).lineWidth(1.2).strokeColor(gold).stroke();
+
+  doc.fillColor(ink).font('Helvetica-Bold').fontSize(13).text('PAYMENT RECEIPT', 32, 94, { width: W, align: 'center' });
+  doc.font('Helvetica').fontSize(9).fillColor(muted)
+    .text(`Receipt No: ${receiptNo}`, 32, 112, { width: W / 2 })
+    .text(`Date: ${fmtD(col.collection_date)}`, 32 + W / 2, 112, { width: W / 2, align: 'right' });
+
+  const rows = [
+    ['Received from', guestName],
+    ['Room', col.room_number ? `Room ${col.room_number}` : '—'],
+    ['Towards', typeLabel + (col.collection_month ? ` — ${col.collection_month}` : '')],
+    ['Payment mode', (col.payment_mode || 'cash').toUpperCase()],
+    ['Description', col.description || '—']
+  ];
+  let y = 136;
+  for (const [k, v] of rows) {
+    doc.font('Helvetica').fontSize(9).fillColor(muted).text(k, 32, y, { width: 90 });
+    doc.font('Helvetica-Bold').fontSize(9.5).fillColor(ink).text(String(v), 126, y, { width: W - 94 });
+    y += Math.max(18, doc.heightOfString(String(v), { width: W - 94 }) + 8);
+  }
+
+  y += 6;
+  doc.rect(32, y, W, 40).fillAndStroke('#FBF7EE', gold);
+  doc.fillColor(muted).font('Helvetica').fontSize(9).text('AMOUNT RECEIVED', 44, y + 8);
+  doc.fillColor(ink).font('Helvetica-Bold').fontSize(18).text(fmtMoney(col.amount), 44, y + 18, { width: W - 24, align: 'right' });
+  y += 54;
+
+  doc.font('Helvetica').fontSize(8.5).fillColor(muted).text(`Received by: ${col.collected_by || 'Management'}`, 32, y, { width: W });
+  y += 14;
+  doc.text('This is a computer-generated receipt and does not require a signature.', 32, y, { width: W });
+  doc.text('Thank you for your payment.', 32, doc.page.height - 56, { width: W, align: 'center' });
+  doc.end();
+}
+
 router.get('/collections/:id/receipt/pdf', auth, async (req, res) => {
-  try {
-    const [c, s] = await Promise.all([
-      pool.query(
-        `SELECT c.*, g.name AS gname, g.phone AS gphone, r.room_number, u.username AS collected_by
-           FROM collections c LEFT JOIN guests g ON g.id=c.guest_id LEFT JOIN rooms r ON r.id=g.room_id
-           LEFT JOIN users u ON u.id=c.created_by
-          WHERE c.id=$1 AND c.is_deleted=false`, [req.params.id]),
-      pool.query(`SELECT key, value FROM app_settings WHERE key IN ('pg_name','pg_address','pg_phone','upi_vpa')`)
-    ]);
-    const col = c.rows[0];
-    if (!col) return res.status(404).json({ error: 'Payment not found' });
-    if (col.status && col.status !== 'confirmed') {
-      return res.status(400).json({ error: 'Receipt is available only after the payment is confirmed' });
-    }
-    const settings = Object.fromEntries(s.rows.map(x => [x.key, x.value]));
-    const pgName = settings.pg_name || 'Siri Mane PG';
-    const pgAddress = settings.pg_address || 'Tumakuru, Karnataka';
-    const pgPhone = settings.pg_phone || '';
-    const receiptNo = col.receipt_number || `SM-${String(col.id).padStart(5, '0')}`;
-    const guestName = col.gname || col.guest_name || '—';
-    const typeLabel = { rent: 'Rent', deposit: 'Security Deposit', advance: 'Advance' }[col.collection_type] || (col.collection_type || 'Payment');
+  try { await sendReceiptPdf(res, req.params.id); }
+  catch (err) { if (!res.headersSent) res.status(500).json({ error: err.message }); }
+});
 
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="receipt-${receiptNo}.pdf"`);
-    const doc = new PDFDocument({ size: 'A5', margin: 32 });
-    doc.pipe(res);
-    const W = doc.page.width - 64; // usable width
-    const gold = '#C9A96E', ink = '#1E293B', muted = '#64748B';
-
-    // Header
-    if (fs.existsSync(LOGO_PATH)) { try { doc.image(LOGO_PATH, 32, 28, { width: 70 }); } catch { /* logo optional */ } }
-    doc.fillColor(ink).font('Helvetica-Bold').fontSize(16).text(pgName, 112, 30, { width: W - 80 });
-    doc.font('Helvetica').fontSize(8.5).fillColor(muted).text(pgAddress, 112, 50, { width: W - 80 });
-    if (pgPhone) doc.text('Ph: ' + pgPhone, 112, 62, { width: W - 80 });
-    doc.moveTo(32, 84).lineTo(32 + W, 84).lineWidth(1.2).strokeColor(gold).stroke();
-
-    doc.fillColor(ink).font('Helvetica-Bold').fontSize(13).text('PAYMENT RECEIPT', 32, 94, { width: W, align: 'center' });
-    doc.font('Helvetica').fontSize(9).fillColor(muted)
-      .text(`Receipt No: ${receiptNo}`, 32, 112, { width: W / 2 })
-      .text(`Date: ${fmtD(col.collection_date)}`, 32 + W / 2, 112, { width: W / 2, align: 'right' });
-
-    // Detail rows
-    const rows = [
-      ['Received from', guestName],
-      ['Room', col.room_number ? `Room ${col.room_number}` : '—'],
-      ['Towards', typeLabel + (col.collection_month ? ` — ${col.collection_month}` : '')],
-      ['Payment mode', (col.payment_mode || 'cash').toUpperCase()],
-      ['Description', col.description || '—']
-    ];
-    let y = 136;
-    for (const [k, v] of rows) {
-      doc.font('Helvetica').fontSize(9).fillColor(muted).text(k, 32, y, { width: 90 });
-      doc.font('Helvetica-Bold').fontSize(9.5).fillColor(ink).text(String(v), 126, y, { width: W - 94 });
-      y += Math.max(18, doc.heightOfString(String(v), { width: W - 94 }) + 8);
-    }
-
-    // Amount box
-    y += 6;
-    doc.rect(32, y, W, 40).fillAndStroke('#FBF7EE', gold);
-    doc.fillColor(muted).font('Helvetica').fontSize(9).text('AMOUNT RECEIVED', 44, y + 8);
-    doc.fillColor(ink).font('Helvetica-Bold').fontSize(18).text(fmtMoney(col.amount), 44, y + 18, { width: W - 24, align: 'right' });
-    y += 54;
-
-    doc.font('Helvetica').fontSize(8.5).fillColor(muted)
-      .text(`Received by: ${col.collected_by || 'Management'}`, 32, y, { width: W });
-    y += 14;
-    doc.text('This is a computer-generated receipt and does not require a signature.', 32, y, { width: W });
-    doc.text('Thank you for your payment.', 32, doc.page.height - 56, { width: W, align: 'center' });
-    doc.end();
-  } catch (err) { if (!res.headersSent) res.status(500).json({ error: err.message }); }
+// SPRINT 2 — the resident portal has always called this; it did not exist.
+// A resident may download only her own confirmed payments.
+router.get('/guest-receipt/:id/pdf', guestAuth, async (req, res) => {
+  try { await sendReceiptPdf(res, req.params.id, { guestId: req.guest.id }); }
+  catch (err) { if (!res.headersSent) res.status(500).json({ error: err.message }); }
 });

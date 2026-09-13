@@ -1,0 +1,16 @@
+{
+  "name": "Siri Mane — Resident Portal",
+  "short_name": "Siri Mane",
+  "description": "Pay rent, see dues, report issues and read notices for Siri Mane Ladies PG, Tumakuru.",
+  "start_url": "/guest?src=pwa",
+  "scope": "/guest",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FFFFFF",
+  "theme_color": "#F59E0B",
+  "lang": "en-IN",
+  "icons": [
+    { "src": "/images/logo.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/images/logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
