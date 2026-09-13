@@ -823,3 +823,20 @@ svg.ic { display: inline-block; }
 svg.ic { width: 18px !important; height: 18px !important; flex: 0 0 18px; }
 svg.ic.ic-sm { width: 15px !important; height: 15px !important; flex: 0 0 15px; }
 svg.ic.ic-lg { width: 22px !important; height: 22px !important; flex: 0 0 22px; }
+
+/* ── Sprint 8: Resident 360 and wizards ───────────────────────── */
+.wiz-bar { height: 4px; background: var(--surface-2); border-radius: 999px; overflow: hidden; }
+.wiz-bar > span { display: block; height: 100%; background: var(--accent); transition: width .2s; }
+.r360-status { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.r360-kv { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+.r360-kv span { color: var(--text-muted); }
+.r360-h { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin: 18px 0 6px; }
+.r360-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+.r360-row:last-child { border-bottom: none; }
+.r360-timeline { list-style: none; margin: 0; padding: 0; }
+.r360-timeline li { display: flex; gap: 12px; padding: 10px 0 10px 14px; border-left: 2px solid var(--border); position: relative; font-size: 14px; }
+.r360-timeline li::before { content: ''; position: absolute; left: -5px; top: 16px; width: 8px; height: 8px; border-radius: 50%; background: var(--border); }
+.r360-timeline li.tl-payment::before { background: var(--green); }
+.r360-timeline li.tl-request::before { background: var(--amber); }
+.r360-timeline li.tl-joined::before, .r360-timeline li.tl-left::before { background: var(--accent); }
+.r360-timeline .tl-date { flex: 0 0 84px; color: var(--text-muted); font-size: 12px; padding-top: 2px; }

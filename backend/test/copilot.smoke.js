@@ -136,6 +136,29 @@ async function run(mode) {
   r = await askAs(staffTok, `resolve request ${openReq.id}`); ok(r.data.clarify && /already/.test(r.data.clarify), `${mode}: already-resolved is explained, not re-proposed`);
   r = await askAs(staffTok, `mark request 999999 resolved`); ok(r.data.clarify && /can't find/.test(r.data.clarify), `${mode}: unknown request id is explained`);
 
+  // ── Sprint 8: move-in, checkout, readiness ─────────────────────────────
+  r = await askAs(staffTok, 'Meera Joshi joining room C2 tomorrow, rent 6000, deposit 12000, phone 9876543210');
+  eq(r.data.tool, 'prepare_resident', `${mode}: move-in prepared`);
+  const mi = r.data.data || r.data.preview || (r.data.proposal && r.data.proposal.preview) || r.data.openWizard?.fields;
+  ok(r.data.openWizard && r.data.openWizard.kind === 'move-in', `${mode}: returns a move-in wizard to open`);
+  const f = r.data.openWizard.fields;
+  eq(f.name, 'Meera Joshi', `${mode}: name read`); eq(f.monthly_rent, 6000, `${mode}: rent read`); eq(f.deposit_amount, 12000, `${mode}: deposit read`);
+  eq(f.phone, '9876543210', `${mode}: phone read`); eq(f.room_number, 'C2', `${mode}: room matched`);
+  eq((await api('GET', '/guests', null, adminTok)).data.length, (await api('GET', '/guests', null, adminTok)).data.length, `${mode}: MONEY/DATA: preparing a move-in creates nobody`);
+  const beforeGuests = (await api('GET', '/guests', null, adminTok)).data.length;
+  r = await askAs(staffTok, 'Nobody Special joining room C9 tomorrow'); ok(r.data.clarify && /don't know a room/i.test(r.data.clarify), `${mode}: unknown room is explained`);
+  eq((await api('GET', '/guests', null, adminTok)).data.length, beforeGuests, `${mode}: still nobody created`);
+  r = await askAs(staffTok, 'is room C1 ready?'); eq(r.data.tool, 'room_readiness', `${mode}: readiness`); ok(/readiness/i.test(r.data.answer), `${mode}: readiness text`);
+  r = await askAs(staffTok, 'Copilot Anu is checking out tomorrow'); ok(r.data.forbidden, `${mode}: staff cannot run a checkout`);
+  r = await askAs(adminTok, 'Copilot Anu is checking out tomorrow');
+  eq(r.data.tool, 'prepare_checkout', `${mode}: checkout prepared`);
+  ok(r.data.openWizard && r.data.openWizard.kind === 'checkout', `${mode}: returns a checkout wizard`);
+  const cf = r.data.openWizard.fields;
+  eq(cf.deposit_held, 12000, `${mode}: deposit held`); eq(cf.refund_before_deductions, 12000, `${mode}: refund before deductions`);
+  ok(cf.outstanding > 0, `${mode}: outstanding computed from her ledger (${cf.outstanding})`);
+  const stillActive = await pool.query('SELECT is_active FROM guests WHERE id=$1', [F.gA.id]);
+  eq(stillActive.rows[0].is_active, true, `${mode}: MONEY: preparing a checkout checks nobody out`);
+
   // ── audit ─────────────────────────────────────────────────────────────
   const audit = await pool.query(`SELECT * FROM ai_actions WHERE request_text ILIKE 'record 2500 rent%' ORDER BY id DESC LIMIT 1`);
   ok(audit.rows[0], `${mode}: ask audited`); eq(audit.rows[0].interpretation.tool, 'prepare_payment', `${mode}: audit has the interpretation`); ok(audit.rows[0].proposal_id, `${mode}: audit links the proposal`);

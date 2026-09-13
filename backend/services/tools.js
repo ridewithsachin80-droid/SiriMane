@@ -256,6 +256,118 @@ const TOOLS = {
     }
   },
 
+  prepare_resident: {
+    description: 'Draft a new resident from a sentence like "Ananya Sharma joining Room 204 bed B tomorrow, rent 8000, deposit 16000, phone 98765 43210". Preview only — the move-in form opens pre-filled.',
+    args: { text: 'string' }, role: 'staff', level: 'prepare',
+    async run(a) {
+      const t = String(a.text || '');
+      const amounts = [];
+      let rest = t;
+      // Rent and deposit, however they are phrased.
+      const rentM = t.match(/rent\s*(?:is|of)?\s*(?:rs\.?|₹)?\s*([\d,]+(?:\.\d+)?)\s*(k|thousand)?/i);
+      const depM = t.match(/deposit\s*(?:is|of)?\s*(?:rs\.?|₹)?\s*([\d,]+(?:\.\d+)?)\s*(k|thousand)?/i);
+      const num = m => m ? Math.round(parseFloat(m[1].replace(/,/g, '')) * (/k|thousand/i.test(m[2] || '') ? 1000 : 1)) : null;
+      const rent = num(rentM), deposit = num(depM);
+      const roomM = t.match(/\broom\s*([a-z]?\d{1,3}[a-z]?)\b/i);
+      const bedM = t.match(/\bbed\s*([a-z0-9]{1,3})\b/i);
+      const phoneM = t.match(/\b((?:\+?91[\s-]?)?[6-9]\d{4}[\s-]?\d{5})\b/);
+      // Date: explicit YYYY-MM-DD, "today", "tomorrow", or "1 Oct".
+      let joinDate = null;
+      const iso = t.match(/\b(\d{4}-\d{2}-\d{2})\b/);
+      const today = istToday();
+      if (iso) joinDate = iso[1];
+      else if (/\btomorrow\b/i.test(t)) joinDate = new Date(new Date(today + 'T00:00:00Z').getTime() + 86400000).toISOString().slice(0, 10);
+      else if (/\btoday\b/i.test(t)) joinDate = today;
+      else {
+        const dm = t.match(/\b(\d{1,2})\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/i);
+        if (dm) {
+          const mi = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'].indexOf(dm[2].toLowerCase());
+          const y = new Date(today + 'T00:00:00Z').getUTCFullYear();
+          joinDate = `${y}-${String(mi + 1).padStart(2, '0')}-${String(Number(dm[1])).padStart(2, '0')}`;
+        }
+      }
+      // Name: the words before the first keyword, title-cased tokens only.
+      rest = t.split(/\b(joining|join|room|rent|deposit|phone|bed|from|tomorrow|today)\b/i)[0];
+      const name = rest.replace(/[^A-Za-z .]/g, ' ').replace(/\s+/g, ' ').trim();
+      if (!name) return { clarify: 'What is her name?' };
+      const dup = await pool.query(`SELECT name FROM guests WHERE is_active=true AND LOWER(name)=LOWER($1)`, [name]);
+      let room = null;
+      if (roomM) {
+        const r = await pool.query(`SELECT r.id, r.room_number, r.total_beds, r.monthly_rent, (SELECT COUNT(*) FROM guests g WHERE g.room_id=r.id AND g.is_active=true)::int AS occupied FROM rooms r WHERE r.is_active=true AND r.room_number ILIKE $1`, [roomM[1]]);
+        if (!r.rows[0]) return { clarify: `I don't know a room "${roomM[1]}".` };
+        room = r.rows[0];
+        if (room.occupied >= room.total_beds) return { clarify: `Room ${room.room_number} is full (${room.occupied}/${room.total_beds}).` };
+      }
+      const preview = {
+        name, phone: phoneM ? phoneM[1].replace(/[^\d]/g, '').slice(-10) : null,
+        room_id: room ? room.id : null, room_number: room ? room.room_number : null,
+        bed_number: bedM ? bedM[1] : null, join_date: joinDate || today,
+        monthly_rent: rent != null ? rent : (room ? Math.round(parseFloat(room.monthly_rent)) : null),
+        deposit_amount: deposit
+      };
+      const missing = [];
+      if (!preview.phone) missing.push('phone number');
+      if (!preview.room_id) missing.push('room');
+      if (preview.monthly_rent == null) missing.push('rent');
+      if (preview.deposit_amount == null) missing.push('deposit');
+      return {
+        text: `${name}${preview.room_number ? ' → Room ' + preview.room_number : ''}${preview.bed_number ? ' bed ' + preview.bed_number : ''} from ${preview.join_date}` +
+              `${preview.monthly_rent != null ? ' · rent ' + fmt(preview.monthly_rent) : ''}${preview.deposit_amount != null ? ' · deposit ' + fmt(preview.deposit_amount) : ''}.` +
+              (dup.rows.length ? ` ⚠️ A resident called ${dup.rows[0].name} is already here.` : '') +
+              (missing.length ? ` Still needed: ${missing.join(', ')} — the form will open for you to fill them in.` : ''),
+        preview, openWizard: { kind: 'move-in', fields: preview }
+      };
+    }
+  },
+  prepare_checkout: {
+    description: 'Work out a resident’s checkout: final dues, deposit held, refund. Use for "Ananya is checking out tomorrow". Preview only — the checkout form opens with the figures.',
+    args: { name: 'string?', resident_id: 'number?', date: 'string?' }, role: 'admin', level: 'prepare',
+    async run(a, ctx) {
+      const { match, candidates } = await resolveResident({ id: a.resident_id || ctx.context?.resident_id, name: a.name });
+      if (!match) return { clarify: candidates.length ? 'Which resident is checking out?' : 'I could not find that resident.', candidates };
+      const g = await pool.query(`SELECT g.*, r.room_number FROM guests g LEFT JOIN rooms r ON r.id=g.room_id WHERE g.id=$1`, [match.id]);
+      const x = g.rows[0];
+      if (!x.is_active) return { clarify: `${x.name} has already checked out.` };
+      const ledger = await routes.computeGuestLedger(x);
+      const outstanding = ledger.currentBalance < 0 ? -ledger.currentBalance : 0;
+      const credit = ledger.currentBalance > 0 ? ledger.currentBalance : 0;
+      const deposit = parseFloat(x.deposit_amount) || 0;
+      const openIssues = await pool.query(`SELECT COUNT(*)::int AS n FROM complaints WHERE guest_id=$1 AND status<>'resolved'`, [match.id]);
+      // Deductions are the warden's call; the preview shows the refund BEFORE
+      // any deduction, exactly as the checkout screen computes it.
+      const preview = {
+        guest_id: x.id, name: x.name, room_number: x.room_number,
+        leave_date: /^\d{4}-\d{2}-\d{2}$/.test(a.date || '') ? a.date : istToday(),
+        outstanding, credit, deposit_held: deposit, refund_before_deductions: deposit,
+        open_requests: openIssues.rows[0].n
+      };
+      return {
+        text: `${x.name}${x.room_number ? ' (Room ' + x.room_number + ')' : ''} — ${outstanding > 0 ? `owes ${fmt(outstanding)}` : credit > 0 ? `is ${fmt(credit)} in credit` : 'is settled'} · deposit held ${fmt(deposit)} · refund before deductions ${fmt(deposit)}` +
+              `${openIssues.rows[0].n ? ` · ${openIssues.rows[0].n} open request${openIssues.rows[0].n === 1 ? '' : 's'} to close first` : ''}.` +
+              ` Open the checkout form to record damages and confirm.`,
+        preview, openWizard: { kind: 'checkout', fields: preview }
+      };
+    }
+  },
+  room_readiness: {
+    description: 'Is a room ready for someone to move in? Checks free beds, open maintenance and rent approval.',
+    args: { room: 'string' }, role: 'staff', level: 'inform',
+    async run(a) {
+      const r = await pool.query(`SELECT r.id, r.room_number, r.total_beds, (SELECT COUNT(*) FROM guests g WHERE g.room_id=r.id AND g.is_active=true)::int AS occupied,
+          (SELECT COUNT(*) FROM complaints c WHERE c.room_number=r.room_number AND c.status<>'resolved')::int AS issues
+        FROM rooms r WHERE r.is_active=true AND r.room_number ILIKE $1`, [String(a.room)]);
+      if (!r.rows[0]) return { clarify: `I don't know a room "${a.room}".` };
+      const x = r.rows[0];
+      const free = Math.max(0, x.total_beds - x.occupied);
+      const checks = [
+        { label: 'Free bed', ok: free > 0, detail: free ? `${free} of ${x.total_beds} free` : 'Room is full' },
+        { label: 'No open maintenance', ok: x.issues === 0, detail: x.issues ? `${x.issues} open request${x.issues === 1 ? '' : 's'}` : 'Nothing open' }
+      ];
+      const done = checks.filter(c => c.ok).length;
+      return { text: `Room ${x.room_number} readiness: ${Math.round(done * 100 / checks.length)}%. ` + checks.map(c => `${c.ok ? '✅' : '❌'} ${c.label} (${c.detail})`).join(' · '), checks, rows: [] };
+    }
+  },
+
   // ═══════════════════ EXECUTE (confirm required) ═══════════════════
   create_payment: {
     description: 'Save a payment (after confirmation).', args: {}, role: 'staff', level: 'execute',

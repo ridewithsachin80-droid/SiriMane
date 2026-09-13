@@ -8,7 +8,7 @@ const REQUIRED = {
   tables: ['users', 'rooms', 'guests', 'collections', 'purchases', 'guest_rent_history', 'guest_room_history', 'deposit_refunds',
     'fixed_assets', 'capital_transactions', 'app_settings', 'daily_menu', 'announcements', 'inbox_messages', 'activity_log',
     'checklist_items', 'checklist_log', 'complaints', 'ai_reads', 'reminder_log', 'owner_reports', 'ai_proposals', 'ai_actions'],
-  columns: { guests: ['password_hash', 'address', 'advance_required', 'rent_variance_approved'], collections: ['status', 'source'],
+  columns: { guests: ['password_hash', 'address', 'advance_required', 'rent_variance_approved', 'expected_checkout', 'resident_no'], collections: ['status', 'source'],
     purchases: ['status', 'source'], complaints: ['source', 'priority'] }
 };
 

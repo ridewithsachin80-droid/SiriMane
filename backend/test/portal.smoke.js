@@ -215,6 +215,31 @@ async function runAtWidth(browser, BASE, width, fixtures) {
   await sleep(150);
   eq(await page.evaluate(() => document.documentElement.getAttribute('data-theme')), 'light', `${tag} portal toggles back`);
 
+  // ── Sprint 8: digital resident ID ──────────────────────────────────────
+  // The session test above deliberately expires her login, so sign in again.
+  if (await page.$('#login-mobile')) {
+    await page.type('#login-mobile', PHONE);
+    await page.type('#login-password', PHONE);
+    await page.click('#login-btn');
+    await page.waitForFunction(() => !document.getElementById('portal-section').classList.contains('hidden'), { timeout: 8000 });
+  }
+  const tabLabels = await page.$$eval('.tab', els => els.map(e => ({ label: e.textContent.trim(), tab: e.dataset.tab })));
+  ok(tabLabels.some(t => t.tab === 'idcard'), `${tag} portal has a My ID tab`);
+  ok(tabLabels.every(t => t.tab), `${tag} every tab declares which panel it opens`);
+  await page.evaluate(() => showTab('idcard'));
+  await page.waitForSelector('.idcard-qr svg', { timeout: 10000 });
+  eq(await page.$eval('.tab.active', e => e.dataset.tab), 'idcard', `${tag} the ID tab is the one highlighted`);
+  const idTxt = await page.$eval('#idcard-body', e => e.textContent);
+  ok(/SM\d{4}/.test(idTxt), `${tag} ID card shows her resident number`);
+  ok(idTxt.includes('Rakshitha') || idTxt.includes('Portal Resident'), `${tag} ID card names her`);
+  const qrSvg = await page.$eval('.idcard-qr svg', e => e.outerHTML);
+  ok(qrSvg.length > 300, `${tag} QR rendered (${qrSvg.length} bytes)`);
+  ok(!qrSvg.includes(PHONE), `${tag} PRIVACY: the QR markup carries no phone number`);
+  ok(/changes every 24 hours/.test(idTxt), `${tag} card explains the code expires`);
+  const idW = await page.evaluate(() => Math.round(document.querySelector('.idcard').getBoundingClientRect().right));
+  ok(idW <= width + 1, `${tag} ID card fits the screen (${idW}px)`);
+  await page.screenshot({ path: path.join(SHOTS, `portal-id-${width}.png`) });
+
   eq(jsErrors.length, 0, `${tag} no uncaught JS errors (${jsErrors.join('; ')})`);
   await page.close(); await ctx.close();
 }

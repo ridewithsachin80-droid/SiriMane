@@ -275,7 +275,7 @@ router.get('/guests/:id', auth, async (req, res) => {
 });
 
 router.post('/guests', auth, async (req, res) => {
-  const { name,phone,email,emergency_contact,id_proof_type,id_proof_number,room_id,bed_number,join_date,monthly_rent,deposit_amount,notes,address } = req.body;
+  const { name,phone,email,emergency_contact,emergency_contact_name,id_proof_type,id_proof_number,room_id,bed_number,join_date,monthly_rent,deposit_amount,notes,address,expected_checkout } = req.body;
   if (!name || !join_date) return res.status(400).json({ error: 'Name and join date required' });
   try {
     // If this guest's rent doesn't match their room's standard per-bed rate,
@@ -290,8 +290,13 @@ router.post('/guests', auth, async (req, res) => {
     }
 
     const r = await pool.query(
-      `INSERT INTO guests(name,phone,email,emergency_contact,id_proof_type,id_proof_number,room_id,bed_number,join_date,monthly_rent,deposit_amount,notes,created_by,rent_variance_approved,address) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
-      [name,phone,email,emergency_contact,id_proof_type||null,id_proof_number||null,room_id||null,bed_number||null,join_date,monthly_rent||0,deposit_amount||0,notes,req.user.id,rentVarianceApproved,address||null]);
+      `INSERT INTO guests(name,phone,email,emergency_contact,id_proof_type,id_proof_number,room_id,bed_number,join_date,monthly_rent,deposit_amount,notes,created_by,rent_variance_approved,address,expected_checkout,emergency_contact_name) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
+      [name,phone,email,emergency_contact,id_proof_type||null,id_proof_number||null,room_id||null,bed_number||null,join_date,monthly_rent||0,deposit_amount||0,notes,req.user.id,rentVarianceApproved,address||null,expected_checkout||null,emergency_contact_name||null]);
+    // Every resident gets a stable, readable number for her ID card.
+    if (!r.rows[0].resident_no) {
+      const num = await pool.query(`UPDATE guests SET resident_no='SM'||LPAD(id::text,4,'0') WHERE id=$1 RETURNING resident_no`, [r.rows[0].id]);
+      r.rows[0].resident_no = num.rows[0].resident_no;
+    }
     if (parseFloat(monthly_rent) > 0) {
       await pool.query(
         `INSERT INTO guest_rent_history(guest_id, monthly_rent, effective_from, changed_by, note) VALUES($1,$2,$3,$4,$5)`,
@@ -315,7 +320,7 @@ router.post('/guests', auth, async (req, res) => {
 });
 
 router.put('/guests/:id', auth, async (req, res) => {
-  const { name,phone,email,emergency_contact,room_id,bed_number,monthly_rent,deposit_amount,notes,leave_date,is_active,rent_effective_from,address,id_proof_type,id_proof_number } = req.body;
+  const { name,phone,email,emergency_contact,emergency_contact_name,room_id,bed_number,monthly_rent,deposit_amount,notes,leave_date,is_active,rent_effective_from,address,id_proof_type,id_proof_number,expected_checkout } = req.body;
   try {
     const existing = await pool.query('SELECT monthly_rent,deposit_amount FROM guests WHERE id=$1', [req.params.id]);
     if (!existing.rows[0]) return res.status(404).json({ error: 'Not found' });
@@ -337,10 +342,12 @@ router.put('/guests/:id', auth, async (req, res) => {
 
     const r = await pool.query(
       `UPDATE guests SET name=COALESCE($1,name),phone=COALESCE($2,phone),email=COALESCE($3,email),emergency_contact=COALESCE($4,emergency_contact),room_id=$5,bed_number=$6,monthly_rent=COALESCE($7,monthly_rent),deposit_amount=COALESCE($8,deposit_amount),notes=COALESCE($9,notes),leave_date=$10,is_active=COALESCE($11,is_active),rent_variance_approved=$12,
-              address=COALESCE($14,address),id_proof_type=COALESCE($15,id_proof_type),id_proof_number=COALESCE($16,id_proof_number)
+              address=COALESCE($14,address),id_proof_type=COALESCE($15,id_proof_type),id_proof_number=COALESCE($16,id_proof_number),
+              expected_checkout=COALESCE($17,expected_checkout),emergency_contact_name=COALESCE($18,emergency_contact_name)
         WHERE id=$13 RETURNING *`,
       [name,phone,email,emergency_contact,room_id||null,bed_number||null,monthly_rent,deposit_amount,notes,leave_date||null,is_active,rentVarianceApproved,req.params.id,
-       address === undefined ? null : address, id_proof_type === undefined ? null : id_proof_type, id_proof_number === undefined ? null : id_proof_number]);
+       address === undefined ? null : address, id_proof_type === undefined ? null : id_proof_type, id_proof_number === undefined ? null : id_proof_number,
+       expected_checkout === undefined ? null : expected_checkout, emergency_contact_name === undefined ? null : emergency_contact_name]);
     if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
 
     if (newRent !== oldRent && newRent > 0) {
@@ -391,7 +398,12 @@ router.delete('/guests/:id', auth, requireAdmin, async (req, res) => {
 // in one step so the two can never get out of sync. Admin only, since it's
 // the final sign-off on a financial transaction.
 router.post('/guests/:id/checkout', auth, requireAdmin, async (req, res) => {
-  const { deductions, deduction_notes, refund_mode } = req.body;
+  const { deductions, deduction_notes, refund_mode, leave_date } = req.body;
+  // The date may be backdated (she left on Sunday, it is recorded on Tuesday)
+  // but never set in the future.
+  const isDate = d => /^\d{4}-\d{2}-\d{2}$/.test(String(d || ''));
+  if (leave_date && !isDate(leave_date)) return res.status(400).json({ error: 'leave_date must be YYYY-MM-DD' });
+  if (leave_date && leave_date > istToday()) return res.status(400).json({ error: 'Checkout date cannot be in the future' });
   try {
     const g = await pool.query(`SELECT g.*,r.room_number FROM guests g LEFT JOIN rooms r ON g.room_id=r.id WHERE g.id=$1`, [req.params.id]);
     const guest = g.rows[0];
@@ -407,7 +419,7 @@ router.post('/guests/:id/checkout', auth, requireAdmin, async (req, res) => {
        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
       [guest.id, guest.name, guest.room_number, depositAmount, deductionAmount, deduction_notes || null, refundAmount, refund_mode || 'cash', req.user.id]
     );
-    await pool.query('UPDATE guests SET is_active=false,leave_date=CURRENT_DATE WHERE id=$1', [guest.id]);
+    await pool.query('UPDATE guests SET is_active=false, leave_date=COALESCE($2::date, $3::date) WHERE id=$1', [guest.id, leave_date || null, istToday()]);
     await logActivity(req, 'guest_checkout', `${guest.name} (room ${guest.room_number || '—'}) — refund ₹${refundAmount}`);
 
     res.status(201).json(refund.rows[0]);
@@ -1799,6 +1811,95 @@ router.get('/guest-receipt/:id/pdf', guestAuth, async (req, res) => {
 module.exports.computeRentDueList = computeRentDueList;
 module.exports.computeGuestLedger = computeGuestLedger;
 module.exports.istToday = istToday;
+// ── DIGITAL RESIDENT ID (Sprint 8) ───────────────────────────────────────
+// The card carries a QR holding a SIGNED, SHORT-LIVED token — not her name,
+// phone or ID number. Staff scan it (or type the resident number) and the
+// server decides what to show. A photographed card is useless after 24h.
+const QRCode = require('qrcode');
+
+router.get('/guest-id', guestAuth, async (req, res) => {
+  try {
+    const g = await pool.query(
+      `SELECT g.id, g.name, g.resident_no, g.phone, g.emergency_contact, g.emergency_contact_name, g.join_date, g.bed_number, r.room_number
+         FROM guests g LEFT JOIN rooms r ON r.id=g.room_id WHERE g.id=$1`, [req.guest.id]);
+    const x = g.rows[0];
+    if (!x) return res.status(404).json({ error: 'Resident not found' });
+    const token = jwt.sign({ type: 'resident-id', guestId: x.id }, process.env.JWT_SECRET, { expiresIn: '24h' });
+    const settings = await pool.query(`SELECT key, value FROM app_settings WHERE key IN ('pg_name','pg_phone')`);
+    const st = Object.fromEntries(settings.rows.map(r => [r.key, r.value]));
+    const qr = await QRCode.toString(token, { type: 'svg', margin: 0, errorCorrectionLevel: 'M', width: 220 });
+    res.json({
+      resident_no: x.resident_no, name: x.name, room_number: x.room_number, bed_number: x.bed_number,
+      join_date: x.join_date, emergency_contact: x.emergency_contact, emergency_contact_name: x.emergency_contact_name,
+      pg_name: st.pg_name || 'Siri Mane PG', pg_phone: st.pg_phone || null,
+      qr_svg: qr, expires_in_hours: 24
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Staff verify: POST /resident-id/verify { token } or { resident_no }
+router.post('/resident-id/verify', auth, async (req, res) => {
+  const { token, resident_no } = req.body || {};
+  try {
+    let guestId = null;
+    if (token) {
+      let decoded;
+      try { decoded = jwt.verify(String(token), process.env.JWT_SECRET); }
+      catch (e) { return res.status(400).json({ valid: false, error: /expired/i.test(e.message) ? 'That ID has expired — ask her to reopen the portal' : 'That code is not valid' }); }
+      if (decoded.type !== 'resident-id') return res.status(400).json({ valid: false, error: 'That code is not a resident ID' });
+      guestId = decoded.guestId;
+    } else if (resident_no) {
+      const r = await pool.query('SELECT id FROM guests WHERE resident_no=$1', [String(resident_no).trim().toUpperCase()]);
+      if (!r.rows[0]) return res.status(404).json({ valid: false, error: 'No resident with that number' });
+      guestId = r.rows[0].id;
+    } else return res.status(400).json({ error: 'token or resident_no is required' });
+
+    const g = await pool.query(
+      `SELECT g.id, g.name, g.resident_no, g.is_active, g.join_date, g.leave_date, g.bed_number, r.room_number
+         FROM guests g LEFT JOIN rooms r ON r.id=g.room_id WHERE g.id=$1`, [guestId]);
+    const x = g.rows[0];
+    if (!x) return res.status(404).json({ valid: false, error: 'Resident not found' });
+    await logActivity(req, 'resident_id_verify', `${x.name} (${x.resident_no})`);
+    res.json({ valid: !!x.is_active, resident: { id: x.id, name: x.name, resident_no: x.resident_no, room_number: x.room_number, bed_number: x.bed_number, join_date: x.join_date, is_active: x.is_active, leave_date: x.leave_date } });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /guests/:id/timeline — payments, room moves, rent changes, requests and
+// the refund, merged into one dated list. Read-only; every row comes from the
+// table that already owns it.
+router.get('/guests/:id/timeline', auth, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const g = await pool.query(`SELECT id, name, join_date, leave_date, monthly_rent, deposit_amount FROM guests WHERE id=$1`, [id]);
+    if (!g.rows[0]) return res.status(404).json({ error: 'Resident not found' });
+    const [pays, moves, rents, reqs, refunds] = await Promise.all([
+      pool.query(`SELECT id, collection_date AS at, amount, collection_type, payment_mode, status, receipt_number, source FROM collections WHERE guest_id=$1 AND is_deleted=false ORDER BY collection_date DESC, id DESC`, [id]),
+      pool.query(`SELECT id, effective_from AS at, from_room_number, to_room_number, to_bed_number, note FROM guest_room_history WHERE guest_id=$1`, [id]),
+      pool.query(`SELECT id, effective_from AS at, monthly_rent FROM guest_rent_history WHERE guest_id=$1`, [id]),
+      pool.query(`SELECT id, created_at::date AS at, category, description, status, priority, resolved_at FROM complaints WHERE guest_id=$1`, [id]),
+      pool.query(`SELECT id, created_at::date AS at, deposit_amount, deductions, refund_amount FROM deposit_refunds WHERE guest_id=$1`, [id])
+    ]);
+    const guest = g.rows[0];
+    const items = [
+      { at: guest.join_date, kind: 'joined', title: 'Moved in', detail: `Rent ${fmtMoney(guest.monthly_rent)}/month · deposit ${fmtMoney(guest.deposit_amount)}` },
+      ...pays.rows.map(p => ({ at: p.at, kind: 'payment', title: `${fmtMoney(p.amount)} ${p.collection_type}`, detail: `${(p.payment_mode || '').toUpperCase()}${p.receipt_number ? ' · ' + p.receipt_number : ''}${p.status !== 'confirmed' ? ' · ' + p.status : ''}${p.source && p.source !== 'manual' ? ' · via ' + p.source : ''}`, id: p.id, status: p.status })),
+      ...moves.rows.map(m => ({ at: m.at, kind: 'move', title: `Room ${m.from_room_number || '—'} → ${m.to_room_number}${m.to_bed_number ? ' / bed ' + m.to_bed_number : ''}`, detail: m.note || '' })),
+      ...rents.rows.map(r => ({ at: r.at, kind: 'rent', title: `Rent set to ${fmtMoney(r.monthly_rent)}/month`, detail: '' })),
+      ...reqs.rows.map(c => ({ at: c.at, kind: 'request', title: `${c.category} request`, detail: `${c.description.slice(0, 80)} · ${c.status}${c.priority ? ' · ' + c.priority : ''}`, id: c.id })),
+      ...refunds.rows.map(r => ({ at: r.at, kind: 'refund', title: `Deposit refunded ${fmtMoney(r.refund_amount)}`, detail: `Held ${fmtMoney(r.deposit_amount)}${parseFloat(r.deductions) ? ' · deductions ' + fmtMoney(r.deductions) : ''}` })),
+      ...(guest.leave_date ? [{ at: guest.leave_date, kind: 'left', title: 'Checked out', detail: '' }] : [])
+    ].filter(x => x.at);
+    // Newest first. On the same date, "Moved in" is always the first thing
+    // that happened and "Checked out" the last, so they bracket the day.
+    const rank = { left: 0, payment: 1, request: 2, move: 3, rent: 4, refund: 5, joined: 9 };
+    items.sort((a, b) =>
+      String(b.at).slice(0, 10).localeCompare(String(a.at).slice(0, 10))
+      || (rank[a.kind] ?? 6) - (rank[b.kind] ?? 6)
+      || (b.id || 0) - (a.id || 0));
+    res.json({ resident: guest, items });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 module.exports.computeReportData = computeReportData;
 module.exports.computeTrend = computeTrend;
 module.exports.computeBalanceSheetData = computeBalanceSheetData;

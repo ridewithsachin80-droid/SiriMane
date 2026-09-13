@@ -668,6 +668,91 @@ async function runAtWidth(browser, BASE, width) {
   });
   eq(deadButtons.length, 0, `${tag} no empty-state button calls a missing function (${deadButtons.join(', ')})`);
 
+  // ── Sprint 8: Resident 360, move-in and checkout wizards ───────────────
+  await page.evaluate(() => navigate('guests'));
+  await page.waitForFunction(() => document.querySelector('#page-content table.sm-cards tbody tr'), { timeout: 10000 });
+  await page.evaluate(id => residentProfile(id), target.id);
+  await page.waitForSelector('.r360-kv', { timeout: 10000 });
+  const r360txt = await page.$eval('.modal-body', e => e.textContent);
+  ok(r360txt.includes(target.name) || (await page.$eval('.modal-header', e => e.textContent)).includes(target.name), `${tag} Resident 360 opens on her`);
+  ok(/SM\d{4}/.test(r360txt), `${tag} shows her resident number`);
+  const tabs360 = await page.$$eval('.modal .subtab', els => els.map(e => e.textContent.trim()));
+  eq(tabs360.length, 5, `${tag} five profile tabs (${tabs360.join('/')})`);
+  await page.evaluate(() => { r360.tab = 'stay'; renderResident360(); });
+  await page.waitForSelector('.r360-timeline li', { timeout: 8000 });
+  const tlDates = await page.$$eval('.r360-timeline .tl-date', els => els.map(e => e.textContent.trim()));
+  ok(tlDates.length >= 2, `${tag} timeline rendered (${tlDates.length} entries)`);
+  ok(await page.$eval('.r360-timeline li:last-child', e => /Moved in/.test(e.textContent)), `${tag} timeline ends with "Moved in"`);
+  await page.evaluate(() => { r360.tab = 'money'; renderResident360(); });
+  await sleep(200);
+  ok(await page.$eval('#r360-body', e => /Payments/.test(e.textContent)), `${tag} money tab lists payments`);
+  await page.screenshot({ path: path.join(SHOTS, `resident360-${width}.png`) });
+  await page.evaluate(() => closeModal());
+
+  // Move-in wizard: nothing is written until the final step
+  const guestsBefore = (await page.evaluate(() => API.getGuests())).length;
+  await page.evaluate(() => moveInWizard());
+  await page.waitForSelector('#mi-name', { timeout: 10000 });
+  ok(await page.$('.wiz-bar'), `${tag} wizard shows progress`);
+  await page.type('#mi-name', 'Wizard Tester');
+  await page.type('#mi-phone', '9' + String(Date.now()).slice(-9));
+  await page.evaluate(() => moveInStep(1));
+  await page.waitForSelector('#mi-ec-name', { timeout: 5000 });
+  await page.evaluate(() => moveInStep(1));
+  await page.waitForSelector('#mi-room', { timeout: 5000 });
+  const roomOpts = await page.$$eval('#mi-room option', els => els.map(e => e.value).filter(Boolean));
+  ok(roomOpts.length >= 1, `${tag} wizard offers rooms with a free bed`);
+  await page.select('#mi-room', roomOpts[0]);
+  await page.evaluate(() => moveInStep(1));
+  await page.waitForSelector('#mi-rent', { timeout: 5000 });
+  await page.evaluate(() => { document.getElementById('mi-rent').value = 6000; document.getElementById('mi-dep').value = 12000; });
+  await page.evaluate(() => moveInStep(1));
+  await page.waitForSelector('#mi-idtype', { timeout: 5000 });
+  await page.evaluate(() => moveInStep(1));
+  await page.waitForSelector('#mi-pay-dep', { timeout: 5000 });
+  await page.evaluate(() => { document.getElementById('mi-pay-dep').value = 12000; });
+  await page.evaluate(() => moveInStep(1));
+  await page.waitForFunction(() => /Nothing is saved until/.test(document.querySelector('.modal-body')?.textContent || ''), { timeout: 5000 });
+  eq((await page.evaluate(() => API.getGuests())).length, guestsBefore, `${tag} DATA: six steps in, still nobody created`);
+  await page.screenshot({ path: path.join(SHOTS, `movein-${width}.png`) });
+  await page.evaluate(() => moveInSave());
+  await page.waitForFunction(() => !document.querySelector('#mi-name'), { timeout: 10000 });
+  const afterMoveIn = await page.evaluate(() => API.getGuests());
+  eq(afterMoveIn.length, guestsBefore + 1, `${tag} resident created on confirm`);
+  const made = afterMoveIn.find(g => g.name === 'Wizard Tester');
+  ok(made, `${tag} she is in the list`);
+  const herPays = await page.evaluate(id => apiFetch(`/guests/${id}/timeline`), made.id);
+  ok(herPays.items.some(i => i.kind === 'payment' && /12,000/.test(i.title)), `${tag} the deposit taken at move-in is recorded`);
+  // Abandoning the wizard writes nothing
+  await page.evaluate(() => moveInWizard());
+  await page.waitForSelector('#mi-name', { timeout: 8000 });
+  await page.type('#mi-name', 'Abandoned Person');
+  await page.evaluate(() => closeModal());
+  await sleep(300);
+  eq((await page.evaluate(() => API.getGuests())).length, guestsBefore + 1, `${tag} DATA: an abandoned wizard leaves nobody behind`);
+
+  // Checkout wizard: refund = deposit − deductions, and it is the server's number
+  await page.evaluate(id => checkoutWizard(id), made.id);
+  await page.waitForSelector('#co-date', { timeout: 10000 });
+  await page.evaluate(() => checkoutStep(1));
+  await page.waitForSelector('#co-ded', { timeout: 5000 });
+  await page.evaluate(() => { document.getElementById('co-ded').value = 500; document.getElementById('co-notes').value = 'Broken drawer'; });
+  await page.evaluate(() => checkoutStep(1));
+  await page.waitForFunction(() => /Refund due/.test(document.querySelector('.modal-body')?.textContent || ''), { timeout: 5000 });
+  ok(await page.$eval('.modal-body', e => /11,500/.test(e.textContent)), `${tag} MONEY: refund shown as 12,000 − 500`);
+  const activeBefore = (await page.evaluate(() => API.getGuests())).filter(g => g.is_active).length;
+  await page.screenshot({ path: path.join(SHOTS, `checkout-${width}.png`) });
+  await page.evaluate(() => checkoutSave());
+  await page.waitForFunction(() => !document.querySelector('#co-date'), { timeout: 10000 });
+  const activeAfter = (await page.evaluate(() => API.getGuests())).filter(g => g.is_active).length;
+  eq(activeAfter, activeBefore - 1, `${tag} she is checked out`);
+  const refunds = await page.evaluate(() => apiFetch('/deposit-refunds'));
+  ok(refunds.some(x => parseFloat(x.refund_amount) === 11500), `${tag} MONEY: the refund recorded is 11,500`);
+  // Leaving-soon filter
+  await page.evaluate(() => navigate('guests'));
+  await page.waitForFunction(() => document.querySelector('#page-content table.sm-cards tbody tr'), { timeout: 10000 });
+  ok(await page.$eval('#page-content', e => /Leaving soon/.test(e.textContent)), `${tag} Residents has a "Leaving soon" filter`);
+
   eq(jsErrors.length, 0, `${tag} no uncaught JS errors (${jsErrors.join('; ')})`);
   await page.close(); await ctx.close();
 }

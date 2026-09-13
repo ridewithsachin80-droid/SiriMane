@@ -456,7 +456,7 @@ async function pgGuests(filter) {
   loading();
   const f = filter || guestsCurrentFilter;
   guestsCurrentFilter = f;
-  document.getElementById('topbar-actions').innerHTML = `<button class="btn btn-primary btn-sm" onclick="guestModal()">+ Add resident</button>`;
+  document.getElementById('topbar-actions').innerHTML = `<button class="btn btn-primary btn-sm" onclick="moveInWizard()">+ Add resident</button>`;
   try {
     const list = await API.getGuests('?active=all');
     guestsListCache = list;
@@ -464,12 +464,14 @@ async function pgGuests(filter) {
     const hasVariance = (g) => g.room_id && g.room_rent !== null && g.room_rent !== undefined && parseFloat(g.monthly_rent) !== parseFloat(g.room_rent);
     const pendingCount = list.filter(g => hasVariance(g) && !g.rent_variance_approved).length;
     const leftCount = list.filter(g=>!g.is_active).length;
+  const leavingCount = guestsListCache.filter(g => g.is_active && g.expected_checkout && new Date(g.expected_checkout) <= new Date(Date.now() + 30 * 86400000)).length;
     const rooms = [...new Set(list.filter(g=>g.room_number).map(g => g.room_number))].sort();
     setContent(`
       <div class="page-header"><h1>Residents</h1><p>Register and manage the people living here</p></div>
       ${pendingCount>0?`<div class="alert" style="background:#FFFBEB;border:1px solid var(--amber);color:#92400E;margin-bottom:16px">⏳ ${pendingCount} guest${pendingCount>1?'s have':' has'} a rent that differs from their room's standard rate and ${pendingCount>1?'need':'needs'} your approval — look for the amber "Variance" badge below.</div>`:''}
       <div class="flex gap-2 mb-4" style="flex-wrap:wrap">
         <button class="btn ${f==='active'?'btn-primary':'btn-outline'} btn-sm" onclick="pgGuests('active')">Active</button>
+        <button class="btn ${f==='leaving'?'btn-primary':'btn-outline'} btn-sm" onclick="pgGuests('leaving')">Leaving soon (${leavingCount})</button>
         <button class="btn ${f==='left'?'btn-primary':'btn-outline'} btn-sm" onclick="pgGuests('left')">Left (${leftCount})</button>
         <button class="btn ${f==='all'?'btn-primary':'btn-outline'} btn-sm" onclick="pgGuests('all')">All</button>
       </div>
@@ -487,7 +489,7 @@ async function pgGuests(filter) {
               <option value="missing">Docs Missing</option>
             </select>
             <input type="text" id="guest-search" placeholder="🔍 Search..." style="width:200px;margin:0" oninput="filterGuests()" />
-            <button class="btn btn-primary btn-sm" onclick="guestModal()">+ Add resident</button>
+            <button class="btn btn-primary btn-sm" onclick="moveInWizard()">+ Add resident</button>
           </div>
         </div>
         <div class="table-wrap">
@@ -518,11 +520,11 @@ function renderGuestRows(filtered, f) {
       <td><span class="badge badge-gray">${g.id_proof_type||'—'}</span></td>
       <td>
         <div class="flex gap-2">
-          <button class="btn btn-outline btn-sm" onclick="viewGuest(${g.id})">View</button>
+          <button class="btn btn-outline btn-sm" onclick="residentProfile(${g.id})">View</button>
           <button class="btn btn-primary btn-sm" onclick="guestModal(null,${g.id})">Edit</button>
           ${needsApproval && isAdmin()?`<button class="btn btn-success btn-sm" onclick="approveRentVariance(${g.id})">Approve Rent</button>`:''}
           ${g.is_active && isAdmin()?`<button class="btn btn-outline btn-sm" onclick="roomShiftModal(${g.id},'${g.name.replace(/'/g,"\\'")}')">Shift Room</button>`:''}
-          ${g.is_active && isAdmin()?`<button class="btn btn-danger btn-sm" onclick="checkoutModal(${g.id})">Checkout</button>`:''}
+          ${g.is_active && isAdmin()?`<button class="btn btn-danger btn-sm" onclick="checkoutWizard(${g.id})">Checkout</button>`:''}
         </div>
       </td>
     </tr>`;
@@ -534,7 +536,11 @@ function filterGuests() {
   const docs = document.getElementById('guest-docs-filter')?.value || '';
   const q = (document.getElementById('guest-search')?.value || '').toLowerCase().trim();
   const f = guestsCurrentFilter;
-  let rows = f === 'active' ? guestsListCache.filter(g=>g.is_active) : f === 'left' ? guestsListCache.filter(g=>!g.is_active) : guestsListCache;
+  let rows = f === 'active' ? guestsListCache.filter(g=>g.is_active)
+    : f === 'left' ? guestsListCache.filter(g=>!g.is_active)
+    // "Leaving soon" = still here, with an expected checkout inside 30 days.
+    : f === 'leaving' ? guestsListCache.filter(g => g.is_active && g.expected_checkout && new Date(g.expected_checkout) <= new Date(Date.now() + 30 * 86400000))
+    : guestsListCache;
   if (room) rows = rows.filter(g => g.room_number === room);
   if (docs === 'present') rows = rows.filter(g => !!g.id_proof_type);
   else if (docs === 'missing') rows = rows.filter(g => !g.id_proof_type);
@@ -3943,7 +3949,8 @@ function renderCopilotResult(r) {
     return `<div>${x.name || x.title || JSON.stringify(x)}</div>`;
   }).join('')}${(r.evidence || []).length > 8 ? `<div class="text-muted">…and ${r.evidence.length - 8} more</div>` : ''}</div>` : '';
   const preview = r.proposal ? `<div class="copilot-preview"><div class="copilot-preview-h">Siri prepared — check before confirming</div>${previewRows(r.proposal.preview)}</div>` : '';
-  const buttons = (r.actions || []).map(a => {
+  const wizardBtn = r.openWizard ? `<button class="btn btn-success" onclick='openWizardFromCopilot(${JSON.stringify(r.openWizard).replace(/'/g, "&#39;")});copilotDismiss()'>${r.openWizard.kind === 'checkout' ? 'Open checkout' : 'Open move-in form'}</button>` : '';
+  const buttons = wizardBtn + (r.actions || []).map(a => {
     if (a.confirm) return `<button class="btn btn-success" onclick="copilotConfirm('${a.confirm}', this)">✓ ${a.label}</button>`;
     if (a.navigate) return `<button class="btn btn-outline btn-sm" onclick="navigate('${a.navigate}')">${a.label}</button>`;
     if (a.download) return `<button class="btn btn-outline btn-sm" onclick="API.downloadExport('${a.download}','${a.filename || 'file'}').catch(e=>toast(e.message))">📄 ${a.label}</button>`;
@@ -4119,7 +4126,7 @@ async function runSearch() {
 // ── Quick action ─────────────────────────────────────────────────────────
 const QUICK_ACTIONS = [
   { icon: 'rupee', label: 'Collect rent', run: () => navigate('collect') },
-  { icon: 'users', label: 'Add resident', run: () => { navigate('guests'); setTimeout(() => guestModal(), 350); } },
+  { icon: 'users', label: 'Add resident', run: () => { navigate('guests'); setTimeout(() => moveInWizard(), 350); } },
   { icon: 'cart', label: 'Add expense', run: () => { navigate('purchases'); setTimeout(() => purchaseModal(), 350); } },
   { icon: 'wrench', label: 'Report an issue', run: () => { navigate('complaints'); setTimeout(() => complaintModal(), 350); } },
   { icon: 'megaphone', label: 'Post an announcement', admin: true, run: () => { navigate('guest-messages'); setTimeout(() => announcementModal(), 350); } }
@@ -4219,3 +4226,289 @@ async function pgHome(force) {
   briefCache = { text: h.brief.text, computed_at: h.brief.computed_at, cached: h.brief.cached };
 }
 async function loadHome(force) { if (force) { await apiFetch('/copilot/brief?force=1'); } navigate('dashboard'); }
+
+
+/* ═══════════════════════════════════════════════════════════════
+   SPRINT 8 — Resident 360, move-in & checkout copilots, digital ID
+   ═══════════════════════════════════════════════════════════════ */
+
+// ── Resident 360 ────────────────────────────────────────────────
+const R360_TABS = [
+  { id: 'overview', label: 'Overview' }, { id: 'money', label: 'Money' },
+  { id: 'stay', label: 'Stay' }, { id: 'requests', label: 'Requests' }, { id: 'docs', label: 'Documents' }
+];
+let r360 = { id: null, tab: 'overview', data: null };
+
+async function residentProfile(id, tab) {
+  r360 = { id, tab: tab || 'overview', data: null };
+  smSetContext({ resident_id: id });
+  openModal(`<div class="modal modal-lg"><div class="modal-header"><h3>Resident</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+    <div class="modal-body"><div class="sm-skel"><div class="sm-skel-line" style="width:50%"></div><div class="sm-skel-card"></div></div></div></div>`);
+  try {
+    const [g, timeline, ledger] = await Promise.all([
+      API.getGuest(id),
+      apiFetch(`/guests/${id}/timeline`),
+      API.getGuestLedger(id).catch(() => null)
+    ]);
+    r360.data = { g, timeline, ledger };
+    smSetContext({ resident_id: id, resident_name: g.name, room_number: g.room_number || null });
+    renderResident360();
+  } catch (e) {
+    openModal(`<div class="modal"><div class="modal-header"><h3>Resident</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+      <div class="modal-body"><div class="alert alert-danger" style="display:block">${e.message}</div></div></div>`);
+  }
+}
+
+function renderResident360() {
+  const { g, timeline, ledger } = r360.data;
+  const due = ledger && ledger.currentBalance < 0 ? -ledger.currentBalance : 0;
+  const credit = ledger && ledger.currentBalance > 0 ? ledger.currentBalance : 0;
+  const months = g.monthly_rent > 0 ? Math.round(due / g.monthly_rent * 10) / 10 : 0;
+  const kv = rows => rows.filter(([, v]) => v !== undefined).map(([k, v]) => `<div class="r360-kv"><span>${k}</span><strong>${v || '—'}</strong></div>`).join('');
+  const body = {
+    overview: () => `
+      <div class="r360-status">${due > 0 ? `<span class="badge badge-red">Owes ${fmt(due)}${months ? ` · ${months} mo` : ''}</span>` : credit > 0 ? `<span class="badge badge-green">In credit ${fmt(credit)}</span>` : `<span class="badge badge-green">Settled</span>`}
+        ${g.is_active ? '<span class="badge badge-gray">Active</span>' : '<span class="badge badge-gray">Checked out</span>'}
+        ${g.expected_checkout ? `<span class="badge badge-amber">Leaving ${fmtDate(g.expected_checkout)}</span>` : ''}</div>
+      ${kv([['Resident no.', g.resident_no], ['Room / bed', g.room_number ? `Room ${g.room_number}${g.bed_number ? ' / ' + g.bed_number : ''}` : '—'],
+            ['Phone', g.phone], ['Emergency', [g.emergency_contact_name, g.emergency_contact].filter(Boolean).join(' · ')],
+            ['Moved in', fmtDate(g.join_date)], ['Rent', fmt(g.monthly_rent) + '/mo'], ['Deposit', fmt(g.deposit_amount)], ['Address', g.address]])}
+      <div class="flex gap-2" style="flex-wrap:wrap;margin-top:14px">
+        <button class="btn btn-primary btn-sm" onclick="closeModal();collectFrom(${g.id})">${icon('rupee')} Collect</button>
+        ${g.phone ? `<a class="btn btn-outline btn-sm" target="_blank" rel="noopener" href="${buildWhatsappUrl(g.phone, 'Hello ' + g.name + ',') || '#'}">${icon('whatsapp')} WhatsApp</a>` : ''}
+        <button class="btn btn-outline btn-sm" onclick="guestModal(${g.id})">Edit</button>
+        ${g.is_active && isAdmin() ? `<button class="btn btn-outline btn-sm" onclick="checkoutWizard(${g.id})">Checkout</button>` : ''}
+      </div>`,
+    money: () => {
+      const pays = timeline.items.filter(i => i.kind === 'payment');
+      return `${kv([['Outstanding', due ? fmt(due) : '—'], ['In credit', credit ? fmt(credit) : '—'], ['Monthly rent', fmt(g.monthly_rent)], ['Deposit held', fmt(g.deposit_amount)]])}
+        <div class="r360-h">Payments</div>
+        ${pays.length ? pays.map(p => `<div class="r360-row"><span><strong>${p.title}</strong><div class="t-sub">${fmtDate(p.at)}${p.detail ? ' · ' + p.detail : ''}</div></span>
+          ${p.status === 'confirmed' ? `<button class="btn btn-outline btn-sm" onclick="downloadReceipt(${p.id})">${icon('receipt')}</button>` : `<span class="badge badge-amber">${p.status}</span>`}</div>`).join('')
+          : emptyState('rupee', 'No payments yet', 'Collections will appear here.', `<button class="btn btn-primary btn-sm" onclick="closeModal();collectFrom(${g.id})">Collect rent</button>`)}`;
+    },
+    stay: () => `${kv([['Moved in', fmtDate(g.join_date)], ['Expected checkout', g.expected_checkout ? fmtDate(g.expected_checkout) : 'Not set'], ['Checked out', g.leave_date ? fmtDate(g.leave_date) : '—']])}
+      <div class="r360-h">Timeline</div>
+      <ul class="r360-timeline">${timeline.items.map(i => `<li class="tl-${i.kind}"><div class="tl-date">${fmtDate(i.at)}</div><div><strong>${i.title}</strong>${i.detail ? `<div class="t-sub">${i.detail}</div>` : ''}</div></li>`).join('')}</ul>`,
+    requests: () => {
+      const reqs = timeline.items.filter(i => i.kind === 'request');
+      return reqs.length ? reqs.map(r => `<div class="r360-row"><span><strong>${r.title}</strong><div class="t-sub">${fmtDate(r.at)} · ${r.detail}</div></span></div>`).join('')
+        : emptyState('wrench', 'No requests', 'Anything she reports will be listed here.', '');
+    },
+    docs: () => `${kv([['ID proof', g.id_proof_type], ['ID number', g.id_proof_number ? g.id_proof_number.replace(/.(?=.{4})/g, '•') : null], ['Address on file', g.address]])}
+      <p class="text-muted" style="font-size:12px;margin-top:10px">ID photos are never stored — only the fields read from them.</p>
+      ${!g.id_proof_type ? `<button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="guestModal(${g.id})">Add ID proof</button>` : ''}`
+  };
+  openModal(`<div class="modal modal-lg">
+    <div class="modal-header"><h3>${g.name}${g.room_number ? ` · Room ${g.room_number}` : ''}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+    <div class="modal-body">
+      <div class="subtabs">${R360_TABS.map(t => `<button class="subtab ${t.id === r360.tab ? 'active' : ''}" onclick="r360.tab='${t.id}';renderResident360()">${t.label}</button>`).join('')}</div>
+      <div id="r360-body">${body[r360.tab]()}</div>
+    </div></div>`);
+}
+
+// ── Move-in wizard ──────────────────────────────────────────────
+// Seven short steps; nothing is written until the last one, so an abandoned
+// wizard leaves no half-resident behind.
+let moveIn = null;
+async function moveInWizard(prefill) {
+  const rooms = await API.getRooms();
+  moveIn = { step: 1, rooms, data: Object.assign({ join_date: nowDate() }, prefill || {}) };
+  renderMoveIn();
+}
+function renderMoveIn() {
+  const d = moveIn.data, free = moveIn.rooms.filter(r => (r.total_beds - (r.occupied_beds || 0)) > 0);
+  const steps = [
+    { t: 'Who is moving in?', html: `
+      <div class="form-group"><label>Full name *</label><input id="mi-name" value="${d.name || ''}" placeholder="As on her ID"/></div>
+      <div class="form-group"><label>Phone *</label><input id="mi-phone" inputmode="numeric" value="${d.phone || ''}" placeholder="10-digit mobile"/></div>` },
+    { t: 'Emergency contact', html: `
+      <div class="form-group"><label>Name</label><input id="mi-ec-name" value="${d.emergency_contact_name || ''}" placeholder="Parent or guardian"/></div>
+      <div class="form-group"><label>Phone</label><input id="mi-ec" inputmode="numeric" value="${d.emergency_contact || ''}"/></div>` },
+    { t: 'Room and bed', html: `
+      <div class="form-group"><label>Room *</label><select id="mi-room">${['<option value="">— choose —</option>'].concat(free.map(r => `<option value="${r.id}" ${String(d.room_id) === String(r.id) ? 'selected' : ''}>Room ${r.room_number} · ${r.total_beds - (r.occupied_beds || 0)} free · ${fmt(r.monthly_rent)}</option>`)).join('')}</select></div>
+      <div class="form-group"><label>Bed</label><input id="mi-bed" value="${d.bed_number || ''}" placeholder="e.g. 2"/></div>
+      <div id="mi-ready" class="text-muted" style="font-size:12px"></div>` },
+    { t: 'Rent and deposit', html: `
+      <div class="form-group"><label>Monthly rent *</label><input id="mi-rent" type="number" inputmode="numeric" value="${d.monthly_rent != null ? d.monthly_rent : ''}"/></div>
+      <div class="form-group"><label>Deposit *</label><input id="mi-dep" type="number" inputmode="numeric" value="${d.deposit_amount != null ? d.deposit_amount : ''}"/></div>
+      <div class="form-row"><div class="form-group"><label>Move-in date *</label><input id="mi-join" type="date" value="${d.join_date || nowDate()}"/></div>
+      <div class="form-group"><label>Expected checkout</label><input id="mi-exp" type="date" value="${d.expected_checkout || ''}"/></div></div>` },
+    { t: 'ID proof', html: `
+      <div class="voice-row"><button type="button" id="mi-scan" class="mic-btn" style="background:var(--amber)" onclick="moveInScanId()">${icon('camera')}</button>
+        <span id="mi-scan-status" class="voice-status">Photograph her Aadhaar / ID to fill these in. The photo is never stored.</span></div>
+      <div class="form-row"><div class="form-group"><label>Type</label><select id="mi-idtype">${['', 'Aadhaar', 'PAN Card', 'Passport', 'Driving License', 'Voter ID'].map(t => `<option ${d.id_proof_type === t ? 'selected' : ''}>${t || '— select —'}</option>`).join('')}</select></div>
+      <div class="form-group"><label>Number</label><input id="mi-idnum" value="${d.id_proof_number || ''}"/></div></div>
+      <div class="form-group"><label>Address</label><textarea id="mi-address" rows="2">${d.address || ''}</textarea></div>` },
+    { t: 'First payment (optional)', html: `
+      <p class="text-muted" style="font-size:13px;margin-bottom:10px">Record what she is paying today. Leave blank to skip.</p>
+      <div class="form-row"><div class="form-group"><label>Deposit received</label><input id="mi-pay-dep" type="number" inputmode="numeric" value="${d.pay_deposit || ''}"/></div>
+      <div class="form-group"><label>Rent received</label><input id="mi-pay-rent" type="number" inputmode="numeric" value="${d.pay_rent || ''}"/></div></div>
+      <div class="form-group"><label>Mode</label><select id="mi-pay-mode">${['Cash', 'UPI', 'Bank Transfer'].map(m => `<option ${d.pay_mode === m ? 'selected' : ''}>${m}</option>`).join('')}</select></div>` },
+    { t: 'Check and confirm', html: `
+      <div class="copilot-preview"><div class="copilot-preview-h">Nothing is saved until you tap Confirm</div>
+        ${[['Name', d.name], ['Phone', d.phone], ['Room', (moveIn.rooms.find(r => String(r.id) === String(d.room_id)) || {}).room_number ? 'Room ' + moveIn.rooms.find(r => String(r.id) === String(d.room_id)).room_number + (d.bed_number ? ' / bed ' + d.bed_number : '') : '—'],
+          ['Move-in', fmtDate(d.join_date)], ['Expected checkout', d.expected_checkout ? fmtDate(d.expected_checkout) : '—'],
+          ['Rent', d.monthly_rent != null ? fmt(d.monthly_rent) + '/mo' : '—'], ['Deposit', d.deposit_amount != null ? fmt(d.deposit_amount) : '—'],
+          ['ID', d.id_proof_type || '—'], ['Paying today', (d.pay_deposit || d.pay_rent) ? `${fmt((+d.pay_deposit || 0) + (+d.pay_rent || 0))} by ${d.pay_mode || 'Cash'}` : '—']]
+          .map(([k, v]) => `<div class="copilot-kv"><span>${k}</span><strong>${v || '—'}</strong></div>`).join('')}</div>
+      <div id="mi-alert" class="alert alert-danger hidden" style="margin-top:10px"></div>` }
+  ];
+  const i = moveIn.step - 1, st = steps[i];
+  openModal(`<div class="modal modal-lg">
+    <div class="modal-header"><h3>Move in · step ${moveIn.step} of ${steps.length}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+    <div class="modal-body">
+      <div class="wiz-bar"><span style="width:${moveIn.step * 100 / steps.length}%"></span></div>
+      <h4 style="margin:12px 0 10px">${st.t}</h4>
+      ${st.html}
+      <div class="flex gap-2" style="margin-top:16px">
+        ${moveIn.step > 1 ? `<button class="btn btn-outline" onclick="moveInStep(-1)">Back</button>` : ''}
+        ${moveIn.step < steps.length ? `<button class="btn btn-primary" style="flex:1" onclick="moveInStep(1)">Next</button>`
+          : `<button class="btn btn-success" style="flex:1" onclick="moveInSave()">✓ Confirm move-in</button>`}
+      </div>
+    </div></div>`);
+  if (moveIn.step === 3) moveInReadiness();
+}
+function moveInCollect() {
+  const v = id => { const e = document.getElementById(id); return e ? e.value.trim() : undefined; };
+  const d = moveIn.data;
+  if (moveIn.step === 1) { d.name = v('mi-name'); d.phone = v('mi-phone'); }
+  if (moveIn.step === 2) { d.emergency_contact_name = v('mi-ec-name'); d.emergency_contact = v('mi-ec'); }
+  if (moveIn.step === 3) { d.room_id = v('mi-room'); d.bed_number = v('mi-bed'); }
+  if (moveIn.step === 4) { d.monthly_rent = v('mi-rent'); d.deposit_amount = v('mi-dep'); d.join_date = v('mi-join'); d.expected_checkout = v('mi-exp'); }
+  if (moveIn.step === 5) { d.id_proof_type = v('mi-idtype'); d.id_proof_number = v('mi-idnum'); d.address = v('mi-address'); }
+  if (moveIn.step === 6) { d.pay_deposit = v('mi-pay-dep'); d.pay_rent = v('mi-pay-rent'); d.pay_mode = v('mi-pay-mode'); }
+}
+function moveInStep(delta) {
+  moveInCollect();
+  const d = moveIn.data;
+  if (delta > 0) {
+    if (moveIn.step === 1 && (!d.name || !d.phone || d.phone.replace(/\D/g, '').length !== 10)) return toast('Her name and a 10-digit phone number are needed');
+    if (moveIn.step === 3 && !d.room_id) return toast('Choose a room');
+    if (moveIn.step === 4 && (!d.monthly_rent || !d.deposit_amount || !d.join_date)) return toast('Rent, deposit and the move-in date are needed');
+  }
+  moveIn.step = Math.max(1, moveIn.step + delta);
+  renderMoveIn();
+}
+async function moveInReadiness() {
+  const sel = document.getElementById('mi-room');
+  const host = document.getElementById('mi-ready');
+  if (!sel || !host) return;
+  const show = async () => {
+    const r = moveIn.rooms.find(x => String(x.id) === sel.value);
+    if (!r) { host.textContent = ''; return; }
+    try { const res = await apiFetch('/copilot/ask', { method: 'POST', body: { text: `is room ${r.room_number} ready?` } }); host.textContent = res.answer; }
+    catch { host.textContent = ''; }
+  };
+  sel.onchange = show; show();
+}
+async function moveInScanId() {
+  const status = document.getElementById('mi-scan-status');
+  try {
+    const r = await smScan('id', status);
+    if (!r) return;
+    const f = r.fields;
+    if (f.name && !document.getElementById('mi-name')) moveIn.data.name = moveIn.data.name || f.name;
+    smFill('mi-idnum', f.id_proof_number); smFill('mi-address', f.address);
+    const t = ID_TYPE_MAP[f.id_proof_type]; if (t) smFill('mi-idtype', t);
+    if (status) status.textContent = `Read from the ID (${f.confidence} confidence) — please check.`;
+  } catch (e) { if (status) { status.textContent = e.message; status.classList.add('voice-error'); } }
+}
+async function moveInSave() {
+  moveInCollect();
+  const d = moveIn.data;
+  const al = document.getElementById('mi-alert');
+  try {
+    const g = await API.createGuest({
+      name: d.name, phone: d.phone, emergency_contact: d.emergency_contact || null, emergency_contact_name: d.emergency_contact_name || null,
+      room_id: d.room_id, bed_number: d.bed_number || null, join_date: d.join_date, expected_checkout: d.expected_checkout || null,
+      monthly_rent: d.monthly_rent, deposit_amount: d.deposit_amount, address: d.address || null,
+      id_proof_type: d.id_proof_type || null, id_proof_number: d.id_proof_number || null, notes: null
+    });
+    const pays = [];
+    if (+d.pay_deposit > 0) pays.push({ collection_type: 'deposit', amount: +d.pay_deposit });
+    if (+d.pay_rent > 0) pays.push({ collection_type: 'rent', amount: +d.pay_rent });
+    for (const p of pays) {
+      await API.createCollection({ guest_id: g.id, guest_name: g.name, amount: p.amount, collection_date: d.join_date,
+        collection_type: p.collection_type, payment_mode: d.pay_mode || 'Cash', collection_month: new Date(d.join_date).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }), description: 'At move-in' });
+    }
+    closeModal();
+    const room = moveIn.rooms.find(r => String(r.id) === String(d.room_id));
+    toast(`${g.name} is in${room ? ` Room ${room.room_number}` : ''}${d.bed_number ? ` bed ${d.bed_number}` : ''} — ready`, 'ok');
+    moveIn = null;
+    navigate('guests');
+  } catch (e) { if (al) showAlert(al, e.message); else toast(e.message); }
+}
+
+// ── Checkout wizard ─────────────────────────────────────────────
+// Wraps the existing admin checkout endpoint; the refund maths is the
+// server's, shown here before it is committed.
+let checkoutW = null;
+async function checkoutWizard(id, prefill) {
+  const [g, ledger] = await Promise.all([API.getGuest(id), API.getGuestLedger(id).catch(() => null)]);
+  const due = ledger && ledger.currentBalance < 0 ? -ledger.currentBalance : 0;
+  checkoutW = { step: 1, g, due, data: { leave_date: (prefill && prefill.leave_date) || nowDate(), deductions: '', deduction_notes: '', refund_mode: 'cash' } };
+  renderCheckout();
+}
+function renderCheckout() {
+  const { g, due, data } = checkoutW;
+  const deposit = parseFloat(g.deposit_amount) || 0;
+  const ded = Math.max(0, parseFloat(data.deductions) || 0);
+  const refund = deposit - ded;
+  const steps = [
+    { t: 'Leaving date and dues', html: `
+      <div class="form-group"><label>Checkout date</label><input id="co-date" type="date" max="${nowDate()}" value="${data.leave_date}"/></div>
+      <div class="copilot-preview">${[['Outstanding rent', due ? fmt(due) : 'None'], ['Deposit held', fmt(deposit)]].map(([k, v]) => `<div class="copilot-kv"><span>${k}</span><strong>${v}</strong></div>`).join('')}</div>
+      ${due > 0 ? `<div class="alert alert-warning" style="display:block;margin-top:10px">She still owes ${fmt(due)}. Collect it first, or deduct it from the deposit on the next step.</div>` : ''}` },
+    { t: 'Room inspection and deductions', html: `
+      <div class="form-group"><label>Deductions from deposit</label><input id="co-ded" type="number" inputmode="numeric" value="${data.deductions}" placeholder="0"/></div>
+      <div class="form-group"><label>What for?</label><textarea id="co-notes" rows="2" placeholder="Damage, unpaid rent, cleaning…">${data.deduction_notes}</textarea></div>
+      ${due > 0 ? `<button class="btn btn-outline btn-sm" onclick="document.getElementById('co-ded').value=${Math.min(due, deposit)};document.getElementById('co-notes').value='Unpaid rent at checkout'">Deduct the ${fmt(Math.min(due, deposit))} she owes</button>` : ''}` },
+    { t: 'Refund', html: `
+      <div class="copilot-preview">${[['Deposit held', fmt(deposit)], ['Deductions', ded ? '− ' + fmt(ded) : '—'], ['Refund due', fmt(refund)]].map(([k, v]) => `<div class="copilot-kv"><span>${k}</span><strong>${v}</strong></div>`).join('')}</div>
+      ${refund < 0 ? `<div class="alert alert-danger" style="display:block;margin-top:10px">Deductions exceed the deposit — she owes ${fmt(-refund)}. Reduce the deduction or collect the difference separately.</div>` : ''}
+      <div class="form-group" style="margin-top:10px"><label>Refund paid by</label><select id="co-mode">${['cash', 'upi', 'bank'].map(m => `<option value="${m}" ${data.refund_mode === m ? 'selected' : ''}>${m.toUpperCase()}</option>`).join('')}</select></div>
+      <div id="co-alert" class="alert alert-danger hidden"></div>` }
+  ];
+  const st = steps[checkoutW.step - 1];
+  openModal(`<div class="modal modal-lg">
+    <div class="modal-header"><h3>Checkout · ${g.name}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+    <div class="modal-body">
+      <div class="wiz-bar"><span style="width:${checkoutW.step * 100 / steps.length}%"></span></div>
+      <h4 style="margin:12px 0 10px">${st.t}</h4>${st.html}
+      <div class="flex gap-2" style="margin-top:16px">
+        ${checkoutW.step > 1 ? `<button class="btn btn-outline" onclick="checkoutStep(-1)">Back</button>` : ''}
+        ${checkoutW.step < steps.length ? `<button class="btn btn-primary" style="flex:1" onclick="checkoutStep(1)">Next</button>`
+          : `<button class="btn btn-danger" style="flex:1" ${refund < 0 ? 'disabled' : ''} onclick="checkoutSave()">✓ Check out and refund ${fmt(refund)}</button>`}
+      </div>
+    </div></div>`);
+}
+function checkoutStep(delta) {
+  const d = checkoutW.data;
+  const v = id => { const e = document.getElementById(id); return e ? e.value : undefined; };
+  if (checkoutW.step === 1) d.leave_date = v('co-date') || d.leave_date;
+  if (checkoutW.step === 2) { d.deductions = v('co-ded') || ''; d.deduction_notes = v('co-notes') || ''; }
+  if (checkoutW.step === 3) d.refund_mode = v('co-mode') || d.refund_mode;
+  checkoutW.step = Math.max(1, checkoutW.step + delta);
+  renderCheckout();
+}
+async function checkoutSave() {
+  const d = checkoutW.data;
+  const al = document.getElementById('co-alert');
+  d.refund_mode = document.getElementById('co-mode')?.value || d.refund_mode;
+  try {
+    const r = await apiFetch(`/guests/${checkoutW.g.id}/checkout`, { method: 'POST', body: {
+      deductions: d.deductions || 0, deduction_notes: d.deduction_notes || null, refund_mode: d.refund_mode, leave_date: d.leave_date } });
+    closeModal();
+    toast(`${checkoutW.g.name} checked out · refund ${fmt(r.refund_amount)}`, 'ok');
+    checkoutW = null;
+    navigate('guests');
+  } catch (e) { if (al) showAlert(al, e.message); else toast(e.message); }
+}
+
+// The Copilot opens these wizards when it has prepared the fields.
+function openWizardFromCopilot(w) {
+  if (!w) return;
+  if (w.kind === 'move-in') moveInWizard(w.fields);
+  if (w.kind === 'checkout') checkoutWizard(w.fields.guest_id, w.fields);
+}

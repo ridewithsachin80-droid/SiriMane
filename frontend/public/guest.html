@@ -46,6 +46,16 @@
     }
     [data-theme="dark"] input::placeholder, [data-theme="dark"] textarea::placeholder { color: var(--p-text-light); }
     [data-theme="dark"] .btn-amber, [data-theme="dark"] .btn-primary { color: var(--p-on-solid); }
+    .idcard { border:1px solid var(--p-border); border-radius:14px; overflow:hidden; }
+    .idcard-top { background: var(--p-accent); color: var(--p-on-solid); padding:14px 16px; }
+    .idcard-top .idc-name { font-size:18px; font-weight:700; }
+    .idcard-top .idc-sub { font-size:13px; opacity:.9; }
+    .idcard-body { padding:16px; display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
+    .idcard-qr { flex:0 0 160px; }
+    .idcard-qr svg { width:160px; height:160px; background:#fff; padding:8px; border-radius:10px; }
+    .idcard-kv { flex:1; min-width:160px; }
+    .idcard-kv div { display:flex; justify-content:space-between; gap:10px; padding:6px 0; font-size:13px; border-bottom:1px solid var(--p-border); }
+    .idcard-kv div span { color: var(--p-text-muted); }
     #p-theme { background:none; border:none; cursor:pointer; font-size:18px; padding:6px 8px; border-radius:8px; line-height:1; }
 
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
@@ -100,9 +110,10 @@
     .alert-success { background: var(--p-green-soft); color: var(--p-green-ink); border: 1px solid #A7F3D0; }
 
     /* Tabs */
-    .tab-bar { display: flex; background: var(--p-card); border-radius: 14px; padding: 4px; margin-bottom: 16px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); gap: 2px; }
-    .tab { flex: 1; padding: 8px 4px; text-align: center; font-size: 12px; font-weight: 500; color: var(--p-text-muted); cursor: pointer; border-radius: 10px; border: none; background: none; font-family: inherit; }
-    .tab.active { background: var(--p-accent); color: white; font-weight: 600; }
+    .tab-bar { display: flex; background: var(--p-card); border-radius: 14px; padding: 4px; margin-bottom: 16px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); gap: 2px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+    .tab-bar::-webkit-scrollbar { display: none; }
+    .tab { flex: 0 0 auto; min-width: 72px; padding: 8px 10px; text-align: center; font-size: 12px; font-weight: 500; color: var(--p-text-muted); cursor: pointer; border-radius: 10px; border: none; background: none; font-family: inherit; }
+    .tab.active { background: var(--p-accent); color: var(--p-on-solid); font-weight: 600; }
 
     /* Menu table */
     .menu-table { width: 100%; border-collapse: collapse; font-size: 12px; }
@@ -222,13 +233,14 @@
 
     <!-- Tab bar -->
     <div class="tab-bar">
-      <button class="tab active" onclick="showTab('pay')">Pay Rent</button>
-      <button class="tab" onclick="showTab('details')">My Details</button>
-      <button class="tab" onclick="showTab('menu')">Daily Menu</button>
-      <button class="tab" onclick="showTab('notices')">Notices</button>
-      <button class="tab" onclick="showTab('complaint')">Report Issue</button>
-      <button class="tab" onclick="showTab('message')">Message Us</button>
-      <button class="tab" onclick="showTab('settings')">Settings</button>
+      <button class="tab active" data-tab="pay" onclick="showTab('pay')">Pay Rent</button>
+      <button class="tab" data-tab="details" onclick="showTab('details')">My Details</button>
+      <button class="tab" data-tab="idcard" onclick="showTab('idcard')">My ID</button>
+      <button class="tab" data-tab="menu" onclick="showTab('menu')">Daily Menu</button>
+      <button class="tab" data-tab="notices" onclick="showTab('notices')">Notices</button>
+      <button class="tab" data-tab="complaint" onclick="showTab('complaint')">Report Issue</button>
+      <button class="tab" data-tab="message" onclick="showTab('message')">Message Us</button>
+      <button class="tab" data-tab="settings" onclick="showTab('settings')">Settings</button>
     </div>
 
     <!-- PAY RENT TAB -->
@@ -265,6 +277,12 @@
     </div>
 
     <!-- DAILY MENU TAB -->
+    <div id="tab-idcard" class="hidden">
+      <div class="card"><div class="card-h">🪪 My resident ID</div>
+        <div class="card-b" id="idcard-body"><p style="text-align:center;color:var(--p-text-muted)">Loading…</p></div>
+      </div>
+    </div>
+
     <div id="tab-menu" class="hidden">
       <div id="p-menu-host"></div>
     </div>
@@ -488,6 +506,35 @@ function showPortal() {
 }
 
 // ── LOAD FULL DATA ────────────────────────────────
+async function loadIdCard() {
+  const host = document.getElementById('idcard-body');
+  if (!host) return;
+  try {
+    const res = await fetch('/api/guest-id', { headers: { Authorization: 'Bearer ' + guestToken } });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error || 'Could not load your ID');
+    host.innerHTML = `
+      <div class="idcard">
+        <div class="idcard-top">
+          <div class="idc-name">${d.name}</div>
+          <div class="idc-sub">${d.pg_name}${d.room_number ? ' · Room ' + d.room_number : ''}${d.bed_number ? ' / Bed ' + d.bed_number : ''}</div>
+        </div>
+        <div class="idcard-body">
+          <div class="idcard-qr">${d.qr_svg}</div>
+          <div class="idcard-kv">
+            <div><span>Resident no.</span><strong>${d.resident_no}</strong></div>
+            <div><span>Resident since</span><strong>${fmtDate(d.join_date)}</strong></div>
+            <div><span>PG contact</span><strong>${d.pg_phone || '—'}</strong></div>
+            ${d.emergency_contact ? `<div><span>Emergency</span><strong>${d.emergency_contact_name ? d.emergency_contact_name + ' · ' : ''}${d.emergency_contact}</strong></div>` : ''}
+          </div>
+        </div>
+      </div>
+      <p style="font-size:12px;color:var(--p-text-muted);margin-top:10px;text-align:center">
+        Show this at the gate. The code changes every ${d.expires_in_hours} hours, so a screenshot someone else keeps will not work.
+      </p>`;
+  } catch (e) { host.innerHTML = `<p style="text-align:center;color:var(--p-red)">${e.message}</p>`; }
+}
+
 async function loadGuestData() {
   try {
     const res = await fetch('/api/guest-portal', {
@@ -817,13 +864,12 @@ async function changePassword() {
 
 // ── TABS ──────────────────────────────────────────
 function showTab(tab) {
-  ['pay','details','menu','notices','complaint','message','settings'].forEach(t => {
+  ['pay','details','idcard','menu','notices','complaint','message','settings'].forEach(t => {
     document.getElementById('tab-'+t).classList.add('hidden');
   });
   document.getElementById('tab-'+tab).classList.remove('hidden');
-  document.querySelectorAll('.tab').forEach((b,i) => {
-    b.classList.toggle('active', ['pay','details','menu','notices','complaint','message','settings'][i]===tab);
-  });
+  if (tab === 'idcard') loadIdCard();
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   if (tab === 'complaint') loadComplaintHistory();
 }
 

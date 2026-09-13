@@ -201,6 +201,37 @@ async function main() {
   r = await A('DELETE', `/collections/${mine.id}`); eq(r.status, 200, 'cleanup');
   ok(sheetWithClaim.length > 0, 'balance sheet still computes with a pending claim present');
 
+  // ── Sprint 8: timeline, expected checkout, ID verification ────────────
+  r = await A('PUT', `/guests/${guest.id}`, { expected_checkout: '2026-12-31', emergency_contact_name: 'Her mother' }); eq(r.status, 200, 'expected checkout saved');
+  r = await A('GET', `/guests/${guest.id}`);
+  eq(String(r.data.expected_checkout).slice(0, 10), '2026-12-31', 'expected_checkout persisted'); eq(r.data.emergency_contact_name, 'Her mother', 'emergency contact name persisted');
+  ok(/^SM\d{4}$/.test(r.data.resident_no), `resident number assigned (${r.data.resident_no})`);
+  r = await A('GET', `/guests/${guest.id}/timeline`); eq(r.status, 200, 'timeline');
+  ok(r.data.items.length >= 2, `timeline has entries (${r.data.items.length})`);
+  eq(r.data.items[r.data.items.length - 1].kind, 'joined', 'timeline ends at move-in');
+  const dates = r.data.items.map(i => String(i.at).slice(0, 10));
+  ok(dates.every((d, i) => i === 0 || dates[i - 1] >= d), 'timeline is newest-first');
+  ok(r.data.items.some(i => i.kind === 'payment'), 'payments appear in the timeline');
+  ok(r.data.items.some(i => i.kind === 'move'), 'room moves appear in the timeline');
+  r = await S('GET', '/guests/999999/timeline'); eq(r.status, 404, 'timeline for an unknown resident → 404');
+
+  r = await G('GET', '/guest-id'); eq(r.status, 200, 'resident downloads her own ID');
+  ok(r.data.qr_svg.startsWith('<svg'), 'ID carries a QR'); ok(/^SM\d{4}$/.test(r.data.resident_no), 'ID shows the resident number');
+  ok(!r.data.qr_svg.includes(guest.phone), 'PRIVACY: the QR does not contain her phone number');
+  const idToken = r.data.qr_svg && (await api('GET', '/guest-id', null, guestTok)).data;
+  r = await api('POST', '/resident-id/verify', { resident_no: idToken.resident_no }, staffTok);
+  eq(r.status, 200, 'staff verify by resident number'); eq(r.data.valid, true, 'active resident verifies'); eq(r.data.resident.name, guest.name, 'verify names her');
+  ok(!('phone' in r.data.resident) && !('id_proof_number' in r.data.resident), 'PRIVACY: verify returns no phone or ID number');
+  r = await api('POST', '/resident-id/verify', { token: 'not-a-token' }, staffTok); eq(r.status, 400, 'garbage code refused'); eq(r.data.valid, false, 'and reported invalid');
+  r = await api('POST', '/resident-id/verify', { resident_no: 'SM9999' }, staffTok); eq(r.status, 404, 'unknown resident number → 404');
+  r = await api('POST', '/resident-id/verify', { resident_no: idToken.resident_no }); eq(r.status, 401, 'verify needs a staff login');
+
+  r = await A('POST', `/guests/${guest2.id}/checkout`, { deductions: 0, refund_mode: 'cash', leave_date: '2099-01-01' }); eq(r.status, 400, 'future checkout date refused');
+  r = await A('POST', `/guests/${guest2.id}/checkout`, { deductions: 500, deduction_notes: 'Broken chair', refund_mode: 'cash', leave_date: '2026-09-01' });
+  eq(r.status, 201, 'backdated checkout accepted'); eq(parseFloat(r.data.refund_amount), 12000 - 500, 'MONEY: refund = deposit − deductions');
+  const co = await pool.query('SELECT leave_date, is_active FROM guests WHERE id=$1', [guest2.id]);
+  eq(new Date(co.rows[0].leave_date).toISOString().slice(0, 10), "2026-09-01", "leave_date is the date given, not today"); eq(co.rows[0].is_active, false, 'she is checked out');
+
   // ── Dashboard still works with the new tables ─────────────────────────
     r = await S('GET', '/dashboard'); eq(r.status, 200, 'dashboard'); eq(r.data.todayChecklist.total, 33, 'dashboard checklist total'); eq(r.data.todayChecklist.checked, 1, 'dashboard checklist checked'); eq(r.data.openComplaints, 2, 'dashboard open complaints (1 staff room issue + 1 guest issue)');
     console.log('✓ dashboard');

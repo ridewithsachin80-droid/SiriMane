@@ -47,6 +47,19 @@ function localIntent(text, user, context) {
       || t.match(/\b(?:resolve|close|fix)\s+(?:request|complaint|issue|ticket)\s*#?\s*(\d+)\b/i);
     if (m) return { tool: 'prepare_request_status', args: { id: Number(m[1]), status: m[2] || 'resolved', note: (t.match(/[—–-]\s*(.+)$/) || [])[1] }, via: 'local' };
   }
+  // Move-in: "Ananya Sharma joining room 204 tomorrow, rent 8000, deposit 16000"
+  if (/\b(joining|move.?in|new resident|new guest|admit)\b/i.test(t) && !/\b(shift|transfer)\b/i.test(t))
+    return { tool: 'prepare_resident', args: { text: t }, via: 'local' };
+  // Checkout: "Ananya is checking out tomorrow"
+  if (/\b(check(?:ing)?.?out|checkout|vacating|leaving|moving out)\b/i.test(t)) {
+    const name = (t.match(/^([a-z .]+?)\s+(?:is|will be)?\s*(?:check|vacat|leav|mov)/i) || [])[1];
+    const date = /\btomorrow\b/i.test(t) ? new Date(Date.now() + 5.5 * 3600000 + 86400000).toISOString().slice(0, 10) : (t.match(/\b(\d{4}-\d{2}-\d{2})\b/) || [])[1];
+    return { tool: 'prepare_checkout', args: { name: name ? name.trim() : undefined, date }, via: 'local' };
+  }
+  if (/\bread(y|iness)\b.*\broom\b|\broom\s*[a-z]?\d{1,3}[a-z]?\b.*\bready\b/i.test(t)) {
+    const rm = (t.match(/room\s*([a-z]?\d{1,3}[a-z]?)/i) || [])[1];
+    if (rm) return { tool: 'room_readiness', args: { room: rm }, via: 'local' };
+  }
   if (/\b(move|shift)\b.*\b(room|to)\b/i.test(t)) {
     const room = (t.match(/\b(?:to|into)\s+(?:room\s*)?([a-z]?\d{1,3}[a-z]?)\b/i) || [])[1];
     const name = (t.match(/^(?:move|shift)\s+([a-z ]+?)\s+(?:to|into|from)\b/i) || [])[1];
@@ -158,6 +171,9 @@ async function ask({ user, text, context, authorization, port }) {
   }
 
   const out = { answer: result.text, evidence: result.rows || result.reminders || result.issues || [], data: result.resident || result.report || result.facts || null, actions: [], confidence: intent.via === 'local' ? 'high' : 'medium', tool: intent.tool, level: tool.level, via: intent.via };
+  if (result.openWizard) out.openWizard = result.openWizard;
+  if (result.checks) out.checks = result.checks;
+  if (result.preview && !result.execute) out.preview = result.preview;
   if (result.download) out.actions.push({ label: 'Download', download: result.download, filename: result.filename, level: 'inform' });
   if (result.navigate) out.actions.push({ label: 'Open', navigate: result.navigate, level: 'inform' });
   if (Array.isArray(result.actions)) out.actions.push(...result.actions);
