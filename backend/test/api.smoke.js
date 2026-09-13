@@ -242,7 +242,25 @@ async function main() {
   eq(s2.occupied + s2.free, s2.total_beds, 'every bed is either taken or free');
   eq(allTiles.reduce((t, x) => t + x.occupied, 0), r.data.totals.occupied, 'MAP: tiles agree with the headline count');
   eq(r.data.totals.occupied + r.data.totals.free, r.data.totals.beds, 'MAP: occupied + free = total beds');
-  ok(typeof r.data.totals.unplaced === 'number', 'MAP: residents without a room are reported separately, not hidden');
+  ok(typeof r.data.totals.noRoom === 'number', 'MAP: residents without a room are reported separately, not hidden');
+  // Nobody may vanish: an over-capacity room must still show its people.
+  const packed = (await A('POST', '/rooms', { room_number: 'S4', floor: 3, total_beds: 2, monthly_rent: 5000 })).data;
+  const packedIds = [];
+  for (const b of ['1', '2', '3']) {
+    const g = (await A('POST', '/guests', { name: `Packed ${b}`, phone: '7' + uniq + b + '11', room_id: packed.id, bed_number: b, join_date: today, monthly_rent: 5000, deposit_amount: 0 })).data;
+    packedIds.push(g.id);
+  }
+  r = await S('GET', '/room-map');
+  const packedTile = r.data.floors.flatMap(f => f.rooms).find(x => x.room_number === 'S4');
+  eq(packedTile.occupied, 3, 'MAP: a 2-bed room with 3 residents reports all 3');
+  eq(packedTile.over_capacity, 1, 'MAP: the third is flagged as over capacity');
+  eq(packedTile.over[0].name, 'Packed 3', 'MAP: and is named, not dropped');
+  eq(packedTile.free, 0, 'MAP: an over-full room offers no free bed');
+  const mapped = r.data.floors.flatMap(f => f.rooms).reduce((t, x) => t + x.occupied, 0);
+  eq(mapped + r.data.totals.noRoom, r.data.totals.residents, 'MAP: every active resident is accounted for (on a bed, over capacity, or roomless)');
+  const headcount = (await S('GET', '/dashboard')).data.totalGuests;
+  eq(r.data.totals.residents, headcount, 'MAP: the map headcount equals the dashboard headcount');
+  for (const id of packedIds) await A('PUT', `/guests/${id}`, { is_active: false, leave_date: today });
   const occupiedRoom = allTiles.find(x => x.occupied > 0);
   if (occupiedRoom) {
     r = await S('PUT', `/rooms/${occupiedRoom.id}/status`, { status: 'maintenance' });

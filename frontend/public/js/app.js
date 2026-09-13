@@ -4529,7 +4529,13 @@ async function pgRoomMap() {
   const m = await apiFetch('/room-map');
   roomMapCache = m;
   setContent(`
-    <div class="page-header"><h1>Rooms</h1><p>${m.totals.occupied} of ${m.totals.beds} beds taken · ${m.totals.free} free</p></div>
+    <div class="page-header"><h1>Rooms</h1><p>${m.totals.residents} resident${m.totals.residents === 1 ? '' : 's'} · ${m.totals.beds} beds · ${m.totals.free} free</p></div>
+    ${(m.totals.overCapacity || m.totals.noRoom) ? `<div class="alert alert-warning" style="display:block;margin-bottom:14px">
+      ${m.totals.overCapacity ? `${m.totals.overCapacity} resident${m.totals.overCapacity === 1 ? '' : 's'} beyond the beds their room has. ` : ''}
+      ${m.totals.noRoom ? `${m.totals.noRoom} resident${m.totals.noRoom === 1 ? '' : 's'} with no room assigned. ` : ''}
+      Everyone is counted — fix the room or bed number so the map matches reality.
+      ${m.totals.noRoom ? `<button class="btn btn-outline btn-sm" style="margin-top:8px" onclick="pgGuests('all')">Show residents</button>` : ''}
+    </div>` : ''}
     <div class="flex gap-2 mb-5" style="flex-wrap:wrap">
       <button class="btn btn-primary btn-sm" onclick="pgRoomMap()">Map</button>
       <button class="btn btn-outline btn-sm" onclick="pgRooms()">Table</button>
@@ -4541,8 +4547,8 @@ async function pgRoomMap() {
         ${f.rooms.map(r => `
           <button class="room-tile ${r.status !== 'active' ? 'is-' + r.status : ''}" onclick="roomSheet(${r.id})">
             <div class="rt-head"><strong>${r.room_number}</strong>${r.high_issues ? `<span class="badge badge-red">${r.high_issues}!</span>` : r.open_issues ? `<span class="badge badge-amber">${r.open_issues}</span>` : ''}</div>
-            <div class="rt-beds">${r.beds.map(b => `<i class="bed ${b.state}" title="${b.resident ? b.resident.name : b.state}"></i>`).join('')}</div>
-            <div class="rt-sub">${r.occupied}/${r.total_beds} · ${fmt(r.monthly_rent)}</div>
+            <div class="rt-beds">${r.beds.map(b => `<i class="bed ${b.state}" title="${b.resident ? b.resident.name : b.state}"></i>`).join('')}${r.over_capacity ? `<i class="bed over" title="${r.over.map(o => o.name).join(', ')}"></i>`.repeat(r.over_capacity) : ''}</div>
+            <div class="rt-sub">${r.occupied}/${r.total_beds}${r.over_capacity ? ' <span class="text-red">+' + r.over_capacity + '</span>' : ''} · ${fmt(r.monthly_rent)}</div>
           </button>`).join('')}
       </div>`).join('')}
   `);
@@ -4561,6 +4567,8 @@ function roomSheet(id) {
       <div class="r360-kv"><span>Condition</span><strong>${r.status}</strong></div>
       <div class="r360-kv"><span>Last inspected</span><strong>${r.last_inspected ? fmtDate(r.last_inspected) : 'Never'}</strong></div>
       <div class="r360-h">Beds</div>
+      ${(r.over || []).map(o => `<div class="r360-row"><span class="text-red">Over capacity${o.bed_number ? ' · bed ' + o.bed_number : ' · no bed'}</span>
+        <button class="btn btn-outline btn-sm" onclick="closeModal();residentProfile(${o.id})">${o.name}</button></div>`).join('')}
       ${r.beds.map(b => `<div class="r360-row"><span>Bed ${b.bed}</span>${b.resident
         ? `<button class="btn btn-outline btn-sm" onclick="closeModal();residentProfile(${b.resident.id})">${b.resident.name}</button>`
         : `<span class="badge badge-green">free</span>`}</div>`).join('')}

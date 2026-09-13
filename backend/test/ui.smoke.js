@@ -800,8 +800,10 @@ async function runAtWidth(browser, BASE, width) {
   const mapApi = await page.evaluate(() => apiFetch('/room-map'));
   eq(tiles, mapApi.floors.flatMap(f => f.rooms).length, `${tag} a tile per room (${tiles})`);
   const dots = await page.$$eval('.room-tile .bed', els => els.length);
-  eq(dots, mapApi.totals.beds, `${tag} MAP: a dot per bed (${dots})`);
-  eq(await page.$$eval('.room-tile .bed.occupied', els => els.length), mapApi.totals.occupied, `${tag} MAP: occupied dots match the API`);
+  eq(dots, mapApi.totals.beds + mapApi.totals.overCapacity, `${tag} MAP: a dot per bed, plus one per over-capacity resident (${dots})`);
+  eq(await page.$$eval('.room-tile .bed.occupied, .room-tile .bed.over', els => els.length), mapApi.totals.occupied, `${tag} MAP: filled dots match the API's headcount`);
+  const mapHead = await page.$eval('#page-content .page-header p', e => e.textContent);
+  ok(mapHead.includes(String(mapApi.totals.residents)), `${tag} MAP: the header states the true resident count`);
   await page.screenshot({ path: path.join(SHOTS, `room-map-${width}.png`) });
   await noHScroll('room map');
   await page.evaluate(() => document.querySelector('.room-tile').click());

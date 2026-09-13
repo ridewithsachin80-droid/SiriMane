@@ -41,8 +41,19 @@ router.get('/room-map', auth, async (req, res) => {
       const inRoom = residents.rows.filter(g => String(g.room_id) === String(r.id));
       // A bed is "taken" if someone names it; residents without a bed number
       // still occupy one, so they fill the unnamed beds in order.
+      // Place residents on beds, but never lose one. A bed number outside the
+      // room's capacity, or more residents than beds, produces an "over
+      // capacity" list shown on the tile — silently dropping a resident would
+      // make the map disagree with the headcount, which is worse than an
+      // ugly number.
       const named = new Map();
-      for (const g of inRoom) if (g.bed_number) named.set(String(g.bed_number), g);
+      const spill = [];
+      for (const g of inRoom) {
+        const b = g.bed_number ? String(g.bed_number) : null;
+        const withinRoom = b && Number(b) >= 1 && Number(b) <= r.total_beds;
+        if (withinRoom && !named.has(b)) named.set(b, g);
+        else if (b) spill.push(g);          // bed 3 in a 2-bed room, or two people on one bed
+      }
       const unplaced = inRoom.filter(g => !g.bed_number);
       const beds = [];
       for (let i = 1; i <= r.total_beds; i++) {
@@ -51,18 +62,33 @@ router.get('/room-map', auth, async (req, res) => {
         if (!who && unplaced.length) who = unplaced.shift();
         beds.push({ bed: key, state: r.status !== 'active' ? r.status : who ? 'occupied' : 'free', resident: who ? { id: who.id, name: who.name, expected_checkout: who.expected_checkout } : null });
       }
+      // Anyone still holding no bed is over capacity.
+      const over = [...spill, ...unplaced].map(g => ({ id: g.id, name: g.name, bed_number: g.bed_number }));
       const iss = issueBy.get(String(r.room_number)) || { n: 0, high: 0 };
-      const tile = { ...r, beds, occupied: beds.filter(b => b.state === 'occupied').length, free: beds.filter(b => b.state === 'free').length, open_issues: iss.n, high_issues: iss.high };
+      const tile = { ...r, beds, over,
+        // "occupied" counts every resident living here, including the ones
+        // over capacity, so the tile never under-reports the people present.
+        occupied: beds.filter(b => b.state === 'occupied').length + over.length,
+        on_beds: beds.filter(b => b.state === 'occupied').length,
+        free: beds.filter(b => b.state === 'free').length,
+        over_capacity: over.length, open_issues: iss.n, high_issues: iss.high };
       (floors[r.floor] = floors[r.floor] || []).push(tile);
     }
     const list = Object.keys(floors).sort((a, b) => Number(a) - Number(b)).map(f => ({ floor: f, rooms: floors[f] }));
     // The headline must equal what the tiles show: residents who are not in an
     // active room occupy no bed, so they are reported separately rather than
     // silently inflating the count.
-    const placed = list.flatMap(f => f.rooms).reduce((t, r) => t + r.occupied, 0);
-    const unplaced = residents.rows.filter(g => !rooms.rows.some(r => String(r.id) === String(g.room_id))).length;
-    const totals = { beds: rooms.rows.reduce((t, r) => t + r.total_beds, 0), occupied: placed, unplaced };
-    totals.free = Math.max(0, totals.beds - placed);
+    const tiles = list.flatMap(f => f.rooms);
+    const inRooms = tiles.reduce((t, r) => t + r.occupied, 0);
+    const noRoom = residents.rows.filter(g => !rooms.rows.some(r => String(r.id) === String(g.room_id))).length;
+    const totals = {
+      beds: rooms.rows.reduce((t, r) => t + r.total_beds, 0),
+      occupied: inRooms,                 // people the tiles show
+      noRoom,                            // active residents not in any active room
+      overCapacity: tiles.reduce((t, r) => t + r.over_capacity, 0),
+      residents: residents.rows.length   // the headcount everything else uses
+    };
+    totals.free = Math.max(0, totals.beds - tiles.reduce((t, r) => t + r.on_beds, 0));
     res.json({ floors: list, totals });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
