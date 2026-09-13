@@ -423,3 +423,162 @@ input:focus, select:focus, textarea:focus {
 .sm-toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 20px); max-width: min(92vw, 420px); padding: 12px 16px; border-radius: 10px; font-size: 14px; font-weight: 500; color: #fff; background: #EF4444; box-shadow: 0 8px 24px rgba(0,0,0,.18); opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 9999; }
 .sm-toast.show { opacity: 1; transform: translate(-50%, 0); }
 .sm-toast-ok { background: #10B981; }
+
+/* ═══════════════════════════════════════════════════════════════
+   SPRINT 1 — phone-first warden UX
+   Everything below applies on top of the existing desktop styles;
+   the desktop layout is unchanged above 640px except where noted.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Android zooms the page when an input's font-size is under 16px. */
+input, select, textarea { font-size: 16px; }
+@media (min-width: 641px) { input, select, textarea { font-size: 13px; } }
+
+/* Comfortable thumb targets everywhere on phones. */
+@media (max-width: 640px) {
+  .btn { min-height: 44px; padding: 10px 14px; }
+  .btn-sm { min-height: 40px; font-size: 13px; }
+  .modal-close { min-width: 44px; min-height: 44px; }
+  input, select, textarea { min-height: 44px; }
+}
+
+/* ── Tables become cards on phones ─────────────────────────────
+   app.js copies each column's heading into every cell's data-label,
+   so no screen's row renderer had to be rewritten. */
+@media (max-width: 640px) {
+  .table-wrap { overflow-x: visible; }
+  table.sm-cards, table.sm-cards thead, table.sm-cards tbody,
+  table.sm-cards tr, table.sm-cards th, table.sm-cards td { display: block; width: auto; }
+  table.sm-cards thead { display: none; }
+  table.sm-cards tr {
+    background: #fff; border: 1px solid var(--border); border-radius: 12px;
+    padding: 12px 14px; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(15,23,42,.04);
+  }
+  table.sm-cards td {
+    border: none; padding: 5px 0; display: flex; gap: 12px;
+    align-items: flex-start; justify-content: space-between; font-size: 14px;
+  }
+  table.sm-cards td::before {
+    content: attr(data-label); flex: 0 0 40%; color: var(--text-muted, #64748B);
+    font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+    padding-top: 2px;
+  }
+  table.sm-cards td[data-label=""]::before { display: none; }
+  /* First cell is the card's headline: bigger, no label, full width. */
+  table.sm-cards td.sm-card-title { display: block; font-size: 16px; font-weight: 600; padding: 0 0 8px; }
+  table.sm-cards td.sm-card-title::before { display: none; }
+  /* Action cell: buttons go full width and stack. */
+  table.sm-cards td.sm-card-actions { display: block; padding-top: 10px; margin-top: 8px; border-top: 1px dashed var(--border); }
+  table.sm-cards td.sm-card-actions::before { display: none; }
+  table.sm-cards td.sm-card-actions .flex { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  table.sm-cards td.sm-card-actions .btn { width: 100%; justify-content: center; }
+  table.sm-cards tr.empty-row { text-align: center; color: var(--text-muted, #64748B); }
+  table.sm-cards tr.empty-row td { display: block; }
+  table.sm-cards tr.empty-row td::before { display: none; }
+  /* Rows whose value is empty add noise on a small screen. */
+  table.sm-cards td.sm-empty { display: none; }
+}
+
+/* ── Topbar on phones: title truncates, actions collapse ─────── */
+@media (max-width: 640px) {
+  .topbar { padding-left: 8px; padding-right: 8px; gap: 8px; }
+  #page-title { display: block; max-width: 46vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #topbar-user { display: none; }
+  #topbar-actions { display: none; }
+  #topbar-actions.sm-open {
+    display: block; position: absolute; top: 56px; right: 8px; z-index: 60;
+    background: #fff; border: 1px solid var(--border); border-radius: 12px;
+    padding: 10px; box-shadow: 0 12px 28px rgba(15,23,42,.14); min-width: 220px;
+  }
+  #topbar-actions.sm-open .btn, #topbar-actions.sm-open > * { width: 100%; justify-content: center; margin: 4px 0; }
+  #sm-topbar-more { display: inline-flex; }
+}
+#sm-topbar-more { display: none; background: none; border: none; font-size: 20px; padding: 6px 10px; border-radius: 8px; cursor: pointer; }
+
+/* ── Bottom tab bar (phones only) ─────────────────────────────── */
+.sm-tabbar { display: none; }
+@media (max-width: 640px) {
+  .sm-tabbar {
+    display: grid; grid-template-columns: repeat(5, 1fr); position: fixed;
+    left: 0; right: 0; bottom: 0; z-index: 80; background: #fff;
+    border-top: 1px solid var(--border); padding-bottom: env(safe-area-inset-bottom);
+    box-shadow: 0 -2px 12px rgba(15,23,42,.06);
+  }
+  .sm-tab {
+    background: none; border: none; padding: 8px 2px 10px; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    font-size: 10.5px; font-weight: 600; color: var(--text-muted, #64748B);
+    min-height: 56px; font-family: inherit;
+  }
+  .sm-tab .sm-tab-icon { font-size: 19px; line-height: 1; }
+  .sm-tab.active { color: var(--primary); }
+  .sm-tab .sm-tab-dot {
+    position: absolute; transform: translate(14px, -4px); background: var(--red);
+    color: #fff; font-size: 9px; min-width: 15px; padding: 1px 4px; border-radius: 8px;
+  }
+  /* Keep the last rows clear of the bar and the FAB. */
+  .content { padding: 16px 12px 150px; }
+  .app { padding-bottom: 0; }
+}
+
+/* ── Collect FAB ──────────────────────────────────────────────── */
+.sm-fab { display: none; }
+@media (max-width: 640px) {
+  .sm-fab.sm-fab-on {
+    display: inline-flex; align-items: center; gap: 8px; position: fixed;
+    right: 16px; bottom: calc(76px + env(safe-area-inset-bottom)); z-index: 85;
+    background: var(--primary); color: #fff; border: none; border-radius: 28px;
+    padding: 14px 20px; font-size: 15px; font-weight: 600; font-family: inherit;
+    box-shadow: 0 8px 20px rgba(79,70,229,.36); cursor: pointer;
+  }
+  .sm-fab.sm-fab-on:active { transform: translateY(1px); }
+}
+
+/* ── Skeleton loading (replaces the bare spinner) ─────────────── */
+.sm-skel { padding: 4px 0; }
+.sm-skel-line, .sm-skel-card {
+  background: linear-gradient(90deg, #EEF2F7 25%, #F8FAFC 37%, #EEF2F7 63%);
+  background-size: 400% 100%; animation: sm-shimmer 1.2s ease-in-out infinite; border-radius: 8px;
+}
+.sm-skel-line { height: 14px; margin-bottom: 10px; }
+.sm-skel-card { height: 84px; margin-bottom: 12px; border-radius: 12px; }
+@keyframes sm-shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+
+/* ── Empty states ─────────────────────────────────────────────── */
+.sm-empty-state { text-align: center; padding: 36px 18px; color: var(--text-muted, #64748B); }
+.sm-empty-state .sm-empty-icon { font-size: 34px; display: block; margin-bottom: 8px; }
+.sm-empty-state h4 { font-size: 15px; color: var(--text, #1E293B); margin-bottom: 4px; }
+.sm-empty-state p { font-size: 13px; margin-bottom: 14px; }
+
+/* ── Collect screen ───────────────────────────────────────────── */
+.sm-collect-step { margin-bottom: 18px; }
+.sm-collect-step h4 { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted, #64748B); margin-bottom: 8px; }
+.sm-kn { font-family: inherit; color: var(--text-muted, #64748B); font-weight: 500; }
+.sm-person {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%;
+  padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: #fff;
+  margin-bottom: 8px; cursor: pointer; text-align: left; font-family: inherit; min-height: 56px;
+}
+.sm-person.selected { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(79,70,229,.14); }
+.sm-person .sm-person-name { font-size: 15px; font-weight: 600; }
+.sm-person .sm-person-sub { font-size: 12px; color: var(--text-muted, #64748B); }
+.sm-person .sm-person-due { font-size: 15px; font-weight: 700; white-space: nowrap; }
+.sm-chip-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.sm-chip {
+  padding: 11px 16px; border-radius: 999px; border: 1px solid var(--border); background: #fff;
+  font-size: 14px; font-weight: 600; font-family: inherit; cursor: pointer; min-height: 44px;
+}
+.sm-chip.selected { background: var(--primary); color: #fff; border-color: var(--primary); }
+.sm-amount-input { font-size: 26px !important; font-weight: 700; text-align: center; padding: 14px !important; }
+.sm-done-card { text-align: center; padding: 26px 18px; }
+.sm-done-card .sm-done-tick { font-size: 44px; }
+
+/* Toast must clear the tab bar and the FAB on phones. */
+@media (max-width: 640px) {
+  .sm-toast { bottom: calc(140px + env(safe-area-inset-bottom)); }
+}
+/* Action buttons pair up whatever wrapper the screen used. */
+@media (max-width: 640px) {
+  table.sm-cards td.sm-card-actions > div { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  table.sm-cards td.sm-card-actions > .btn { width: 100%; justify-content: center; }
+}

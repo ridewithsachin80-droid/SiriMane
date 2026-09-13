@@ -54,10 +54,9 @@ async function runAtWidth(browser, BASE, width) {
   // something Sprint 0 touched.
   const noHScroll = async (label) => {
     const w = await page.evaluate(() => Math.max(...[...document.querySelectorAll('#page-content, #page-content > *')].map(e => e.getBoundingClientRect().right)));
-    // Reported, not asserted, in Sprint 0: tables (Complaints, Payments,
-    // Guests, Rooms) overflow on phones today. Sprint 1 turns this into a hard
-    // assertion once every table has a card view.
-    console.log(`   ${tag} ${label}: content width ${Math.round(w)}px ${w <= width + 1 ? '(fits)' : '(OVERFLOWS — Sprint 1)'}`);
+    ok(w <= width + 1, `${tag} ${label}: content fits viewport (${Math.round(w)}px)`);
+    const doc = await page.evaluate(() => document.documentElement.scrollWidth);
+    ok(doc <= width + 1, `${tag} ${label}: page does not scroll sideways (${doc}px)`);
   };
 
   // ── Daily Checklist ───────────────────────────────────────────────────
@@ -141,6 +140,71 @@ async function runAtWidth(browser, BASE, width) {
   ok(/No such endpoint/.test(missing), `${tag} missing endpoint gives readable error ("${missing}")`);
   await page.evaluate(() => toast('hello toast'));
   ok(await page.$eval('#sm-toast', e => e.classList.contains('show') && e.textContent === 'hello toast'), `${tag} toast renders`);
+  const toastTop = await page.$eval('#sm-toast', e => e.getBoundingClientRect().bottom);
+  const barTop = await page.$eval('.sm-tabbar', e => e.getBoundingClientRect().top);
+  ok(toastTop <= barTop, `${tag} toast sits clear of the tab bar`);
+  await page.evaluate(() => document.getElementById('sm-toast').classList.remove('show'));
+
+  // ── Sprint 1: phone chrome ────────────────────────────────────────────
+  const tabs = await page.$$eval('.sm-tab', els => els.map(e => e.textContent.trim()));
+  eq(tabs.length, 5, `${tag} bottom tab bar has 5 tabs`);
+  ok(tabs.join('|').includes('Collect'), `${tag} Collect tab present`);
+  ok(await page.$eval('.sm-tabbar', e => getComputedStyle(e).display === 'grid'), `${tag} tab bar visible on phone`);
+  const tabH = await page.$eval('.sm-tab', e => e.getBoundingClientRect().height);
+  ok(tabH >= 44, `${tag} tab targets ≥44px (${Math.round(tabH)}px)`);
+  await page.evaluate(() => navigate('guests'));
+  await page.waitForFunction(() => document.querySelector('#page-content table.sm-cards tbody tr'), { timeout: 8000 });
+  await page.screenshot({ path: path.join(SHOTS, `guests-cards-${width}.png`) });
+  ok(await page.$eval('.sm-fab', e => e.classList.contains('sm-fab-on')), `${tag} Collect FAB shown on Guests`);
+  ok(await page.$eval('#page-content thead', e => getComputedStyle(e).display === 'none'), `${tag} table headers hidden, cards shown`);
+  const labelled = await page.$$eval('#page-content tbody tr:first-child td', tds => tds.filter(t => t.hasAttribute('data-label')).length);
+  ok(labelled >= 5, `${tag} card cells carry their column labels (${labelled})`);
+  await page.evaluate(() => navigate('daily-menu'));
+  await page.waitForFunction(() => !document.querySelector('#page-content table.sm-cards'), { timeout: 8000 }).catch(() => {});
+  ok(!(await page.$eval('.sm-fab', e => e.classList.contains('sm-fab-on'))), `${tag} FAB hidden where collecting makes no sense`);
+
+  // ── Sprint 1: collect rent in one screen ──────────────────────────────
+  const dueBefore = await page.evaluate(() => API.getRentDue());
+  const target = dueBefore.find(g => parseFloat(g.amount_due) > 0) || dueBefore[0];
+  const beforeLedger = await page.evaluate(id => API.getGuestLedger ? API.getGuestLedger(id) : apiFetch(`/guests/${id}/ledger`), target.id);
+  await page.evaluate(() => document.getElementById('sm-fab').click());
+  await page.waitForSelector('#collect-people .sm-person', { timeout: 8000 });
+  ok(true, `${tag} FAB opens Collect`);
+  await page.screenshot({ path: path.join(SHOTS, `collect-${width}.png`) });
+  const firstDue = await page.$eval('#collect-people .sm-person .sm-person-due', e => e.textContent);
+  ok(firstDue.length > 0, `${tag} residents listed with amount (${firstDue})`);
+  await page.type('#collect-search', target.name.split(' ')[0]);
+  await sleep(200);
+  const matches = await page.$$('#collect-people .sm-person');
+  ok(matches.length >= 1, `${tag} search narrows the list`);
+  await page.evaluate(id => selectCollectGuest(id), target.id);
+  await page.waitForSelector('#collect-amount', { timeout: 5000 });
+  const prefill = await page.$eval('#collect-amount', e => e.value);
+  eq(Number(prefill), Math.round(parseFloat(target.amount_due) > 0 ? parseFloat(target.amount_due) : parseFloat(target.monthly_rent)), `${tag} amount pre-filled from what is owed`);
+  await page.evaluate(() => setCollectMode('UPI'));
+  ok(await page.$eval('#collect-modes .sm-chip[data-mode="UPI"]', e => e.classList.contains('selected')), `${tag} payment mode selectable`);
+  await page.evaluate(() => { document.getElementById('collect-amount').value = 1000; });
+  await page.evaluate(() => saveCollectEntry());
+  await page.waitForFunction(() => document.body.innerText.includes('recorded'), { timeout: 8000 });
+  await page.screenshot({ path: path.join(SHOTS, `collect-done-${width}.png`) });
+  ok(true, `${tag} payment saved from one screen`);
+  const waHref = await page.$eval('.sm-done-card a.btn-success', e => e.href).catch(() => null);
+  ok(waHref && waHref.startsWith('https://wa.me/91'), `${tag} WhatsApp receipt link built with country code`);
+  ok(decodeURIComponent(waHref).includes(target.name), `${tag} WhatsApp text names the resident`);
+  const saved = (await page.evaluate(() => apiFetch('/collections'))).find(c => parseFloat(c.amount) === 1000);
+  ok(saved, `${tag} collection exists in the API`);
+  eq(saved.payment_mode, 'UPI', `${tag} mode saved as chosen`);
+  const afterLedger = await page.evaluate(id => apiFetch(`/guests/${id}/ledger`), target.id);
+  ok(JSON.stringify(afterLedger) !== JSON.stringify(beforeLedger), `${tag} ledger reflects the new payment`);
+
+  // Rent Due: collect button per resident
+  await page.evaluate(() => navigate('rent-due'));
+  await page.waitForFunction(() => document.querySelector('#rentdue-tb tr'), { timeout: 8000 });
+  const order = await page.$$eval('#rentdue-tb tr td:first-child', els => els.map(e => e.textContent.trim()));
+  ok(order.length >= 1, `${tag} rent due lists residents`);
+  const hasCollect = await page.$('button[onclick^="collectFrom"]');
+  ok(hasCollect, `${tag} Rent Due has a per-resident Collect button`);
+  await noHScroll('rent-due');
 
   eq(jsErrors.length, 0, `${tag} no uncaught JS errors (${jsErrors.join('; ')})`);
   await page.close(); await ctx.close();

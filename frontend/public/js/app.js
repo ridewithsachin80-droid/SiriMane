@@ -2,7 +2,7 @@
 
 // ── INIT ──────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  if (getToken()) { showApp(); navigate('dashboard'); loadInboxCount(); loadComplaintsCount(); }
+  if (getToken()) { showApp(); initPhoneChrome(); navigate('dashboard'); loadInboxCount(); loadComplaintsCount(); }
   else showLogin();
   setupLogin();
   setupNav();
@@ -35,7 +35,7 @@ function setupLogin() {
       const d = await API.login(u, p);
       setToken(d.token);
       localStorage.setItem('sm_user', JSON.stringify(d.user));
-      showApp(); navigate('dashboard'); loadInboxCount(); loadComplaintsCount();
+      showApp(); initPhoneChrome(); navigate('dashboard'); loadInboxCount(); loadComplaintsCount();
     } catch(e) { showAlert(al, e.message||'Login failed'); }
     finally { btn.disabled=false; btn.innerHTML='🔐 Login'; }
   };
@@ -52,11 +52,12 @@ let currentPage = null;
 function navigate(page) {
   currentPage = page;
   document.querySelectorAll('.nav-item[data-page]').forEach(b => b.classList.toggle('active', b.dataset.page===page));
-  const titles = { dashboard:'Dashboard', rooms:'Rooms', guests:'Guests', 'daily-menu':'Daily Menu', 'daily-checklist':'Daily Checklist', complaints:'Complaints', payments:'Payments', 'guest-messages':'Guest Messages', inbox:'Inbox', purchases:'Purchases', collections:'Collections', 'rent-due':'Rent Due', reports:'Reports', 'balance-sheet':'Balance Sheet', admin:'Admin' };
+  const titles = { dashboard:'Dashboard', rooms:'Rooms', guests:'Guests', 'daily-menu':'Daily Menu', 'daily-checklist':'Daily Checklist', complaints:'Complaints', payments:'Payments', 'guest-messages':'Guest Messages', inbox:'Inbox', purchases:'Purchases', collections:'Collections', 'rent-due':'Rent Due', reports:'Reports', 'balance-sheet':'Balance Sheet', admin:'Admin', collect:'Collect Rent' };
   document.getElementById('page-title').textContent = titles[page]||page;
   document.getElementById('topbar-actions').innerHTML = '';
   document.getElementById('sidebar').classList.remove('open');
-  const pages = { dashboard:pgDashboard, rooms:pgRooms, guests:pgGuests, 'daily-menu':pgMenu, 'daily-checklist':pgChecklist, complaints:pgComplaints, payments:pgPayments, 'guest-messages':pgAnnouncements, inbox:pgInbox, purchases:pgPurchases, collections:pgCollections, 'rent-due':pgRentDue, reports:pgReports, 'balance-sheet':pgBalanceSheet, admin:pgAdmin };
+  if (typeof syncChrome === 'function') syncChrome(page);
+  const pages = { dashboard:pgDashboard, rooms:pgRooms, guests:pgGuests, 'daily-menu':pgMenu, 'daily-checklist':pgChecklist, complaints:pgComplaints, payments:pgPayments, 'guest-messages':pgAnnouncements, inbox:pgInbox, purchases:pgPurchases, collections:pgCollections, 'rent-due':pgRentDue, reports:pgReports, 'balance-sheet':pgBalanceSheet, admin:pgAdmin, collect:pgCollect };
   if(!pages[page]) return;
   // Error boundary: a thrown error inside any screen shows a retry card
   // instead of a blank page.
@@ -111,7 +112,13 @@ async function loadComplaintsCount() {
 }
 
 // ── HELPERS ───────────────────────────────────────
-function setContent(html) { document.getElementById('page-content').innerHTML = html; }
+function setContent(html) {
+  const el = document.getElementById('page-content');
+  el.innerHTML = html;
+  // Card up any table in the same tick, so a wide table never flashes on a
+  // phone before the observer catches up.
+  if (typeof mobilizeTables === 'function') { try { mobilizeTables(el); } catch (e) { console.error(e); } }
+}
 function isAdmin() { return (JSON.parse(localStorage.getItem('sm_user') || '{}')).role === 'admin'; }
 function showAlert(el, msg, type='danger') {
   el.className = `alert alert-${type}`;
@@ -127,7 +134,12 @@ function openModal(html) {
   document.getElementById('modal-overlay').addEventListener('click', e => { if(e.target.id==='modal-overlay') closeModal(); });
 }
 function closeModal() { stopPurchaseVoice(); document.getElementById('modal-container').innerHTML = ''; }
-function loading() { setContent('<div class="loading-center"><div class="spinner"></div></div>'); }
+// Skeleton placeholders read as "content is coming" far better than a bare
+// spinner on a slow 4G connection. Same call site as before.
+function loading() {
+  setContent('<div class="sm-skel"><div class="sm-skel-line" style="width:44%;height:22px"></div>'
+    + '<div class="sm-skel-card"></div>'.repeat(4) + '</div>');
+}
 
 // Generic CSV export for any already-loaded array of objects — columns is
 // [{ label, get: (row) => value }]. Builds the file entirely client-side,
@@ -2077,13 +2089,15 @@ async function pgRentDue() {
   document.getElementById('topbar-actions').innerHTML = '';
   try {
     const list = await API.getRentDue();
+    // Default order is "who do I chase first" — biggest total payable on top.
+    if (!rentDueSort.key) { rentDueSort.key = 'total_payable'; rentDueSort.dir = 'desc'; }
     rentDueListCache = list;
     const totalDue = list.reduce((s,g) => s + parseFloat(g.amount_due), 0);
     const totalDepositPending = list.reduce((s,g) => s + parseFloat(g.deposit_pending||0), 0);
     const fullyPaidCount = list.filter(g => parseFloat(g.amount_due) <= 0).length;
     const pendingCount = list.filter(g => parseFloat(g.amount_due) > 0 || parseFloat(g.deposit_pending||0) > 0).length;
     setContent(`
-      <div class="page-header"><h1>📅 Rent Due</h1><p>Running balance for each guest, carried forward across months — not just this month's snapshot</p></div>
+      <div class="page-header"><h1>📅 Rent Due <span class="sm-kn" style="font-size:15px">ಬಾಕಿ</span></h1><p>Running balance for each guest, carried forward across months — not just this month's snapshot</p></div>
       <div class="flex gap-2 mb-5" style="flex-wrap:wrap">
         ${isAdmin()?`<button class="btn btn-outline btn-sm" onclick="exportRentDueCsv()">⬇ Export CSV</button>
         <button class="btn btn-outline btn-sm" onclick="exportRentDuePdf()">⬇ Export PDF</button>`:''}
@@ -2118,9 +2132,9 @@ async function pgRentDue() {
               ${rentDueSortHeader('deposit_pending','DEPOSIT PENDING')}
               ${rentDueSortHeader('total_payable','TOTAL PAYABLE')}
               <th>STATUS</th>
-              <th>REMIND</th>
+              <th>ACTION</th>
             </tr></thead>
-            <tbody id="rentdue-tb">${renderRentDueRows(list)}</tbody>
+            <tbody id="rentdue-tb">${renderRentDueRows(sortRentDueRows(list))}</tbody>
           </table>
         </div>
       </div>`);
@@ -2147,6 +2161,21 @@ function sortRentDueList(key) {
   filterRentDueList();
 }
 
+// Shared sorter so the first paint uses the same order as filterRentDueList().
+function sortRentDueRows(rows) {
+  if (!rentDueSort.key) return rows;
+  const { key, dir } = rentDueSort;
+  return [...rows].sort((a,b) => {
+    let av, bv;
+    if (key === 'total_payable') { av = parseFloat(a.amount_due)+parseFloat(a.deposit_pending||0); bv = parseFloat(b.amount_due)+parseFloat(b.deposit_pending||0); }
+    else if (key === 'name' || key === 'room_number') { av = (a[key]||'').toString().toLowerCase(); bv = (b[key]||'').toString().toLowerCase(); }
+    else { av = parseFloat(a[key])||0; bv = parseFloat(b[key])||0; }
+    if (av < bv) return dir === 'asc' ? -1 : 1;
+    if (av > bv) return dir === 'asc' ? 1 : -1;
+    return 0;
+  });
+}
+
 function renderRentDueRows(list) {
   if (list.length === 0) return `<tr class="empty-row"><td colspan="9">No guests match.</td></tr>`;
   return list.map(g=>{
@@ -2164,11 +2193,14 @@ function renderRentDueRows(list) {
       <td class="${depPending>0?'text-red fw-600':''}">${depPending>0?fmt(depPending):'—'}</td>
       <td class="${totalPayable>0?'text-red fw-600':''}">${totalPayable>0?fmt(totalPayable):'—'}</td>
       <td><span class="badge ${anyPending?'badge-red':'badge-green'}">${anyPending?'Pending':credit>0?'Ahead':'Settled'}</span></td>
-      <td>${anyPending
-        ? (g.phone
-            ? `<button class="btn btn-outline btn-sm" onclick="sendOneRentReminder(${g.id})" title="Send WhatsApp reminder">💬</button>`
-            : `<span style="font-size:11px;color:var(--text-muted,#999)">No phone</span>`)
-        : ''}</td>
+      <td><div class="flex gap-2">
+        ${anyPending ? `<button class="btn btn-primary btn-sm" onclick="collectFrom(${g.id})" title="Collect payment">💵 Collect</button>` : ''}
+        ${anyPending
+          ? (g.phone
+              ? `<button class="btn btn-outline btn-sm" onclick="sendOneRentReminder(${g.id})" title="Send WhatsApp reminder">💬 Remind</button>`
+              : `<span style="font-size:11px;color:var(--text-muted,#999)">No phone</span>`)
+          : ''}
+      </div></td>
     </tr>`;
   }).join('');
 }
@@ -2185,18 +2217,7 @@ function filterRentDueList() {
     (g.room_number||'').toLowerCase().includes(search) ||
     (g.phone||'').toLowerCase().includes(search)
   );
-  if (rentDueSort.key) {
-    const { key, dir } = rentDueSort;
-    rows = [...rows].sort((a,b) => {
-      let av, bv;
-      if (key === 'total_payable') { av = parseFloat(a.amount_due)+parseFloat(a.deposit_pending||0); bv = parseFloat(b.amount_due)+parseFloat(b.deposit_pending||0); }
-      else if (key === 'name' || key === 'room_number') { av = (a[key]||'').toString().toLowerCase(); bv = (b[key]||'').toString().toLowerCase(); }
-      else { av = parseFloat(a[key])||0; bv = parseFloat(b[key])||0; }
-      if (av < bv) return dir === 'asc' ? -1 : 1;
-      if (av > bv) return dir === 'asc' ? 1 : -1;
-      return 0;
-    });
-  }
+  rows = sortRentDueRows(rows);
   document.getElementById('rentdue-tb').innerHTML = renderRentDueRows(rows);
 }
 
@@ -2921,4 +2942,307 @@ async function renderAdminRefundsTab() {
 async function delDepositRefund(id) {
   if (!confirm('Delete this refund record? This should only be used to clean up test or mistaken entries, not real checkouts.')) return;
   try { await API.deleteDepositRefund(id); renderAdminRefundsTab(); } catch(e) { alert(e.message); }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SPRINT 1 — phone-first warden UX
+   ═══════════════════════════════════════════════════════════════ */
+
+const SM_PHONE = () => window.matchMedia('(max-width: 640px)').matches;
+
+// One entry point for all the phone chrome added in Sprint 1. Safe to call
+// twice — every piece checks whether it already exists.
+function initPhoneChrome() {
+  try { initTabBar(); initTopbarMore(); initMobileCards(); } catch (e) { console.error(e); }
+}
+
+// ── Tables → cards on phones ────────────────────────────────────
+// Every list screen renders a <table> with a <thead>. Rather than rewriting
+// ten row renderers, this copies each column's heading onto the matching cell
+// as data-label and lets CSS stack them into cards. It runs after any change
+// to #page-content, so screens that repaint only their <tbody> (filterGuests,
+// filterRentDueList, …) are covered too.
+function mobilizeTables(root) {
+  // Callable with any element; defaults to the whole page body.
+  const scope = root || document.getElementById('page-content');
+  if (!scope) return;
+  scope.querySelectorAll('table').forEach(table => {
+    const heads = [...table.querySelectorAll('thead th')].map(th => th.textContent.replace(/[▲▼]/g, '').trim());
+    if (!heads.length) return;
+    table.classList.add('sm-cards');
+    table.querySelectorAll('tbody tr').forEach(tr => {
+      const cells = [...tr.children];
+      cells.forEach((td, i) => {
+        if (td.colSpan > 1) { td.setAttribute('data-label', ''); return; }
+        const label = heads[i] || '';
+        td.setAttribute('data-label', label);
+        const text = td.textContent.trim();
+        // The first column is the card headline; a cell holding buttons is
+        // the action footer; visually empty cells are dropped on phones.
+        if (i === 0) td.classList.add('sm-card-title');
+        else if (td.querySelector('button, a.btn')) td.classList.add('sm-card-actions');
+        else if (!text || text === '—' || text === '-') td.classList.add('sm-empty');
+        else td.classList.remove('sm-empty');
+      });
+    });
+  });
+}
+
+let smMobilizeQueued = false;
+function queueMobilize() {
+  if (smMobilizeQueued) return;
+  smMobilizeQueued = true;
+  requestAnimationFrame(() => { smMobilizeQueued = false; try { mobilizeTables(); } catch (e) { console.error(e); } });
+}
+
+function initMobileCards() {
+  const target = document.getElementById('page-content');
+  if (!target) return;
+  new MutationObserver(queueMobilize).observe(target, { childList: true, subtree: true });
+  queueMobilize();
+}
+
+// ── Skeleton loading + empty states ─────────────────────────────
+function skeleton(kind) {
+  const cards = `<div class="sm-skel">${'<div class="sm-skel-card"></div>'.repeat(4)}</div>`;
+  const lines = `<div class="sm-skel"><div class="sm-skel-line" style="width:40%;height:22px"></div>${'<div class="sm-skel-line"></div>'.repeat(6)}</div>`;
+  setContent(kind === 'lines' ? lines : cards);
+}
+
+function emptyState(icon, title, text, actionHtml) {
+  return `<div class="sm-empty-state">
+    <span class="sm-empty-icon">${icon}</span>
+    <h4>${title}</h4>
+    <p>${text || ''}</p>
+    ${actionHtml || ''}
+  </div>`;
+}
+
+// ── Topbar "more" menu on phones ────────────────────────────────
+function initTopbarMore() {
+  const right = document.getElementById('topbar-right');
+  const actions = document.getElementById('topbar-actions');
+  if (!right || !actions || document.getElementById('sm-topbar-more')) return;
+  const btn = document.createElement('button');
+  btn.id = 'sm-topbar-more';
+  btn.type = 'button';
+  btn.setAttribute('aria-label', 'More actions');
+  btn.textContent = '⋯';
+  btn.onclick = (e) => { e.stopPropagation(); actions.classList.toggle('sm-open'); };
+  right.appendChild(btn);
+  document.addEventListener('click', () => actions.classList.remove('sm-open'));
+  // A screen with no actions shouldn't show a dead "⋯".
+  const sync = () => { btn.style.visibility = actions.children.length ? 'visible' : 'hidden'; };
+  new MutationObserver(sync).observe(actions, { childList: true });
+  sync();
+}
+
+// ── Bottom tab bar + Collect FAB ────────────────────────────────
+const SM_TABS = [
+  { page: 'dashboard',       icon: '🏠', label: 'Home' },
+  { page: 'collect',         icon: '💵', label: 'Collect' },
+  { page: 'guests',          icon: '👥', label: 'Guests' },
+  { page: 'daily-checklist', icon: '✅', label: 'Checklist' },
+  { page: '__more',          icon: '☰',  label: 'More' }
+];
+// Screens where "collect rent" is the obvious next action.
+const SM_FAB_PAGES = ['dashboard', 'guests', 'rent-due', 'payments', 'collections'];
+
+function initTabBar() {
+  if (document.getElementById('sm-tabbar')) return;
+  const bar = document.createElement('nav');
+  bar.id = 'sm-tabbar';
+  bar.className = 'sm-tabbar';
+  bar.innerHTML = SM_TABS.map(t => `
+    <button class="sm-tab" data-tab="${t.page}" type="button">
+      <span class="sm-tab-icon">${t.icon}</span>${t.label}
+    </button>`).join('');
+  document.getElementById('app').appendChild(bar);
+  bar.querySelectorAll('.sm-tab').forEach(b => {
+    b.onclick = () => {
+      const page = b.dataset.tab;
+      if (page === '__more') { document.getElementById('sidebar').classList.toggle('open'); return; }
+      document.getElementById('sidebar').classList.remove('open');
+      navigate(page);
+    };
+  });
+
+  const fab = document.createElement('button');
+  fab.id = 'sm-fab';
+  fab.className = 'sm-fab';
+  fab.type = 'button';
+  fab.innerHTML = '＋ Collect';
+  fab.onclick = () => navigate('collect');
+  document.getElementById('app').appendChild(fab);
+  syncChrome(currentPage);
+}
+
+function syncChrome(page) {
+  document.querySelectorAll('.sm-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === page));
+  const fab = document.getElementById('sm-fab');
+  if (fab) fab.classList.toggle('sm-fab-on', SM_FAB_PAGES.includes(page));
+  const actions = document.getElementById('topbar-actions');
+  if (actions) actions.classList.remove('sm-open');
+}
+
+// ── COLLECT: rent in one screen ─────────────────────────────────
+// Flow: pick resident (sorted by who owes most) → amount pre-filled from the
+// running balance → mode → Save. Uses the existing POST /collections with the
+// same fields as the old modal; no money logic is duplicated here.
+const SM_MODES = ['Cash', 'UPI', 'Bank Transfer'];
+let collectState = { guest: null, mode: 'Cash', type: 'rent', list: [] };
+
+function monthLabelForCollect(d) {
+  return new Date(d).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+}
+
+async function pgCollect() {
+  skeleton('cards');
+  document.getElementById('topbar-actions').innerHTML = '';
+  const list = await API.getRentDue();
+  // Who to chase first: biggest total payable at the top, settled at the bottom.
+  collectState.list = [...list].sort((a, b) =>
+    ((parseFloat(b.amount_due) || 0) + (parseFloat(b.deposit_pending) || 0)) -
+    ((parseFloat(a.amount_due) || 0) + (parseFloat(a.deposit_pending) || 0)));
+  collectState.guest = null;
+  collectState.mode = 'Cash';
+  collectState.type = 'rent';
+  setContent(`
+    <div class="page-header"><h1>💵 Collect</h1><p>Rent · <span class="sm-kn">ಬಾಡಿಗೆ ಸಂಗ್ರಹ</span></p></div>
+    <div class="card" style="padding:16px">
+      <div class="sm-collect-step">
+        <h4>1 · Who is paying? <span class="sm-kn">ಯಾರು</span></h4>
+        <input type="text" id="collect-search" placeholder="🔍 Search name, room or phone…" oninput="renderCollectPeople()" autocomplete="off"/>
+        <div id="collect-people" style="max-height:46vh;overflow:auto;margin-top:10px"></div>
+      </div>
+      <div id="collect-rest" class="hidden"></div>
+    </div>`);
+  renderCollectPeople();
+}
+
+function renderCollectPeople() {
+  const q = (document.getElementById('collect-search')?.value || '').toLowerCase().trim();
+  let rows = collectState.list;
+  if (q) rows = rows.filter(g => `${g.name} ${g.room_number || ''} ${g.phone || ''}`.toLowerCase().includes(q));
+  const box = document.getElementById('collect-people');
+  if (!box) return;
+  if (!rows.length) { box.innerHTML = emptyState('🔍', 'No resident matches', 'Try a different name or room number.'); return; }
+  box.innerHTML = rows.slice(0, 60).map(g => {
+    const due = parseFloat(g.amount_due) || 0;
+    const dep = parseFloat(g.deposit_pending) || 0;
+    const total = due + dep;
+    return `<button type="button" class="sm-person ${collectState.guest?.id === g.id ? 'selected' : ''}" onclick="selectCollectGuest(${g.id})">
+      <span>
+        <span class="sm-person-name">${g.name}</span><br>
+        <span class="sm-person-sub">${g.room_number ? 'Room ' + g.room_number : 'No room'} · ${fmt(g.monthly_rent)}/mo</span>
+      </span>
+      <span class="sm-person-due ${total > 0 ? 'text-red' : 'text-green'}">${total > 0 ? fmt(total) : 'Settled'}</span>
+    </button>`;
+  }).join('');
+}
+
+function selectCollectGuest(id) {
+  const g = collectState.list.find(x => String(x.id) === String(id));
+  if (!g) return;
+  collectState.guest = g;
+  const due = parseFloat(g.amount_due) || 0;
+  const dep = parseFloat(g.deposit_pending) || 0;
+  // Pre-fill with what's actually outstanding; if nothing is due, fall back to
+  // one month's rent. The warden can always overwrite it.
+  const prefill = due > 0 ? due : (dep > 0 ? dep : parseFloat(g.monthly_rent) || 0);
+  collectState.type = (due <= 0 && dep > 0) ? 'deposit' : 'rent';
+  renderCollectPeople();
+  const rest = document.getElementById('collect-rest');
+  rest.classList.remove('hidden');
+  rest.innerHTML = `
+    <div class="sm-collect-step" style="margin-top:20px">
+      <h4>2 · How much? <span class="sm-kn">ಎಷ್ಟು</span></h4>
+      <input type="number" inputmode="numeric" id="collect-amount" class="sm-amount-input" value="${prefill || ''}"/>
+      <div style="font-size:12px;color:var(--text-muted,#64748B);margin-top:6px">
+        ${due > 0 ? `Rent pending <span class="sm-kn">ಬಾಕಿ</span>: <strong class="text-red">${fmt(due)}</strong>` : 'No rent pending'}
+        ${dep > 0 ? ` · Deposit <span class="sm-kn">ಠೇವಣಿ</span>: <strong class="text-red">${fmt(dep)}</strong>` : ''}
+      </div>
+      <div class="sm-chip-row" style="margin-top:10px">
+        ${due > 0 ? `<button type="button" class="sm-chip" onclick="setCollectAmount(${due},'rent')">Full rent ${fmt(due)}</button>` : ''}
+        ${dep > 0 ? `<button type="button" class="sm-chip" onclick="setCollectAmount(${dep},'deposit')">Deposit ${fmt(dep)}</button>` : ''}
+        <button type="button" class="sm-chip" onclick="setCollectAmount(${parseFloat(g.monthly_rent) || 0},'rent')">1 month ${fmt(g.monthly_rent)}</button>
+      </div>
+    </div>
+    <div class="sm-collect-step">
+      <h4>3 · Paid how? <span class="sm-kn">ಹೇಗೆ</span></h4>
+      <div class="sm-chip-row" id="collect-modes">
+        ${SM_MODES.map(m => `<button type="button" class="sm-chip ${m === collectState.mode ? 'selected' : ''}" data-mode="${m}" onclick="setCollectMode('${m}')">${m}</button>`).join('')}
+      </div>
+    </div>
+    <div class="sm-collect-step">
+      <div class="form-row">
+        <div class="form-group"><label>Date</label><input type="date" id="collect-date" value="${nowDate()}"/></div>
+        <div class="form-group"><label>For month</label><input type="text" id="collect-month" value="${monthLabelForCollect(new Date())}"/></div>
+      </div>
+    </div>
+    <div id="collect-alert" class="alert alert-danger hidden"></div>
+    <button class="btn btn-success" id="collect-save" style="width:100%;justify-content:center;font-size:16px;padding:14px" onclick="saveCollectEntry()">✓ Save payment</button>`;
+  rest.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function setCollectAmount(v, type) {
+  const el = document.getElementById('collect-amount');
+  if (el) el.value = v;
+  if (type) collectState.type = type;
+}
+
+function setCollectMode(m) {
+  collectState.mode = m;
+  document.querySelectorAll('#collect-modes .sm-chip').forEach(c => c.classList.toggle('selected', c.dataset.mode === m));
+}
+
+async function saveCollectEntry() {
+  const al = document.getElementById('collect-alert');
+  const btn = document.getElementById('collect-save');
+  const g = collectState.guest;
+  const amount = parseFloat(document.getElementById('collect-amount').value);
+  if (!g) { showAlert(al, 'Pick a resident first'); return; }
+  if (!amount || amount <= 0) { showAlert(al, 'Enter an amount'); return; }
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    const saved = await API.createCollection({
+      guest_id: g.id,
+      guest_name: g.name,
+      amount,
+      collection_date: document.getElementById('collect-date').value || nowDate(),
+      collection_type: collectState.type,
+      payment_mode: collectState.mode,
+      collection_month: document.getElementById('collect-month').value || '',
+      description: ''
+    });
+    showCollectDone(g, amount, saved);
+  } catch (e) {
+    btn.disabled = false; btn.textContent = '✓ Save payment';
+    showAlert(al, e.message);
+  }
+}
+
+function showCollectDone(g, amount, saved) {
+  const pending = saved && saved.status && saved.status !== 'confirmed';
+  const msg = `Hi ${g.name}, we have received ${fmt(amount)} towards ${collectState.type === 'deposit' ? 'your deposit' : 'rent'} at Siri Mane PG. Thank you!`;
+  const wa = buildWhatsappUrl(g.phone, msg);
+  setContent(`
+    <div class="card sm-done-card">
+      <div class="sm-done-tick">✅</div>
+      <h3 style="margin:8px 0 4px">${fmt(amount)} recorded</h3>
+      <p class="text-muted" style="margin-bottom:6px">${g.name}${g.room_number ? ' · Room ' + g.room_number : ''}</p>
+      ${pending ? `<p style="font-size:13px;color:var(--amber)">Waiting for admin confirmation before it counts as income.</p>` : ''}
+      <div style="display:grid;gap:10px;max-width:320px;margin:18px auto 0">
+        ${wa ? `<a class="btn btn-success" style="justify-content:center" href="${wa}" target="_blank" rel="noopener">💬 Send receipt on WhatsApp</a>` : `<span class="text-muted" style="font-size:13px">No phone number on file for WhatsApp</span>`}
+        ${(saved && saved.id && !pending) ? `<button class="btn btn-outline" onclick="downloadReceipt(${saved.id})">🧾 Download receipt</button>` : ''}
+        <button class="btn btn-primary" onclick="navigate('collect')">＋ Collect from someone else</button>
+        <button class="btn btn-outline" onclick="navigate('rent-due')">📅 Back to Rent Due</button>
+      </div>
+    </div>`);
+}
+
+// Entry point from Rent Due's per-resident "Collect" button.
+async function collectFrom(guestId) {
+  await pgCollect();
+  selectCollectGuest(guestId);
 }
