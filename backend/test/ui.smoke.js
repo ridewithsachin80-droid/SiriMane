@@ -590,6 +590,45 @@ async function runAtWidth(browser, BASE, width) {
   ok(lum(dark.bg) < 0.12, `${tag} dark background is actually dark`);
   ok(contrast(dark.bg, dark.text) >= 7, `${tag} dark text contrast ${contrast(dark.bg, dark.text).toFixed(1)}:1`);
   ok(lum(dark.card) < 0.15, `${tag} cards are dark too (no white slabs)`);
+  // Every visible piece of text must stay readable in dark mode, on whatever
+  // surface it actually sits on. This is the check that catches hardcoded
+  // colours and <button> rows that don't inherit their text colour.
+  const contrastSweep = async (label) => {
+    const bad = await page.evaluate(() => {
+      const lum = c => { const m = c.match(/\d+(\.\d+)?/g); if (!m) return null; const [r, g, b] = m.slice(0, 3).map(Number).map(v => { v /= 255; return v <= .03928 ? v / 12.92 : Math.pow((v + .055) / 1.055, 2.4); }); return .2126 * r + .7152 * g + .0722 * b; };
+      const bgOf = el => { let e = el; while (e) { const b = getComputedStyle(e).backgroundColor; if (b && !/rgba\(0, 0, 0, 0\)|transparent/.test(b)) return b; e = e.parentElement; } return getComputedStyle(document.body).backgroundColor; };
+      const out = [];
+      document.querySelectorAll('#page-content *, .topbar *, .sidebar *, .sm-tabbar *, #copilot-bar *, .modal *').forEach(el => {
+        if (!el.offsetParent && el.tagName !== 'BODY') return;
+        const text = [...el.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent.trim()).join('');
+        if (!text) return;
+        const cs = getComputedStyle(el);
+        const fg = lum(cs.color), bg = lum(bgOf(el));
+        if (fg == null || bg == null) return;
+        const [hi, lo] = [fg, bg].sort((a, b) => b - a);
+        const ratio = (hi + .05) / (lo + .05);
+        if (ratio < 3) out.push(`${(el.className || el.tagName).toString().slice(0, 30)}: "${text.slice(0, 24)}" ${ratio.toFixed(1)}:1`);
+      });
+      return [...new Set(out)].slice(0, 6);
+    });
+    eq(bad.length, 0, `${tag} dark: all text readable on ${label} (${bad.join(' | ')})`);
+  };
+  for (const pg of ['dashboard', 'guests', 'rooms', 'collect', 'admin']) {
+    await page.evaluate(k => navigate(k), pg);
+    await page.waitForFunction(() => { const c = document.getElementById('page-content'); return c && c.textContent.trim() && !c.querySelector('.sm-skel'); }, { timeout: 12000 });
+    await contrastSweep(pg);
+  }
+  // Hover must not turn a row into a white slab in dark mode.
+  await page.evaluate(() => navigate('rooms'));
+  await page.waitForFunction(() => document.querySelector('#page-content tbody tr'), { timeout: 10000 });
+  const hoverBg = await page.evaluate(() => {
+    const td = document.querySelector('#page-content tbody tr td');
+    if (!td) return null;
+    const rule = [...document.styleSheets].flatMap(ss => { try { return [...ss.cssRules]; } catch { return []; } }).find(r => r.selectorText === 'tbody tr:hover td');
+    return rule ? rule.style.backgroundColor : 'none';
+  });
+  ok(!/^#?(fa|f9|f8|ff)/i.test(String(hoverBg).replace(/[^0-9a-f#]/gi, '').slice(0, 3)) || String(hoverBg).includes('var'), `${tag} row hover uses a themed colour (${hoverBg})`);
+
   // Every surface on the page must follow the theme — a hardcoded #fff shows up here.
   const lightSurfaces = await page.evaluate(() => {
     const out = [];

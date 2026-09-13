@@ -36,6 +36,8 @@
   --on-accent: #FFFFFF;
   /* Text on a solid green/red/amber fill — always light, in both themes. */
   --on-solid: #FFFFFF;
+  /* Badge ink: dark on the pale fills in light mode… */
+  --green-ink: #065F46; --red-ink: #991B1B; --amber-ink: #92400E; --blue-ink: #1E40AF;
 }
 
 /* ── Dark theme ────────────────────────────────────────────────────────
@@ -44,9 +46,11 @@
    change — no component knows which theme is on. */
 [data-theme="dark"] {
   --on-solid: #0F1115;
+  /* …and light on the deep fills in dark mode. */
+  --green-ink: #6EE7A8; --red-ink: #FCA5A5; --amber-ink: #FBBF6B; --blue-ink: #A5C0FF;
   --primary: #E5E7EB;
   --primary-light: #2A2E36;
-  --primary-dark: #F9FAFB;
+  --primary-dark: var(--surface-2);
   --accent: #C9A96E;
   --accent-light: #2C2620;
   --accent-soft: #241F18;
@@ -281,7 +285,7 @@ td {
 }
 
 tr:last-child td { border-bottom: none; }
-tbody tr:hover td { background: #FAFBFC; }
+tbody tr:hover td { background: var(--surface-2); }
 
 .empty-row td { text-align: center; padding: 48px; color: var(--text-muted); font-size: 14px; }
 
@@ -392,7 +396,7 @@ input:focus, select:focus, textarea:focus {
 .modal-close { background: none; border: none; font-size: 20px; cursor: pointer; color: var(--text-muted); padding: 2px 6px; border-radius: 4px; }
 .modal-close:hover { background: var(--bg); }
 .modal-body { padding: 22px; }
-.modal-footer { padding: 14px 22px; border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end; background: #FAFBFC; border-radius: 0 0 14px 14px; }
+.modal-footer { padding: 14px 22px; border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end; background: var(--surface-2); border-radius: 0 0 14px 14px; }
 
 /* ── BADGE ── */
 .badge {
@@ -402,12 +406,12 @@ input:focus, select:focus, textarea:focus {
   font-size: 11px;
   font-weight: 600;
 }
-.badge-green { background: var(--green-light); color: #065F46; }
-.badge-red { background: var(--red-light); color: #991B1B; }
-.badge-amber { background: #FFFBEB; color: #92400E; }
-.badge-blue { background: var(--blue-light); color: #1E40AF; }
+.badge-green { background: var(--green-light); color: var(--green-ink); }
+.badge-red { background: var(--red-light); color: var(--red-ink); }
+.badge-amber { background: var(--amber-light); color: var(--amber-ink); }
+.badge-blue { background: var(--blue-light); color: var(--blue-ink); }
 .badge-purple { background: var(--primary-light); color: var(--primary-dark); }
-.badge-gray { background: var(--surface-2); color: #475569; }
+.badge-gray { background: var(--surface-2); color: var(--text); }
 
 /* ── ALERT ── */
 .alert { padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 14px; }
@@ -430,8 +434,8 @@ input:focus, select:focus, textarea:focus {
 
 /* ── INBOX ── */
 .inbox-item { padding: 14px 16px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.15s; }
-.inbox-item:hover { background: #FAFBFC; }
-.inbox-item.unread { background: #EEF2FF; border-left: 3px solid var(--primary); }
+.inbox-item:hover { background: var(--surface-2); }
+.inbox-item.unread { background: var(--accent-soft); border-left: 3px solid var(--primary); }
 
 /* ── LOGIN ── */
 .login-page {
@@ -840,3 +844,14 @@ svg.ic.ic-lg { width: 22px !important; height: 22px !important; flex: 0 0 22px; 
 .r360-timeline li.tl-request::before { background: var(--amber); }
 .r360-timeline li.tl-joined::before, .r360-timeline li.tl-left::before { background: var(--accent); }
 .r360-timeline .tl-date { flex: 0 0 84px; color: var(--text-muted); font-size: 12px; padding-top: 2px; }
+
+/* ── Sprint 8.1: buttons used as rows ──────────────────────────────────
+   A <button> does not inherit the page's text colour, so every element we
+   style as a "row" (Collect list, search results, quick actions, portal
+   tabs) needs it stated — otherwise its text stays near-black and vanishes
+   on a dark card. */
+button, input, select, textarea { color: inherit; }
+.sm-person, .search-item, .qa-item, .copilot-chip, .subtab, .sm-tab, .nav-item, .modal-close { color: var(--text); }
+.sm-person .sm-person-sub, .search-item .s-sub { color: var(--text-muted); }
+.copilot-chip, .subtab:not(.active), .sm-tab:not(.active) { color: var(--text-muted); }
+.sm-person.selected { box-shadow: 0 0 0 2px var(--accent-soft-border); }
