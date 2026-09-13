@@ -180,6 +180,7 @@ async function runAtWidth(browser, BASE, width) {
   await page.waitForSelector('#collect-people .sm-person', { timeout: 8000 });
   ok(true, `${tag} FAB opens Collect`);
   await page.screenshot({ path: path.join(SHOTS, `collect-${width}.png`) });
+  await page.waitForSelector('#collect-people .sm-person .sm-person-due', { timeout: 8000 });
   const firstDue = await page.$eval('#collect-people .sm-person .sm-person-due', e => e.textContent);
   ok(firstDue.length > 0, `${tag} residents listed with amount (${firstDue})`);
   await page.type('#collect-search', target.name.split(' ')[0]);
@@ -348,6 +349,42 @@ async function runAtWidth(browser, BASE, width) {
   const hasPriority = await page.$$eval('#complaints-tb td[data-label="PRIORITY"] .badge', els => els.length);
   ok(hasPriority >= 1, `${tag} complaints show a priority badge`);
   ok(await page.evaluate(() => document.body.innerText.includes('🔴 High')), `${tag} the geyser/water issue is marked High`);
+
+  // ── Sprint 5: owner report on Reports, attention card on Home, schema banner ──
+  await page.evaluate(() => navigate('reports'));
+  await page.waitForSelector('#owner-card', { timeout: 8000 });
+  await page.waitForFunction(() => { const t = document.querySelector('#owner-summary')?.textContent || ''; return t && !/Loading|Computing/.test(t); }, { timeout: 15000 });
+  const summary = await page.$eval('#owner-summary', e => e.textContent);
+  eq(summary.split('\n').length, 5, `${tag} owner summary is five lines`);
+  ok(/collected Rs [\d,]+/.test(summary), `${tag} summary quotes collections`);
+  ok((await page.$eval('#owner-forecast', e => e.textContent)).includes('Next 3 months'), `${tag} forecast shown`);
+  const ownerW = await page.$eval('#owner-card', e => e.getBoundingClientRect().right);
+  ok(ownerW <= width + 1, `${tag} owner card fits (${Math.round(ownerW)}px)`);
+  await page.screenshot({ path: path.join(SHOTS, `owner-report-${width}.png`) });
+  const ownerDl = path.join(SHOTS, `owner-dl-${width}`); fs.mkdirSync(ownerDl, { recursive: true });
+  await cdp.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: ownerDl, browserContextId: ctx.id });
+  await page.evaluate(() => downloadOwnerPdf());
+  let pdfFile = null;
+  for (let i = 0; i < 40 && !pdfFile; i++) { await sleep(250); pdfFile = fs.readdirSync(ownerDl).find(f => f.endsWith('.pdf')); }
+  ok(pdfFile, `${tag} owner PDF downloads`);
+  eq(fs.readFileSync(path.join(ownerDl, pdfFile)).subarray(0, 4).toString(), '%PDF', `${tag} owner PDF is real`);
+  await page.evaluate(() => downloadAccountantZip());
+  let zipFile = null;
+  for (let i = 0; i < 40 && !zipFile; i++) { await sleep(250); zipFile = fs.readdirSync(ownerDl).find(f => f.endsWith('.zip')); }
+  ok(zipFile, `${tag} accountant ZIP downloads`);
+  eq(fs.readFileSync(path.join(ownerDl, zipFile)).readUInt32LE(0), 0x04034b50, `${tag} ZIP has a valid signature`);
+
+  await page.evaluate(() => navigate('dashboard'));
+  await page.waitForSelector('#page-content .stat-card', { timeout: 10000 });
+  await page.waitForFunction(() => { const c = document.getElementById('attention-card'); return c && !c.classList.contains('hidden'); }, { timeout: 10000 });
+  const flagsShown = await page.$$eval('#attention-list > div', els => els.length);
+  ok(flagsShown >= 1, `${tag} Home shows "Needs attention" (${flagsShown} items)`);
+  ok(await page.$('#attention-list button'), `${tag} each flag has an Open button`);
+
+  await page.evaluate(() => navigate('admin'));
+  await page.waitForSelector('#schema-banner', { timeout: 8000 });
+  await sleep(500);
+  eq(await page.$eval('#schema-banner', e => e.innerHTML.trim()), '', `${tag} no schema banner when migrations are current`);
 
   eq(jsErrors.length, 0, `${tag} no uncaught JS errors (${jsErrors.join('; ')})`);
   await page.close(); await ctx.close();

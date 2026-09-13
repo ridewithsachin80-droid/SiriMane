@@ -674,17 +674,44 @@ router.get('/reports', auth, async (req, res) => {
       dateFrom = `${y}-${String(m).padStart(2,'0')}-01`;
       dateTo = new Date(y, m, 0).toISOString().split('T')[0]; // last day of that month
     }
-    const [income, expenses, incomeBreakdown, expenseBreakdown] = await Promise.all([
-      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND status='confirmed' AND collection_date BETWEEN $1 AND $2`, [dateFrom, dateTo]),
-      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM purchases WHERE is_deleted=false AND status='confirmed' AND purchase_date BETWEEN $1 AND $2`, [dateFrom, dateTo]),
-      pool.query(`SELECT collection_type, COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND status='confirmed' AND collection_date BETWEEN $1 AND $2 GROUP BY collection_type`, [dateFrom, dateTo]),
-      pool.query(`SELECT category, COALESCE(SUM(amount),0) as total FROM purchases WHERE is_deleted=false AND status='confirmed' AND purchase_date BETWEEN $1 AND $2 GROUP BY category`, [dateFrom, dateTo])
-    ]);
-    const inc = parseFloat(income.rows[0].total);
-    const exp = parseFloat(expenses.rows[0].total);
-    res.json({ totalIncome: inc, totalExpenses: exp, netProfit: inc - exp, incomeBreakdown: incomeBreakdown.rows, expenseBreakdown: expenseBreakdown.rows, dateFrom, dateTo });
+    res.json(await computeReportData(dateFrom, dateTo));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
+// The one place month/range income & expense totals are computed. The
+// Reports screen, the CSV/PDF exports and the Sprint 5 owner report all call
+// this, so they cannot disagree with each other.
+async function computeReportData(dateFrom, dateTo) {
+  const [income, expenses, incomeBreakdown, expenseBreakdown] = await Promise.all([
+    pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND status='confirmed' AND collection_date BETWEEN $1 AND $2`, [dateFrom, dateTo]),
+    pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM purchases WHERE is_deleted=false AND status='confirmed' AND purchase_date BETWEEN $1 AND $2`, [dateFrom, dateTo]),
+    pool.query(`SELECT collection_type, COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND status='confirmed' AND collection_date BETWEEN $1 AND $2 GROUP BY collection_type`, [dateFrom, dateTo]),
+    pool.query(`SELECT category, COALESCE(SUM(amount),0) as total FROM purchases WHERE is_deleted=false AND status='confirmed' AND purchase_date BETWEEN $1 AND $2 GROUP BY category ORDER BY total DESC`, [dateFrom, dateTo])
+  ]);
+  const inc = parseFloat(income.rows[0].total);
+  const exp = parseFloat(expenses.rows[0].total);
+  return { totalIncome: inc, totalExpenses: exp, netProfit: inc - exp, incomeBreakdown: incomeBreakdown.rows, expenseBreakdown: expenseBreakdown.rows, dateFrom, dateTo };
+}
+
+// Month-by-month totals for the N months ending at `end` (a Date). Shared by
+// the trend chart and the owner forecast.
+async function computeTrend(months, end) {
+  const now = end || new Date();
+  const result = [];
+  for (let i = months - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const m = d.getMonth() + 1;
+    const y = d.getFullYear();
+    const [inc, exp] = await Promise.all([
+      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND status='confirmed' AND EXTRACT(MONTH FROM collection_date)=$1 AND EXTRACT(YEAR FROM collection_date)=$2`, [m, y]),
+      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM purchases WHERE is_deleted=false AND status='confirmed' AND EXTRACT(MONTH FROM purchase_date)=$1 AND EXTRACT(YEAR FROM purchase_date)=$2`, [m, y])
+    ]);
+    const income = parseFloat(inc.rows[0].total);
+    const expenses = parseFloat(exp.rows[0].total);
+    result.push({ month: `${y}-${String(m).padStart(2,'0')}`, label: d.toLocaleString('en-IN', { month: 'short', year: 'numeric' }), income, expenses, net: income - expenses });
+  }
+  return result;
+}
 
 // Month-by-month income/expense for charting trends. Sequential per-month
 // queries rather than one fancy GROUP BY — simpler to read and verify
@@ -692,21 +719,7 @@ router.get('/reports', auth, async (req, res) => {
 router.get('/reports/trend', auth, async (req, res) => {
   try {
     const months = Math.min(parseInt(req.query.months) || 6, 24);
-    const now = new Date();
-    const result = [];
-    for (let i = months - 1; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const m = d.getMonth() + 1;
-      const y = d.getFullYear();
-      const [inc, exp] = await Promise.all([
-        pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND status='confirmed' AND EXTRACT(MONTH FROM collection_date)=$1 AND EXTRACT(YEAR FROM collection_date)=$2`, [m, y]),
-        pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM purchases WHERE is_deleted=false AND status='confirmed' AND EXTRACT(MONTH FROM purchase_date)=$1 AND EXTRACT(YEAR FROM purchase_date)=$2`, [m, y])
-      ]);
-      const income = parseFloat(inc.rows[0].total);
-      const expenses = parseFloat(exp.rows[0].total);
-      result.push({ month: `${y}-${String(m).padStart(2,'0')}`, label: d.toLocaleString('en-IN', { month: 'short', year: 'numeric' }), income, expenses, net: income - expenses });
-    }
-    res.json(result);
+    res.json(await computeTrend(months));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1071,6 +1084,7 @@ async function computeRentDueList() {
       phone: guest.phone,
       room_number: guest.room_number,
       monthly_rent: guest.monthly_rent,
+      join_date: guest.join_date,
       current_balance: currentBalance,
       amount_due: currentBalance < 0 ? Math.abs(currentBalance) : 0,
       credit: currentBalance > 0 ? currentBalance : 0
@@ -1785,3 +1799,9 @@ router.get('/guest-receipt/:id/pdf', guestAuth, async (req, res) => {
 module.exports.computeRentDueList = computeRentDueList;
 module.exports.computeGuestLedger = computeGuestLedger;
 module.exports.istToday = istToday;
+module.exports.computeReportData = computeReportData;
+module.exports.computeTrend = computeTrend;
+module.exports.computeBalanceSheetData = computeBalanceSheetData;
+module.exports.drawPdfTable = drawPdfTable;
+module.exports.fmtMoney = fmtMoney;
+module.exports.fmtD = fmtD;

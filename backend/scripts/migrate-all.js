@@ -23,7 +23,8 @@ const ORDER = [
   'migrate-checklist.js',       // checklist_items + checklist_log (+ default tasks on first run)
   'migrate-complaints.js',      // complaints
   'migrate-ai-inputs.js',       // Sprint 3: source columns + ai_reads cache
-  'migrate-ai-assistant.js'     // Sprint 4: complaint priority + reminder_log
+  'migrate-ai-assistant.js',    // Sprint 4: complaint priority + reminder_log
+  'migrate-owner-reports.js'    // Sprint 5: owner_reports
 ];
 
 let failed = false;

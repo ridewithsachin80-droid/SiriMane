@@ -48,13 +48,21 @@ app.use(express.json({ limit: '10kb' }));
 
 app.use('/api', require('./routes/index'));
 app.use('/api/assistant', require('./routes/assistant'));
+app.use('/api/owner', require('./routes/owner'));
 
 // Any /api path that no route claimed answers with JSON — never the landing
 // page. (Before this, a missing route returned home.html and the app showed
 // "Unexpected token '<'".)
 app.use('/api', (req, res) => res.status(404).json({ error: `No such endpoint: ${req.method} ${req.originalUrl}` }));
 
-app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
+// /health also reports whether every migration this build needs has been run
+// (checked at startup and re-checked every 10 minutes) — so Admin can show a
+// banner instead of individual screens failing with "relation does not exist".
+const schemaCheck = require('./services/schema-check');
+app.get('/health', (req, res) => {
+  const s = schemaCheck.lastResult();
+  res.json({ status: 'ok', time: new Date().toISOString(), schema: s.ok === null ? 'unchecked' : (s.ok ? 'ok' : 'missing'), schemaMissing: s.missing, schemaCheckedAt: s.checkedAt });
+});
 
 app.use(express.static(PUBLIC));
 
@@ -87,5 +95,8 @@ if (require.main === module) {
   // Sprint 4: compute the morning brief once a day at the time in Settings
   // (default 07:00 IST). Runs inside this process — no extra Railway service.
   require('./services/assistant').startScheduler();
+  require('./services/owner').startScheduler();
+  schemaCheck.checkSchema().then(schemaCheck.logResult).catch(e => console.error('schema check failed:', e.message));
+  setInterval(() => schemaCheck.checkSchema().catch(() => {}), 10 * 60 * 1000).unref();
 }
 module.exports = app;

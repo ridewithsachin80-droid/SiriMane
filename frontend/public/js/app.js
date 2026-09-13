@@ -219,6 +219,10 @@ async function pgDashboard() {
           <pre id="ask-a" class="hidden" style="white-space:pre-wrap;font-family:inherit;font-size:14px;line-height:1.5;margin:12px 0 0;padding:12px;background:#F8FAFC;border-radius:8px"></pre>
         </div>
       </div>
+      ${isAdmin() ? `<div class="card mb-6 hidden" id="attention-card">
+        <div class="card-header"><h3>🚩 Needs attention</h3></div>
+        <div id="attention-list" style="padding:6px 16px 10px"></div>
+      </div>` : ''}
       <div class="stat-grid mb-6">
         <div class="stat-card">
           <div class="s-label">Total Guests</div>
@@ -2389,6 +2393,7 @@ async function pgReports(month, year) {
       <button class="btn btn-outline btn-sm" onclick="switchReportsToRange()">Custom Range</button>`;
     setContent(renderReportsPage(r, controls));
     loadTrendChart();
+    if (isAdmin()) loadOwnerReport();
   } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
 }
 
@@ -2435,7 +2440,26 @@ function renderReportsPage(r, controlsHtml) {
         <div><h1>📋 Reports</h1><p>Profit &amp; Loss summary</p></div>
         <div class="flex items-center gap-2">${controlsHtml}</div>
       </div>
-      ${isAdmin()?`<div class="flex gap-2 mb-5">
+      ${isAdmin()?`<div class="card mb-6" id="owner-card">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+          <h3>📈 Owner report</h3>
+          <div class="flex items-center gap-2" style="flex-wrap:wrap">
+            <input type="month" id="owner-month" value="${new Date().toISOString().slice(0,7)}" max="${new Date().toISOString().slice(0,7)}" style="margin:0;min-height:40px" onchange="loadOwnerReport()"/>
+            <button class="btn btn-outline btn-sm" onclick="loadOwnerReport(true)" title="Recompute">↻</button>
+          </div>
+        </div>
+        <div style="padding:14px 16px">
+          <pre id="owner-summary" style="white-space:pre-wrap;font-family:inherit;font-size:14px;line-height:1.55;margin:0 0 12px">Loading…</pre>
+          <div id="owner-forecast" style="font-size:13px;color:var(--text-muted,#64748B);margin-bottom:12px"></div>
+          <div class="flex gap-2" style="flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm" onclick="downloadOwnerPdf()">📄 Download PDF</button>
+            <button class="btn btn-outline btn-sm" onclick="shareOwnerSummary()">💬 WhatsApp summary</button>
+            <button class="btn btn-outline btn-sm" onclick="downloadAccountantZip()">🗂️ Export CSVs (ZIP)</button>
+          </div>
+          <div id="owner-meta" class="text-muted" style="font-size:11px;margin-top:8px"></div>
+        </div>
+      </div>
+      <div class="flex gap-2 mb-5">
         <button class="btn btn-outline btn-sm" onclick="exportReport('csv','${r.dateFrom}','${r.dateTo}')">⬇ Export CSV</button>
         <button class="btn btn-outline btn-sm" onclick="exportReport('pdf','${r.dateFrom}','${r.dateTo}')">⬇ Export PDF</button>
       </div>`:''}
@@ -2784,11 +2808,13 @@ async function pgAdmin() {
   loading();
   document.getElementById('topbar-actions').innerHTML = '';
   renderAdminPage();
+  loadSchemaBanner();
 }
 
 function renderAdminPage() {
   setContent(`
     <div class="page-header"><h1>🔐 Admin</h1><p>Staff accounts, audit trail, deposit refunds, and app settings</p></div>
+    <div id="schema-banner"></div>
     <div class="flex gap-2 mb-5">
       <button class="btn ${adminActiveTab==='staff'?'btn-primary':'btn-outline'} btn-sm" onclick="switchAdminTab('staff')">Staff Users</button>
       <button class="btn ${adminActiveTab==='audit'?'btn-primary':'btn-outline'} btn-sm" onclick="switchAdminTab('audit')">Audit Log</button>
@@ -3600,7 +3626,28 @@ async function getAppSettings() {
   return appSettingsCache;
 }
 
+async function loadAttention() {
+  const card = document.getElementById('attention-card');
+  if (!card) return;
+  try {
+    const flags = await apiFetch('/owner/anomalies');
+    if (!flags.length) { card.classList.add('hidden'); return; }
+    const color = { high: 'var(--red)', medium: 'var(--amber)', low: 'var(--text-muted,#64748B)' };
+    document.getElementById('attention-list').innerHTML = flags.slice(0, 6).map(f => `
+      <div style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--border)">
+        <span style="flex:0 0 8px;height:8px;border-radius:50%;background:${color[f.level]};margin-top:6px"></span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:14px;font-weight:600">${f.title}</div>
+          <div style="font-size:12px;color:var(--text-muted,#64748B)">${f.detail}</div>
+        </div>
+        ${f.action ? `<button class="btn btn-outline btn-sm" style="min-height:36px" onclick="navigate('${f.action}')">Open</button>` : ''}
+      </div>`).join('') + (flags.length > 6 ? `<div class="text-muted" style="font-size:12px;padding-top:8px">…and ${flags.length - 6} more in the owner report</div>` : '');
+    card.classList.remove('hidden');
+  } catch (e) { card.classList.add('hidden'); }
+}
+
 async function loadBrief(force) {
+  loadAttention();
   const el = document.getElementById('brief-text');
   if (!el) return;
   try {
@@ -3683,4 +3730,54 @@ async function sendReminder(guestId) {
   try { await apiFetch('/assistant/reminders/sent', { method: 'POST', body: { guest_id: guestId, text, lang: reminderState.lang } }); } catch {}
   const card = document.getElementById('rem-' + guestId);
   if (card) card.style.opacity = '0.6';
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SPRINT 5 — owner intelligence
+   ═══════════════════════════════════════════════════════════════ */
+let ownerReportCache = null;
+async function loadOwnerReport(force) {
+  const month = document.getElementById('owner-month')?.value;
+  const out = document.getElementById('owner-summary');
+  if (!out) return;
+  out.textContent = 'Computing…';
+  try {
+    const r = await apiFetch(`/owner/report?month=${month}${force ? '&force=1' : ''}`);
+    ownerReportCache = r;
+    out.textContent = r.summary;
+    document.getElementById('owner-forecast').innerHTML = `Next 3 months (simple projection): ` +
+      r.forecast.months.map(m => `<strong>${m.label}</strong> ${fmt(m.income)} in / ${fmt(m.expenses)} out`).join(' · ') +
+      `<br><span style="font-size:11px">${r.forecast.basis}</span>`;
+    document.getElementById('owner-meta').textContent = `${r.cached ? 'Final report' : 'Computed just now'} · ${new Date(r.generated_at).toLocaleString('en-IN')}`;
+  } catch (e) { out.textContent = 'Could not load the owner report: ' + e.message; }
+}
+function downloadOwnerPdf() {
+  const month = document.getElementById('owner-month').value;
+  API.downloadExport(`/owner/report/pdf?month=${month}`, `owner-report-${month}.pdf`).catch(e => toast(e.message));
+}
+function shareOwnerSummary() {
+  if (!ownerReportCache) return;
+  const text = `📈 *Siri Mane — ${ownerReportCache.label}*\n\n${ownerReportCache.summary}`;
+  window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
+}
+function downloadAccountantZip() {
+  const month = document.getElementById('owner-month').value;
+  const [y, m] = month.split('-').map(Number);
+  const from = `${month}-01`;
+  const to = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+  API.downloadExport(`/owner/export.zip?from=${from}&to=${to}`, `sirimane-export-${month}.zip`).catch(e => toast(e.message));
+}
+
+// Admin page: schema banner from /health
+async function loadSchemaBanner() {
+  const host = document.getElementById('schema-banner');
+  if (!host) return;
+  try {
+    const res = await fetch('/health'); const h = await res.json();
+    if (h.schema === 'missing') {
+      host.innerHTML = `<div class="alert alert-danger" style="display:block">
+        <strong>Database needs a migration.</strong> Missing: ${h.schemaMissing.join(', ')}.<br>
+        In the Railway console run: <code>node backend/scripts/migrate-all.js</code></div>`;
+    } else host.innerHTML = '';
+  } catch { /* no banner */ }
 }

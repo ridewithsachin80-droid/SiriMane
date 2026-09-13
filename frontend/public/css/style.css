@@ -586,3 +586,21 @@ input, select, textarea { font-size: 16px; }
 /* ── Sprint 3 ─────────────────────────────────────────────────── */
 .alert-warning { background: #FFFBEB; color: #92400E; border: 1px solid #FDE68A; padding: 10px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; }
 @media (max-width: 640px) { .mic-btn { width: 44px; height: 44px; min-width: 44px; font-size: 18px; } }
+
+/* ── Sprint 5: page headers with controls wrap on phones (Reports etc.) ── */
+@media (max-width: 640px) {
+  .page-header.flex { flex-wrap: wrap; gap: 10px; }
+  .page-header .flex { flex-wrap: wrap; }
+  .page-header input, .page-header select { max-width: 100%; }
+  #page-content { max-width: 100%; overflow-x: hidden; }
+  #owner-card .card-header { flex-wrap: wrap; }
+}
+@media (max-width: 640px) {
+  .page-header > * { min-width: 0; max-width: 100%; }
+  .page-header input[type="month"], .page-header input[type="date"] { width: auto; flex: 1 1 140px; min-width: 0; }
+  #page-content > .card, #page-content > .page-header { width: auto; }
+}
+/* The root .app is a row flexbox; without min-width:0 its .main column grows
+   to fit the widest child (a chart, a long table) instead of the viewport. */
+.main, .content, #page-content { min-width: 0; }
+@media (max-width: 640px) { #page-content canvas, #page-content svg, #page-content img { max-width: 100%; height: auto; } }
