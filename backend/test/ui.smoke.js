@@ -639,6 +639,35 @@ async function runAtWidth(browser, BASE, width) {
   ok(/Residents/.test(resTxt), `${tag} Residents heading`);
   ok(!/All Guests|Add Guest/.test(resTxt), `${tag} no "Guests" wording left on the screen`);
 
+  // ── Sprint 7 completion: no "guest" wording, empty states carry a next step ──
+  const wording = {};
+  for (const pg of ['guests', 'guest-messages', 'inbox', 'rent-due', 'balance-sheet', 'complaints']) {
+    await page.evaluate(k => navigate(k), pg);
+    await page.waitForFunction(() => {
+      const c = document.getElementById('page-content');
+      return c && c.textContent.trim().length > 0 && !c.querySelector('.sm-skel');
+    }, { timeout: 12000 });
+    wording[pg] = await page.$eval('#page-content', e => e.textContent);
+  }
+  ok(!/Guest Messages|Guest Inbox|All Guests|Add Guest/.test(Object.values(wording).join(' ')), `${tag} no legacy "Guest…" screen wording left`);
+  ok(/Announcements/.test(wording['guest-messages']), `${tag} Announcements screen renamed`);
+  ok(/Messages/.test(wording['inbox']), `${tag} Messages screen renamed`);
+  eq(await page.evaluate(() => { navigate('balance-sheet'); return document.getElementById('page-title').textContent; }), 'Owner & Assets', `${tag} Balance Sheet is "Owner & Assets"`);
+  await page.waitForFunction(() => !document.querySelector('#page-content .sm-skel'), { timeout: 12000 });
+  const emptyStates = await page.$$eval('.sm-empty-state', els => els.map(e => ({ h: !!e.querySelector('h4'), icon: !!e.querySelector('svg.ic') })));
+  ok(emptyStates.every(e => e.h && e.icon), `${tag} empty states have a heading and an icon (${emptyStates.length} on screen)`);
+  // Every button an empty state offers must call a function that exists —
+  // a dead "Add asset" button shipped once because the name was guessed.
+  const deadButtons = await page.evaluate(() => {
+    const out = [];
+    document.querySelectorAll('.sm-empty-state button[onclick]').forEach(b => {
+      const fn = (b.getAttribute('onclick').match(/^\s*([A-Za-z_$][\w$]*)\s*\(/) || [])[1];
+      if (fn && typeof window[fn] !== 'function') out.push(fn);
+    });
+    return out;
+  });
+  eq(deadButtons.length, 0, `${tag} no empty-state button calls a missing function (${deadButtons.join(', ')})`);
+
   eq(jsErrors.length, 0, `${tag} no uncaught JS errors (${jsErrors.join('; ')})`);
   await page.close(); await ctx.close();
 }

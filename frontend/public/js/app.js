@@ -52,7 +52,7 @@ let currentPage = null;
 function navigate(page) {
   currentPage = page;
   document.querySelectorAll('.nav-item[data-page]').forEach(b => b.classList.toggle('active', b.dataset.page===page));
-  const titles = { dashboard:'Home', rooms:'Rooms', guests:'Residents', 'daily-menu':'Daily Menu', 'daily-checklist':'Daily Checklist', complaints:'Maintenance & Requests', payments:'Payments', 'guest-messages':'Announcements', inbox:'Inbox', purchases:'Purchases', collections:'Collections', 'rent-due':'Rent Due', reports:'Reports', 'balance-sheet':'Balance Sheet', admin:'Admin', collect:'Collect Rent', reminders:'Rent Reminders', finance:'Finance', operations:'Operations' };
+  const titles = { dashboard:'Home', rooms:'Rooms', guests:'Residents', 'daily-menu':'Daily Menu', 'daily-checklist':'Daily Checklist', complaints:'Maintenance & Requests', payments:'Payments', 'guest-messages':'Announcements', inbox:'Inbox', purchases:'Purchases', collections:'Collections', 'rent-due':'Rent Due', reports:'Reports', 'balance-sheet':'Owner & Assets', admin:'Admin', collect:'Collect Rent', reminders:'Rent Reminders', finance:'Finance', operations:'Operations' };
   document.getElementById('page-title').textContent = titles[page]||page;
   document.getElementById('topbar-actions').innerHTML = '';
   document.getElementById('sidebar').classList.remove('open');
@@ -501,7 +501,7 @@ async function pgGuests(filter) {
 }
 
 function renderGuestRows(filtered, f) {
-  if (filtered.length === 0) return `<tr class="empty-row"><td colspan="9">${f==='left'?'No guests have checked out yet.':'No guests match.'}</td></tr>`;
+  if (filtered.length === 0) return `<tr class="empty-row"><td colspan="9">${f==='left'?'Nobody has checked out yet.':'No resident matches.'}</td></tr>`;
   const hasVariance = (g) => g.room_id && g.room_rent !== null && g.room_rent !== undefined && parseFloat(g.monthly_rent) !== parseFloat(g.room_rent);
   return filtered.map(g=>{
     const variance = hasVariance(g);
@@ -1342,7 +1342,7 @@ async function pgAnnouncements() {
   try {
     const list = await API.getAnnouncements();
     setContent(`
-      <div class="page-header"><h1>Guest Messages</h1><p>Post announcements and notices to all guests</p></div>
+      <div class="page-header"><h1>Announcements</h1><p>Notices posted to every resident's portal</p></div>
       <div class="card">
         <div class="card-header">
           <h3>Posted Messages</h3>
@@ -1416,7 +1416,7 @@ async function pgInbox() {
     const unread = msgs.filter(m=>!m.is_read).length;
     loadInboxCount();
     setContent(`
-      <div class="page-header"><h1>Guest Inbox</h1><p>Messages sent by guests — reply directly from here</p></div>
+      <div class="page-header"><h1>Messages</h1><p>Sent by residents — reply directly from here</p></div>
       <div class="card">
         <div class="card-header">
           <h3>All Messages from Guests ${unread>0?`<span class="badge badge-red" style="margin-left:6px">${unread} unread</span>`:''}</h3>
@@ -1988,7 +1988,7 @@ function clearCollectionsRange() {
 
 function renderCollectionRows(list) {
   return list.length===0
-    ? `<tr class="empty-row"><td colspan="7">No collections found for this filter.</td></tr>`
+    ? `<tr class="empty-row"><td colspan="7">No collections match this filter.</td></tr>`
     : list.map(c=>{
       const pendingVerification = c.status === 'pending_verification';
       const pendingApproval = c.status === 'pending_approval';
@@ -2153,7 +2153,7 @@ async function pgRentDue() {
     const fullyPaidCount = list.filter(g => parseFloat(g.amount_due) <= 0).length;
     const pendingCount = list.filter(g => parseFloat(g.amount_due) > 0 || parseFloat(g.deposit_pending||0) > 0).length;
     setContent(`
-      <div class="page-header"><h1>Rent Due <span class="sm-kn" style="font-size:15px">ಬಾಕಿ</span></h1><p>Running balance for each guest, carried forward across months — not just this month's snapshot</p></div>
+      <div class="page-header"><h1>Rent Due <span class="sm-kn" style="font-size:15px">ಬಾಕಿ</span></h1><p>Running balance for each resident, carried forward across months — not just this month's snapshot</p></div>
       <div class="flex gap-2 mb-5" style="flex-wrap:wrap">
         ${isAdmin()?`<button class="btn btn-outline btn-sm" onclick="exportRentDueCsv()">⬇ Export CSV</button>
         <button class="btn btn-outline btn-sm" onclick="exportRentDuePdf()">⬇ Export PDF</button>`:''}
@@ -2233,7 +2233,7 @@ function sortRentDueRows(rows) {
 }
 
 function renderRentDueRows(list) {
-  if (list.length === 0) return `<tr class="empty-row"><td colspan="9">No guests match.</td></tr>`;
+  if (list.length === 0) return `<tr class="empty-row"><td colspan="9">No resident matches.</td></tr>`;
   return list.map(g=>{
     const due = parseFloat(g.amount_due);
     const credit = parseFloat(g.credit);
@@ -2671,7 +2671,7 @@ async function pgBalanceSheet(asOf) {
             <thead><tr><th>DATE</th><th>NAME</th><th>CATEGORY</th><th>VALUE</th><th>NOTES</th><th>ACTIONS</th></tr></thead>
             <tbody id="assets-tb">
               ${assets.length===0
-                ? `<tr class="empty-row"><td colspan="6">No fixed assets added yet.</td></tr>`
+                ? `<tr class="empty-row"><td colspan="6">${emptyState('bed', 'No assets recorded', 'Beds, geysers, furniture — anything the PG owns.', '<button class="btn btn-primary btn-sm" onclick="fixedAssetModal()">Add asset</button>')}</td></tr>`
                 : assets.map(a=>`<tr data-search="${a.name.toLowerCase()} ${a.category.toLowerCase()} ${(a.notes||'').toLowerCase()}">
                   <td>${fmtDate(a.purchase_date)}</td>
                   <td><strong>${a.name}</strong></td>
@@ -2699,7 +2699,7 @@ async function pgBalanceSheet(asOf) {
             <thead><tr><th>DATE</th><th>AMOUNT</th><th>NOTE</th><th>BY</th><th>ACTIONS</th></tr></thead>
             <tbody id="capital-tb">
               ${capital.length===0
-                ? `<tr class="empty-row"><td colspan="5">No capital transactions yet.</td></tr>`
+                ? `<tr class="empty-row"><td colspan="5">${emptyState('wallet', 'No capital recorded', 'Money the owner has put in or taken out.', '<button class="btn btn-primary btn-sm" onclick="capitalModal()">Add transaction</button>')}</td></tr>`
                 : capital.map(c=>`<tr data-search="${(c.note||'').toLowerCase()} ${(c.username||'').toLowerCase()}">
                   <td>${fmtDate(c.transaction_date)}</td>
                   <td class="fw-600 ${parseFloat(c.amount)<0?'text-red':'text-green'}">${fmt(c.amount)}</td>
@@ -3001,7 +3001,7 @@ async function renderAdminAuditTab() {
             <thead><tr><th>WHEN</th><th>USER</th><th>ACTION</th><th>DETAILS</th></tr></thead>
             <tbody id="audit-tb">
               ${log.length===0
-                ? `<tr class="empty-row"><td colspan="4">No activity recorded yet.</td></tr>`
+                ? `<tr class="empty-row"><td colspan="4">${emptyState('calendar', 'No activity yet', 'Actions taken in the app will be listed here.', '')}</td></tr>`
                 : log.map(a=>`<tr data-search="${(a.username||'').toLowerCase()} ${a.action.toLowerCase()} ${(a.details||'').toLowerCase()}">
                   <td style="white-space:nowrap">${new Date(a.created_at).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}</td>
                   <td>${a.username||'—'}</td>
@@ -3031,7 +3031,7 @@ async function renderAdminRefundsTab() {
             <thead><tr><th>DATE</th><th>GUEST</th><th>ROOM</th><th>DEPOSIT</th><th>DEDUCTIONS</th><th>REFUNDED</th><th>MODE</th><th>BY</th><th>ACTIONS</th></tr></thead>
             <tbody id="refunds-tb">
               ${refunds.length===0
-                ? `<tr class="empty-row"><td colspan="9">No checkouts processed yet.</td></tr>`
+                ? `<tr class="empty-row"><td colspan="9">${emptyState('logout', 'No checkouts yet', 'Deposit refunds appear here once a resident checks out.', '')}</td></tr>`
                 : refunds.map(r=>`<tr data-search="${r.guest_name.toLowerCase()} ${(r.room_number||'').toLowerCase()}">
                   <td>${fmtDate(r.created_at)}</td>
                   <td><strong>${r.guest_name}</strong></td>
@@ -3151,9 +3151,10 @@ function skeleton(kind) {
   setContent(kind === 'lines' ? lines : cards);
 }
 
-function emptyState(icon, title, text, actionHtml) {
+function emptyState(name, title, text, actionHtml) {
+  const glyph = /^[a-z-]+$/.test(name) ? icon(name, 'ic ic-lg') : name;
   return `<div class="sm-empty-state">
-    <span class="sm-empty-icon">${icon}</span>
+    <span class="sm-empty-icon">${glyph}</span>
     <h4>${title}</h4>
     <p>${text || ''}</p>
     ${actionHtml || ''}
@@ -4028,7 +4029,7 @@ const NAV_GROUPS = {
   finance: { label: 'Finance', tabs: [
     { page: 'collect', label: 'Collect' }, { page: 'rent-due', label: 'Rent Due' }, { page: 'payments', label: 'Payments' },
     { page: 'reminders', label: 'Reminders' }, { page: 'purchases', label: 'Expenses' }, { page: 'collections', label: 'Collections' },
-    { page: 'reports', label: 'Reports' }, { page: 'balance-sheet', label: 'Balance Sheet', admin: true } ] },
+    { page: 'reports', label: 'Reports' }, { page: 'balance-sheet', label: 'Owner & Assets', admin: true } ] },
   operations: { label: 'Operations', tabs: [
     { page: 'daily-checklist', label: 'Checklist' }, { page: 'complaints', label: 'Requests' },
     { page: 'daily-menu', label: 'Menu' }, { page: 'guest-messages', label: 'Announcements' } ] }
