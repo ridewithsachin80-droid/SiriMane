@@ -4555,7 +4555,7 @@ async function pgRoomMap() {
     ${(m.totals.overCapacity || m.totals.noRoom || m.totals.bedFixes) ? `<div class="alert alert-warning" style="display:block;margin-bottom:14px">
       ${m.totals.overCapacity ? `<div>${m.totals.overCapacity} resident${m.totals.overCapacity === 1 ? ' is' : 's are'} beyond the beds their room has.</div>` : ''}
       ${m.totals.noRoom ? `<div>${m.totals.noRoom} resident${m.totals.noRoom === 1 ? ' has' : 's have'} no room assigned.</div>` : ''}
-      ${m.totals.bedFixes ? `<div>${m.totals.bedFixes} bed number${m.totals.bedFixes === 1 ? ' needs' : 's need'} correcting — they have a bed, but the number recorded is wrong or duplicated.</div>` : ''}
+      ${m.totals.bedFixes ? `<div>${m.totals.bedFixes} bed number${m.totals.bedFixes === 1 ? ' needs' : 's need'} correcting across ${m.floors.flatMap(f => f.rooms).filter(r => r.bed_fix_count).length} room${m.floors.flatMap(f => f.rooms).filter(r => r.bed_fix_count).length === 1 ? '' : 's'} (marked ⚑) — they have a bed, but the number recorded is wrong or duplicated.</div>` : ''}
       ${(m.totals.noRoom || m.totals.bedFixes) ? `<button class="btn btn-outline btn-sm" style="margin-top:8px" onclick="pgGuests('all')">Show residents</button>` : ''}
     </div>` : ''}
     <div class="flex gap-2 mb-5" style="flex-wrap:wrap">
@@ -4570,7 +4570,7 @@ async function pgRoomMap() {
           <button class="room-tile ${r.status !== 'active' ? 'is-' + r.status : ''}" onclick="roomSheet(${r.id})">
             <div class="rt-head"><strong>${r.room_number}</strong>${r.high_issues ? `<span class="badge badge-red">${r.high_issues}!</span>` : r.open_issues ? `<span class="badge badge-amber">${r.open_issues}</span>` : ''}</div>
             <div class="rt-beds">${r.beds.map(b => `<i class="bed ${b.state}" title="${b.resident ? b.resident.name : b.state}"></i>`).join('')}${r.over_capacity ? `<i class="bed over" title="${r.over.map(o => o.name).join(', ')}"></i>`.repeat(r.over_capacity) : ''}</div>
-            <div class="rt-sub">${r.occupied}/${r.total_beds}${r.over_capacity ? ' <span class="text-red">+' + r.over_capacity + '</span>' : ''}${r.bed_fix_count ? ' <span class="text-amber" title="Bed number needs correcting">⚑</span>' : ''} · ${fmt(r.monthly_rent)}</div>
+            <div class="rt-sub">${r.occupied}/${r.total_beds}${r.over_capacity ? ' <span class="text-red">+' + r.over_capacity + '</span>' : ''}${r.bed_fix_count ? ` <span class="text-amber" title="${r.bed_fix_count} bed number${r.bed_fix_count === 1 ? '' : 's'} to correct: ${(r.bed_fixes || []).map(f => f.name).join(', ')}">⚑${r.bed_fix_count > 1 ? r.bed_fix_count : ''}</span>` : ''} · ${fmt(r.monthly_rent)}</div>
           </button>`).join('')}
       </div>`).join('')}
   `);

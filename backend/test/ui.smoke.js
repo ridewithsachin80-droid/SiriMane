@@ -811,6 +811,13 @@ async function runAtWidth(browser, BASE, width) {
     if (row) eq(t.occupied, Number(row.occupied_beds), `${tag} MAP: room ${t.room_number} matches the table (${t.occupied} vs ${row.occupied_beds})`);
   }
   eq(await page.$$eval('.room-tile .bed.occupied, .room-tile .bed.over', els => els.length), mapApi.totals.occupied, `${tag} MAP: filled dots match the API's headcount`);
+  // The banner counts residents; the tile marks rooms. When one room holds
+  // two of them the two numbers differ, so the tile must say how many.
+  const flagged = mapApi.floors.flatMap(f => f.rooms).filter(r => r.bed_fix_count);
+  if (flagged.some(r => r.bed_fix_count > 1)) {
+    const marks = await page.$$eval('.rt-sub .text-amber', els => els.map(e => e.textContent.trim()));
+    ok(marks.some(m => /⚑\d/.test(m)), `${tag} a room with more than one wrong bed number shows the count (${marks.join(' ')})`);
+  }
   const mapHead = await page.$eval('#page-content .page-header p', e => e.textContent);
   ok(mapHead.includes(String(mapApi.totals.residents)), `${tag} MAP: the header states the true resident count`);
   await page.screenshot({ path: path.join(SHOTS, `room-map-${width}.png`) });
