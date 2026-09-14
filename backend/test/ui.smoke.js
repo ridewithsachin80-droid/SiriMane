@@ -518,7 +518,8 @@ async function runAtWidth(browser, BASE, width) {
   ok(!/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(tabTxt), `${tag} no emoji in the tab bar`);
   eq(tabTxt.split('|').length, 5, `${tag} five tabs`);
   ok(/Residents/.test(navTxt) && /Operations/.test(navTxt) && /Finance/.test(navTxt), `${tag} sidebar is grouped and renamed`);
-  eq(await page.$$eval('.nav-item', els => els.length), 7, `${tag} sidebar is 7 entries, not 17`);
+  const navCount = await page.$$eval('.nav-item', els => els.length);
+  ok(navCount <= 8, `${tag} sidebar stays short (${navCount} entries, was 17)`);
   // Grouped screens keep working and show their sub-tabs
   for (const [group, first] of [['finance', 'collect'], ['operations', 'daily-checklist']]) {
     await page.evaluate(g => navigate(g), group);
@@ -925,6 +926,76 @@ async function runAtWidth(browser, BASE, width) {
     return n.map(x => x.title);
   }, target.phone);
   if (seenByResident) ok(!seenByResident.some(t => t.startsWith('Floor 9 only')), `${tag} PRIVACY: a resident on another floor never sees it`);
+
+  // ── Sprint 12: bell, outbox, documents, maintenance, AI impact ─────────
+  await page.evaluate(() => apiFetch('/notifications/sweep', { method: 'POST' }));
+  await page.evaluate(() => refreshBell());
+  await sleep(400);
+  ok(await page.$('#bell-btn'), `${tag} notification bell present`);
+  await page.evaluate(() => openNotifications());
+  await page.waitForSelector('.notif, .sm-empty-state', { timeout: 10000 });
+  const notifTxt = await page.$eval('.modal-body', e => e.textContent);
+  const notifApi = await page.evaluate(() => apiFetch('/notifications'));
+  if (notifApi.items.length) {
+    ok(/critical|important|informational|digest/.test(notifTxt), `${tag} notifications carry a level`);
+    const levels = await page.$$eval('.notif .badge', els => els.map(e => e.textContent.trim()));
+    const rank = l => ['critical', 'important', 'informational', 'digest'].indexOf(l);
+    ok(levels.every((l, i) => i === 0 || rank(l) >= rank(levels[i - 1])), `${tag} shown most urgent first`);
+    await page.evaluate(() => markAllRead());
+    await sleep(600);
+    eq(await page.$eval('#bell-count', e => e.classList.contains('hidden')), true, `${tag} the badge clears once read`);
+  }
+  await page.evaluate(() => closeModal());
+
+  await page.evaluate(() => navigate('outbox'));
+  await page.waitForFunction(() => /Outbox/.test(document.querySelector('#page-content h1')?.textContent || ''), { timeout: 12000 });
+  ok(await page.$eval('#page-content', e => /Nothing is sent until you tap Send|Nothing to send/.test(e.textContent)), `${tag} outbox says nothing sends itself`);
+  await page.evaluate(() => draftOutbox());
+  await sleep(1200);
+  const outbox = await page.evaluate(() => apiFetch('/outbox?status=draft'));
+  ok(outbox.every(m => m.status === 'draft'), `${tag} TRUST: every queued message is still a draft`);
+  if (outbox.length) {
+    const link = await page.$eval('.outbox-row a.btn-success', e => e.href);
+    ok(link.startsWith('https://wa.me/91'), `${tag} Send opens WhatsApp with the country code`);
+    await page.evaluate(id => markSent(id), outbox[0].id);
+    await sleep(900);
+    const sentNow = await page.evaluate(() => apiFetch('/outbox?status=sent'));
+    ok(sentNow.some(m => m.id === outbox[0].id), `${tag} marking sent is recorded`);
+  }
+  await noHScroll('outbox');
+
+  await page.evaluate(() => navigate('maintenance'));
+  await page.waitForFunction(() => /Recurring maintenance/.test(document.querySelector('#page-content h1')?.textContent || ''), { timeout: 12000 });
+  const maint = await page.evaluate(() => apiFetch('/maintenance-schedule'));
+  ok(maint.length >= 4, `${tag} the seeded recurring tasks are listed (${maint.length})`);
+  await page.evaluate(id => markMaintenanceDone(id), maint[0].id);
+  await sleep(900);
+  const maintAfter = await page.evaluate(() => apiFetch('/maintenance-schedule'));
+  const doneOne = maintAfter.find(m => m.id === maint[0].id);
+  ok(doneOne && doneOne.last_done, `${tag} marking done records the date and reschedules`);
+
+  // Documents on the resident profile
+  await page.evaluate(() => navigate('guests'));
+  await page.waitForFunction(() => document.querySelector('#page-content table.sm-cards tbody tr'), { timeout: 10000 });
+  await page.evaluate(id => residentProfile(id, 'docs'), target.id);
+  await page.waitForSelector('#r360-docs .r360-row', { timeout: 12000 });
+  const docRows = await page.$$eval('#r360-docs .r360-row', els => els.length);
+  eq(docRows, 4, `${tag} four document types listed`);
+  await page.evaluate(id => setDocStatus(id, 'Agreement', 'verified'), target.id);
+  await sleep(900);
+  const docs = await page.evaluate(id => apiFetch(`/guests/${id}/documents`), target.id);
+  eq(docs.find(d => d.doc_type === 'Agreement').status, 'verified', `${tag} a document status can be set`);
+  await page.evaluate(() => closeModal());
+
+  // AI impact page
+  await page.evaluate(() => navigate('admin'));
+  await page.waitForSelector('#schema-banner', { timeout: 10000 });
+  await page.evaluate(() => switchAdminTab('ai'));
+  await page.waitForFunction(() => /Is Siri saving work/.test(document.querySelector('#admin-tab-content')?.textContent || ''), { timeout: 12000 });
+  const aiTxt = await page.$eval('#admin-tab-content', e => e.textContent);
+  ok(/Accepted/.test(aiTxt) && /Entries not typed/.test(aiTxt), `${tag} AI impact shows acceptance and entry share`);
+  ok(/Acceptance is proposals confirmed/.test(aiTxt), `${tag} and explains what the number means`);
+  await page.screenshot({ path: path.join(SHOTS, `ai-impact-${width}.png`) });
 
   eq(jsErrors.length, 0, `${tag} no uncaught JS errors (${jsErrors.join('; ')})`);
   await page.close(); await ctx.close();

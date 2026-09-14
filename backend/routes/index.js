@@ -1896,12 +1896,15 @@ router.get('/guests/:id/timeline', auth, async (req, res) => {
       ...reqs.rows.map(c => ({ at: c.at, kind: 'request', title: `${c.category} request`, detail: `${c.description.slice(0, 80)} · ${c.status}${c.priority ? ' · ' + c.priority : ''}`, id: c.id })),
       ...refunds.rows.map(r => ({ at: r.at, kind: 'refund', title: `Deposit refunded ${fmtMoney(r.refund_amount)}`, detail: `Held ${fmtMoney(r.deposit_amount)}${parseFloat(r.deductions) ? ' · deductions ' + fmtMoney(r.deductions) : ''}` })),
       ...(guest.leave_date ? [{ at: guest.leave_date, kind: 'left', title: 'Checked out', detail: '' }] : [])
-    ].filter(x => x.at);
+    ].filter(x => x.at)
+     // pg returns DATE columns as Date objects and some as strings; normalise
+     // once so the sort compares like with like.
+     .map(x => ({ ...x, at: (x.at instanceof Date ? x.at.toISOString() : String(x.at)).slice(0, 10) }));
     // Newest first. On the same date, "Moved in" is always the first thing
     // that happened and "Checked out" the last, so they bracket the day.
     const rank = { left: 0, payment: 1, request: 2, move: 3, rent: 4, refund: 5, joined: 9 };
     items.sort((a, b) =>
-      String(b.at).slice(0, 10).localeCompare(String(a.at).slice(0, 10))
+      b.at.localeCompare(a.at)
       || (rank[a.kind] ?? 6) - (rank[b.kind] ?? 6)
       || (b.id || 0) - (a.id || 0));
     res.json({ resident: guest, items });

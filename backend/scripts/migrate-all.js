@@ -29,7 +29,8 @@ const ORDER = [
   'migrate-resident-360.js',    // Sprint 8: expected_checkout, resident_no, emergency contact name
   'migrate-rooms-requests.js',  // Sprint 9: room status, request SLA/assignment/comments/photos, staff tasks
   'migrate-finance-intel.js',   // Sprint 10: day_closings, collection_variances
-  'migrate-resident-experience.js' // Sprint 11: meal ratings, visitors, targeted notices, satisfaction
+  'migrate-resident-experience.js', // Sprint 11: meal ratings, visitors, targeted notices, satisfaction
+  'migrate-notify-docs.js'      // Sprint 12: notifications, outbox, documents, maintenance schedule
 ];
 
 let failed = false;

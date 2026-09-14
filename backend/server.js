@@ -58,6 +58,7 @@ app.use('/api/copilot', require('./routes/copilot'));
 app.use('/api', require('./routes/home'));
 app.use('/api', require('./routes/finance'));
 app.use('/api', require('./routes/experience'));
+app.use('/api', require('./routes/notify'));
 
 // Any /api path that no route claimed answers with JSON — never the landing
 // page. (Before this, a missing route returned home.html and the app showed
@@ -106,6 +107,7 @@ if (require.main === module) {
   require('./services/assistant').startScheduler();
   require('./services/owner').startScheduler();
   require('./services/copilot').startEveningScheduler();
+  require('./services/notify').startScheduler();
   schemaCheck.checkSchema().then(schemaCheck.logResult).catch(e => console.error('schema check failed:', e.message));
   setInterval(() => schemaCheck.checkSchema().catch(() => {}), 10 * 60 * 1000).unref();
 }

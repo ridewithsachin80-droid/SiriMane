@@ -52,7 +52,7 @@ let currentPage = null;
 function navigate(page) {
   currentPage = page;
   document.querySelectorAll('.nav-item[data-page]').forEach(b => b.classList.toggle('active', b.dataset.page===page));
-  const titles = { dashboard:'Home', rooms:'Rooms', guests:'Residents', 'daily-menu':'Daily Menu', 'daily-checklist':'Daily Checklist', complaints:'Maintenance & Requests', payments:'Payments', 'guest-messages':'Announcements', inbox:'Inbox', purchases:'Purchases', collections:'Collections', 'rent-due':'Rent Due', reports:'Reports', 'balance-sheet':'Owner & Assets', admin:'Admin', collect:'Collect Rent', reminders:'Rent Reminders', finance:'Finance', operations:'Operations', 'finance-overview':'Finance', visitors:'Visitors', feedback:'Feedback' };
+  const titles = { dashboard:'Home', rooms:'Rooms', guests:'Residents', 'daily-menu':'Daily Menu', 'daily-checklist':'Daily Checklist', complaints:'Maintenance & Requests', payments:'Payments', 'guest-messages':'Announcements', inbox:'Inbox', purchases:'Purchases', collections:'Collections', 'rent-due':'Rent Due', reports:'Reports', 'balance-sheet':'Owner & Assets', admin:'Admin', collect:'Collect Rent', reminders:'Rent Reminders', finance:'Finance', operations:'Operations', 'finance-overview':'Finance', visitors:'Visitors', feedback:'Feedback', outbox:'Outbox', maintenance:'Recurring maintenance' };
   document.getElementById('page-title').textContent = titles[page]||page;
   document.getElementById('topbar-actions').innerHTML = '';
   document.getElementById('sidebar').classList.remove('open');
@@ -70,7 +70,7 @@ function navigate(page) {
     const cQ = document.getElementById('copilot-q');
     if (cQ) cQ.value = '';
   }
-  const pages = { dashboard:pgHome, rooms:pgRoomMap, 'rooms-table':pgRooms, guests:pgGuests, 'daily-menu':pgMenu, 'daily-checklist':pgChecklist, complaints:pgComplaints, payments:pgPayments, 'guest-messages':pgAnnouncements, inbox:pgInbox, purchases:pgPurchases, collections:pgCollections, 'rent-due':pgRentDue, reports:pgReports, 'balance-sheet':pgBalanceSheet, admin:pgAdmin, collect:pgCollect, reminders:pgReminders, finance:pgFinance, operations:pgOperations, 'finance-overview':pgFinanceOverview, visitors:pgVisitors, feedback:pgFeedback };
+  const pages = { dashboard:pgHome, rooms:pgRoomMap, 'rooms-table':pgRooms, guests:pgGuests, 'daily-menu':pgMenu, 'daily-checklist':pgChecklist, complaints:pgComplaints, payments:pgPayments, 'guest-messages':pgAnnouncements, inbox:pgInbox, purchases:pgPurchases, collections:pgCollections, 'rent-due':pgRentDue, reports:pgReports, 'balance-sheet':pgBalanceSheet, admin:pgAdmin, collect:pgCollect, reminders:pgReminders, finance:pgFinance, operations:pgOperations, 'finance-overview':pgFinanceOverview, visitors:pgVisitors, feedback:pgFeedback, outbox:pgOutbox, maintenance:pgMaintenance };
   if(!pages[page]) return;
   // Error boundary: a thrown error inside any screen shows a retry card
   // instead of a blank page.
@@ -2853,9 +2853,11 @@ function renderAdminPage() {
       <button class="btn ${adminActiveTab==='refunds'?'btn-primary':'btn-outline'} btn-sm" onclick="switchAdminTab('refunds')">Deposit Refunds</button>
       <button class="btn ${adminActiveTab==='settings'?'btn-primary':'btn-outline'} btn-sm" onclick="switchAdminTab('settings')">Settings</button>
       <button class="btn ${adminActiveTab==='copilot'?'btn-primary':'btn-outline'} btn-sm" onclick="switchAdminTab('copilot')">Copilot log</button>
+      <button class="btn ${adminActiveTab==='ai'?'btn-primary':'btn-outline'} btn-sm" onclick="switchAdminTab('ai')">AI impact</button>
     </div>
     <div id="admin-tab-content"><div class="loading-center"><div class="spinner"></div></div></div>`);
-  if (adminActiveTab === 'copilot') renderAdminCopilotTab();
+  if (adminActiveTab === 'ai') renderAdminAiTab();
+  else if (adminActiveTab === 'copilot') renderAdminCopilotTab();
   else if (adminActiveTab === 'staff') renderAdminStaffTab();
   else if (adminActiveTab === 'audit') renderAdminAuditTab();
   else if (adminActiveTab === 'refunds') renderAdminRefundsTab();
@@ -3084,7 +3086,7 @@ const SM_PHONE = () => window.matchMedia('(max-width: 640px)').matches;
 // One entry point for all the phone chrome added in Sprint 1. Safe to call
 // twice — every piece checks whether it already exists.
 function initPhoneChrome() {
-  try { initTabBar(); initTopbarMore(); initMobileCards(); initCopilotBar(); initTopbarTools(); } catch (e) { console.error(e); }
+  try { initTabBar(); initTopbarMore(); initMobileCards(); initCopilotBar(); initTopbarTools(); initBell(); } catch (e) { console.error(e); }
   loadIconSprite();
   loadAiStatus();
 }
@@ -4055,7 +4057,7 @@ const NAV_GROUPS = {
   operations: { label: 'Operations', tabs: [
     { page: 'daily-checklist', label: 'Checklist' }, { page: 'complaints', label: 'Requests' },
     { page: 'daily-menu', label: 'Menu' }, { page: 'guest-messages', label: 'Announcements' },
-    { page: 'visitors', label: 'Visitors' }, { page: 'feedback', label: 'Feedback' } ] }
+    { page: 'visitors', label: 'Visitors' }, { page: 'feedback', label: 'Feedback' }, { page: 'maintenance', label: 'Recurring' } ] }
 };
 const PAGE_GROUP = {};
 for (const [g, def] of Object.entries(NAV_GROUPS)) for (const t of def.tabs) PAGE_GROUP[t.page] = g;
@@ -4314,6 +4316,7 @@ function renderResident360() {
         : emptyState('wrench', 'No requests', 'Anything she reports will be listed here.', '');
     },
     docs: () => `${kv([['ID proof', g.id_proof_type], ['ID number', g.id_proof_number ? g.id_proof_number.replace(/.(?=.{4})/g, '•') : null], ['Address on file', g.address]])}
+      <div class="r360-h">Paperwork</div><div id="r360-docs"><div class="sm-skel"><div class="sm-skel-line"></div></div></div>
       <p class="text-muted" style="font-size:12px;margin-top:10px">ID photos are never stored — only the fields read from them.</p>
       ${!g.id_proof_type ? `<button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="guestModal(${g.id})">Add ID proof</button>` : ''}`
   };
@@ -4323,6 +4326,7 @@ function renderResident360() {
       <div class="subtabs">${R360_TABS.map(t => `<button class="subtab ${t.id === r360.tab ? 'active' : ''}" onclick="r360.tab='${t.id}';renderResident360()">${t.label}</button>`).join('')}</div>
       <div id="r360-body">${body[r360.tab]()}</div>
     </div></div>`);
+  if (r360.tab === 'docs') loadResidentDocs(g.id);
 }
 
 // ── Move-in wizard ──────────────────────────────────────────────
@@ -4922,4 +4926,180 @@ async function pgFeedback() {
       <p class="t-sub" style="padding:8px 0">${exp.note}</p>
     </div></div>` : ''}
   `);
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   SPRINT 12 — one bell, one outbox, documents, recurring tasks,
+   and a page that says whether Siri is earning her keep.
+   ═══════════════════════════════════════════════════════════════ */
+
+// ── Notification bell ───────────────────────────────────────────
+function initBell() {
+  const right = document.getElementById('topbar-right');
+  if (!right || document.getElementById('bell-btn')) return;
+  const b = document.createElement('button');
+  b.id = 'bell-btn';
+  b.className = 'bell-btn';
+  b.setAttribute('aria-label', 'Notifications');
+  b.innerHTML = `${icon('flag', 'ic ic-lg')}<span id="bell-count" class="bell-count hidden"></span>`;
+  b.onclick = openNotifications;
+  right.insertBefore(b, right.firstChild);
+  refreshBell();
+  // Every ten minutes is enough; the server sweeps hourly.
+  setInterval(refreshBell, 10 * 60 * 1000);
+}
+async function refreshBell() {
+  try {
+    const d = await apiFetch('/notifications?unread=1');
+    const el = document.getElementById('bell-count');
+    if (!el) return;
+    el.textContent = d.unread > 9 ? '9+' : String(d.unread);
+    el.classList.toggle('hidden', !d.unread);
+  } catch { /* the bell is never the reason a screen fails */ }
+}
+async function openNotifications() {
+  openModal(`<div class="modal modal-lg"><div class="modal-header"><h3>Notifications</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+    <div class="modal-body"><div class="sm-skel"><div class="sm-skel-line"></div><div class="sm-skel-line"></div></div></div></div>`);
+  try {
+    const d = await apiFetch('/notifications');
+    const badge = { critical: 'badge-red', important: 'badge-amber', informational: 'badge-blue', digest: 'badge-gray' };
+    openModal(`<div class="modal modal-lg">
+      <div class="modal-header"><h3>Notifications${d.unread ? ` · ${d.unread} new` : ''}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+      <div class="modal-body">
+        ${d.items.length ? `<div class="flex gap-2" style="margin-bottom:10px"><button class="btn btn-outline btn-sm" onclick="markAllRead()">Mark all read</button>
+          <button class="btn btn-outline btn-sm" onclick="sweepNotifications()">Check now</button></div>` : ''}
+        ${d.items.length ? d.items.map(n => `
+          <div class="notif ${n.read_at ? 'is-read' : ''}">
+            <div class="flex" style="justify-content:space-between;gap:8px;align-items:flex-start">
+              <span><span class="badge ${badge[n.level]}">${n.level}</span> <strong>${n.title}</strong>
+                ${n.detail ? `<div class="t-sub">${n.detail}</div>` : ''}
+                <div class="t-sub">${fmtDate(n.created_at)}</div></span>
+              <span class="flex gap-2">
+                ${n.action_page ? `<button class="btn btn-outline btn-sm" onclick="closeModal();navigate('${n.action_page}')">Open</button>` : ''}
+                ${!n.read_at ? `<button class="btn btn-outline btn-sm" onclick="readNotification(${n.id})">✓</button>` : ''}
+              </span>
+            </div>
+          </div>`).join('') : emptyState('flag', 'Nothing needs your attention', 'Alerts about money, requests and documents appear here.', '')}
+      </div></div>`);
+  } catch (e) { toast(e.message); closeModal(); }
+}
+async function readNotification(id) { try { await apiFetch(`/notifications/${id}/read`, { method: 'POST' }); refreshBell(); openNotifications(); } catch (e) { toast(e.message); } }
+async function markAllRead() { try { await apiFetch('/notifications/read-all', { method: 'POST' }); refreshBell(); openNotifications(); } catch (e) { toast(e.message); } }
+async function sweepNotifications() { try { const r = await apiFetch('/notifications/sweep', { method: 'POST' }); toast(r.created ? `${r.created} new` : 'Nothing new', 'ok'); refreshBell(); openNotifications(); } catch (e) { toast(e.message); } }
+
+// ── Outbox ──────────────────────────────────────────────────────
+async function pgOutbox() {
+  skeleton('cards');
+  document.getElementById('topbar-actions').innerHTML = `<button class="btn btn-outline btn-sm" onclick="draftOutbox()">Draft due messages</button>`;
+  const [drafts, sent] = await Promise.all([apiFetch('/outbox?status=draft'), apiFetch('/outbox?status=sent')]);
+  const kindLabel = { rent_due: 'Rent due', rent_overdue: 'Rent overdue', payment_confirmed: 'Payment received', request_updated: 'Request update', welcome: 'Welcome', checkout_reminder: 'Checkout' };
+  setContent(`
+    <div class="page-header"><h1>Outbox</h1><p>Messages Siri has drafted. Nothing is sent until you tap Send.</p></div>
+    ${drafts.length ? `<div class="card"><div style="padding:4px 16px">
+      ${drafts.map(m => `<div class="outbox-row">
+        <div><strong>${m.guest_name}</strong> <span class="badge badge-gray">${kindLabel[m.kind] || m.kind}</span>
+          <div class="outbox-body">${m.body}</div></div>
+        <div class="flex gap-2">
+          <a class="btn btn-success btn-sm" target="_blank" rel="noopener" href="${m.wa_link}" onclick="markSent(${m.id})">${icon('whatsapp')} Send</a>
+          <button class="btn btn-outline btn-sm" onclick="skipMessage(${m.id})">Skip</button>
+        </div></div>`).join('')}
+    </div></div>` : emptyState('whatsapp', 'Nothing to send', 'Reminders are drafted at the start of the month and again on the 7th.', `<button class="btn btn-primary btn-sm" onclick="draftOutbox()">Draft now</button>`)}
+    ${sent.length ? `<div class="home-section-h">Sent</div><div class="card"><div style="padding:4px 16px">
+      ${sent.slice(0, 20).map(m => `<div class="today-row">${icon('whatsapp')}<span class="t-main">${m.guest_name} · ${kindLabel[m.kind] || m.kind}
+        <div class="t-sub">${fmtDate(m.sent_at)} by ${m.sent_by_username || '—'}</div></span></div>`).join('')}
+    </div></div>` : ''}
+  `);
+}
+async function draftOutbox() { try { const r = await apiFetch('/outbox/draft', { method: 'POST' }); toast(r.drafted ? `${r.drafted} drafted` : 'Nothing due right now', 'ok'); pgOutbox(); } catch (e) { toast(e.message); } }
+async function markSent(id) { try { await apiFetch(`/outbox/${id}/sent`, { method: 'POST' }); setTimeout(pgOutbox, 600); } catch (e) { toast(e.message); } }
+async function skipMessage(id) { try { await apiFetch(`/outbox/${id}/skip`, { method: 'POST' }); pgOutbox(); } catch (e) { toast(e.message); } }
+
+// ── Recurring maintenance ───────────────────────────────────────
+async function pgMaintenance() {
+  skeleton('cards');
+  document.getElementById('topbar-actions').innerHTML = isAdmin() ? `<button class="btn btn-primary btn-sm" onclick="maintenanceModal()">${icon('plus')} Add task</button>` : '';
+  const list = await apiFetch('/maintenance-schedule');
+  setContent(`
+    <div class="page-header"><h1>Recurring maintenance</h1><p>Things that need doing every few months</p></div>
+    ${list.length ? `<div class="card"><div style="padding:4px 16px">
+      ${list.map(m => `<div class="today-row">${icon(m.due_now ? 'flag' : 'calendar')}
+        <span class="t-main"><strong>${m.task}</strong>${m.vendor ? ` · ${m.vendor}` : ''}
+          <div class="t-sub">Every ${m.every_days} days · ${m.last_done ? `last done ${fmtDate(m.last_done)} · ` : ''}next ${fmtDate(m.next_due)}</div></span>
+        ${m.due_now ? '<span class="badge badge-amber">due</span>' : ''}
+        <button class="btn btn-outline btn-sm" onclick="markMaintenanceDone(${m.id})">Done today</button>
+        ${isAdmin() ? `<button class="btn btn-outline btn-sm" onclick="removeMaintenance(${m.id})">✕</button>` : ''}</div>`).join('')}
+    </div></div>` : emptyState('calendar', 'No recurring tasks', 'Water tank cleaning, pest control, RO service…', isAdmin() ? `<button class="btn btn-primary btn-sm" onclick="maintenanceModal()">Add one</button>` : '')}
+  `);
+}
+function maintenanceModal() {
+  openModal(`<div class="modal"><div class="modal-header"><h3>Recurring task</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+    <div class="modal-body">
+      <div class="form-group"><label>What needs doing *</label><input id="mt-task" placeholder="e.g. Water tank cleaning"/></div>
+      <div class="form-row">
+        <div class="form-group"><label>Who does it</label><input id="mt-vendor" placeholder="Vendor or person"/></div>
+        <div class="form-group"><label>Every (days)</label><input id="mt-days" type="number" value="90"/></div>
+      </div>
+      <div class="form-group"><label>Last done</label><input id="mt-last" type="date"/></div>
+      <div id="mt-alert" class="alert alert-danger hidden"></div>
+      <button class="btn btn-primary" style="width:100%" onclick="saveMaintenance()">Add</button>
+    </div></div>`);
+}
+async function saveMaintenance() {
+  const al = document.getElementById('mt-alert');
+  try {
+    await apiFetch('/maintenance-schedule', { method: 'POST', body: {
+      task: document.getElementById('mt-task').value.trim(), vendor: document.getElementById('mt-vendor').value.trim(),
+      every_days: document.getElementById('mt-days').value, last_done: document.getElementById('mt-last').value || null } });
+    closeModal(); pgMaintenance();
+  } catch (e) { showAlert(al, e.message); }
+}
+async function markMaintenanceDone(id) { try { await apiFetch(`/maintenance-schedule/${id}/done`, { method: 'POST', body: { date: nowDate() } }); toast('Recorded', 'ok'); pgMaintenance(); } catch (e) { toast(e.message); } }
+async function removeMaintenance(id) { if (!confirm('Remove this recurring task?')) return; try { await apiFetch(`/maintenance-schedule/${id}`, { method: 'DELETE' }); pgMaintenance(); } catch (e) { toast(e.message); } }
+
+// ── Documents (Resident 360 → Documents) ────────────────────────
+async function loadResidentDocs(guestId) {
+  const host = document.getElementById('r360-docs');
+  if (!host) return;
+  try {
+    const docs = await apiFetch(`/guests/${guestId}/documents`);
+    const cls = { verified: 'badge-green', pending: 'badge-amber', expired: 'badge-red' };
+    host.innerHTML = docs.map(d => `
+      <div class="r360-row"><span>${d.doc_type}${d.expires_on ? `<div class="t-sub">expires ${fmtDate(d.expires_on)}</div>` : ''}</span>
+        <span class="flex gap-2"><span class="badge ${cls[d.status]}">${d.status}</span>
+          <select onchange="setDocStatus(${guestId}, '${d.doc_type}', this.value)" style="margin:0;min-height:36px;width:auto">
+            ${['pending', 'verified', 'expired'].map(x => `<option value="${x}" ${d.status === x ? 'selected' : ''}>${x}</option>`).join('')}
+          </select></span></div>`).join('');
+  } catch (e) { host.innerHTML = `<p class="text-muted">${e.message}</p>`; }
+}
+async function setDocStatus(guestId, docType, status) {
+  try { await apiFetch(`/guests/${guestId}/documents`, { method: 'PUT', body: { doc_type: docType, status } }); loadResidentDocs(guestId); toast('Saved', 'ok'); }
+  catch (e) { toast(e.message); }
+}
+
+// ── AI metrics (Admin) ──────────────────────────────────────────
+async function renderAdminAiTab() {
+  const __seq = adminRenderSeq;
+  const host = () => adminHost(__seq);
+  try {
+    const m = await apiFetch('/ai-metrics');
+    const card = (label, value, sub) => `<div class="money-card"><div class="m-label">${label}</div><div class="m-value">${value}</div>${sub ? `<div class="t-sub">${sub}</div>` : ''}</div>`;
+    const h = host(); if (!h) return;
+    h.innerHTML = `
+      <div class="card"><div class="card-header"><h3>${icon('sparkle')} Is Siri saving work?</h3><span class="text-muted" style="font-size:12px">last ${m.days} days</span></div>
+        <div style="padding:14px 16px">
+          <div class="money-grid">
+            ${card('Questions asked', m.asks)}
+            ${card('Entries prepared', m.prepared)}
+            ${card('Accepted', m.acceptance_rate == null ? '—' : m.acceptance_rate + '%', `${m.confirmed} of ${m.proposals}`)}
+            ${card('Asked instead of guessing', m.clarification_rate == null ? '—' : m.clarification_rate + '%')}
+            ${card('Entries not typed', m.ai_entry_share + '%', 'voice, photo or Copilot')}
+            ${card('Reminders sent', m.reminders_sent)}
+          </div>
+          <div class="r360-h">Where entries came from</div>
+          ${Object.entries(m.entries_by_source).map(([kind, srcs]) => `<div class="r360-row"><span style="text-transform:capitalize">${kind}s</span>
+            <strong>${Object.entries(srcs).map(([k, v]) => `${k} ${v}`).join(' · ')}</strong></div>`).join('') || '<p class="text-muted">No entries yet.</p>'}
+          <p class="t-sub" style="margin-top:10px">${m.note}</p>
+        </div></div>`;
+  } catch (e) { const h = host(); if (h) h.innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
 }
