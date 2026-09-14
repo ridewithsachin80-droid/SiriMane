@@ -128,6 +128,8 @@ router.get('/requests', auth, async (req, res) => {
   if (req.query.assigned_to === 'me') { p.push(req.user.id); where.push(`c.assigned_to=$${p.length}`); }
   else if (req.query.assigned_to) { p.push(Number(req.query.assigned_to)); where.push(`c.assigned_to=$${p.length}`); }
   if (req.query.overdue === '1') where.push(`c.sla_due_at < NOW() AND c.status NOT IN ('resolved','closed')`);
+  // Sprint 13: filter by room, so Room 360's list and this register agree.
+  if (req.query.room) { p.push(String(req.query.room)); where.push(`c.room_number=$${p.length}`); }
   try {
     const r = await pool.query(`
       SELECT c.*, u.username AS assigned_username,
@@ -154,7 +156,10 @@ router.get('/requests/:id', auth, async (req, res) => {
       pool.query(`SELECT id, mime_type, bytes, created_at FROM request_photos WHERE complaint_id=$1 ORDER BY id`, [req.params.id])
     ]);
     if (!c.rows[0]) return res.status(404).json({ error: 'Request not found' });
-    res.json({ request: c.rows[0], comments: comments.rows, photos: photos.rows });
+    const { priorityWhy } = require('../services/assistant');
+    const w = priorityWhy(c.rows[0].category, c.rows[0].description);
+    const priority_why = c.rows[0].priority === w.priority ? w.why : `Set by hand to ${c.rows[0].priority}. The rule alone would say ${w.priority}: ${w.why}`;
+    res.json({ request: { ...c.rows[0], priority_why }, comments: comments.rows, photos: photos.rows });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -281,6 +286,92 @@ router.put('/checklist-items/:id/assign', jsonSmall, auth, requireAdmin, async (
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ═══════════════════ Sprint 13: Room 360 ═══════════════════
+// The room profile: health (explained part by part), who lives there, every
+// request ever raised for it, who has lived there, and the last inspections.
+// Health is recomputed from raw rows on every call — nothing is cached.
+const INSPECTION_CONDITIONS = ['good', 'ok', 'poor'];
+
+function roomHealth({ room, occupied, openRequests, repeats, lastInspected, today }) {
+  const parts = {};
+  const occPct = room.total_beds ? Math.round(occupied * 100 / room.total_beds) : 0;
+  parts.occupancy = { score: Math.min(100, occPct), why: `${occupied} of ${room.total_beds} bed${room.total_beds === 1 ? '' : 's'} taken (${occPct}%)` };
+  parts.requests = { score: Math.max(0, 100 - openRequests.length * 25), why: openRequests.length ? `${openRequests.length} open request${openRequests.length === 1 ? '' : 's'} — 25 points each` : 'No open requests' };
+  parts.repeats = { score: Math.max(0, 100 - repeats.length * 30), why: repeats.length ? `${repeats.map(r => `${r.category} ×${r.n}`).join(', ')} in the last 90 days — the same thing again usually means the cause is still there` : 'Nothing repeated in the last 90 days' };
+  let days = null;
+  // pg hands back a JS Date for a `date` column, and String(Date) is
+  // "Mon Sep 14 2026 …" — slicing that to 10 characters gave an Invalid Date
+  // and turned the whole score into NaN once a room had been inspected.
+  // ymd() copes with a Date, a timestamp string and a plain YYYY-MM-DD.
+  const ymd = v => v instanceof Date
+    ? new Date(v.getTime() - v.getTimezoneOffset() * 60000).toISOString().slice(0, 10)
+    : String(v).slice(0, 10);
+  if (lastInspected) {
+    const d = (new Date(today + 'T00:00:00Z') - new Date(ymd(lastInspected) + 'T00:00:00Z')) / 86400000;
+    days = Number.isFinite(d) ? Math.max(0, Math.round(d)) : null;
+  }
+  parts.inspection = days == null
+    ? { score: 40, why: 'Never inspected — recorded as 40 until the first inspection' }
+    : { score: Math.max(0, 100 - Math.max(0, days - 30) * 2), why: days <= 30 ? `Inspected ${days === 0 ? 'today' : days + ' days ago'} — within 30 days` : `Last inspected ${days} days ago — 2 points off for every day past 30` };
+  const vals = Object.values(parts);
+  const overall = Math.round(vals.reduce((t, x) => t + x.score, 0) / vals.length);
+  return { overall, components: parts, basis: 'Average of four parts, each 0–100: occupancy, open requests, repeat requests in 90 days, days since the last inspection.' };
+}
+
+router.get('/rooms/:id/360', auth, async (req, res) => {
+  const today = istToday();
+  try {
+    const room = (await pool.query(`SELECT * FROM rooms WHERE id=$1`, [req.params.id])).rows[0];
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+    const rn = String(room.room_number);
+    const [residents, requests, repeats, history, past, inspections] = await Promise.all([
+      pool.query(`SELECT id, name, bed_number, join_date, expected_checkout, monthly_rent FROM guests WHERE room_id=$1 AND is_active=true ORDER BY bed_number, name`, [room.id]),
+      pool.query(`SELECT c.id, c.category, c.description, c.status, c.priority, c.created_at, c.resolved_at, c.resolution_notes, c.guest_name, u.username AS assigned_username
+                    FROM complaints c LEFT JOIN users u ON u.id=c.assigned_to WHERE c.room_number=$1 ORDER BY c.created_at DESC`, [rn]),
+      pool.query(`SELECT category, COUNT(*)::int AS n FROM complaints WHERE room_number=$1 AND created_at >= NOW() - INTERVAL '90 days' GROUP BY category HAVING COUNT(*) >= 2 ORDER BY n DESC`, [rn]),
+      pool.query(`SELECT h.id, h.guest_id, g.name, h.from_room_number, h.to_room_number, h.to_bed_number, h.effective_from, h.note
+                    FROM guest_room_history h JOIN guests g ON g.id=h.guest_id
+                   WHERE h.to_room_id=$1 OR h.to_room_number=$2 OR h.from_room_number=$2 ORDER BY h.effective_from DESC, h.id DESC`, [room.id, rn]),
+      pool.query(`SELECT id, name, join_date, leave_date, is_active FROM guests WHERE room_id=$1 ORDER BY is_active DESC, COALESCE(leave_date, CURRENT_DATE) DESC`, [room.id]),
+      pool.query(`SELECT i.id, i.inspected_on, i.condition, i.note, u.username FROM room_inspections i LEFT JOIN users u ON u.id=i.inspected_by
+                   WHERE i.room_id=$1 ORDER BY i.inspected_on DESC, i.id DESC LIMIT 3`, [room.id]).catch(() => ({ rows: [] }))
+    ]);
+    const open = requests.rows.filter(r => !['resolved', 'closed'].includes(r.status));
+    const health = roomHealth({ room, occupied: residents.rows.length, openRequests: open, repeats: repeats.rows, lastInspected: room.last_inspected, today });
+    // History: everyone who has lived here (current and past), plus each move
+    // recorded against this room, oldest first so it reads like a timeline.
+    const lived = past.rows.map(g => ({ kind: g.is_active ? 'living' : 'lived', guest_id: g.id, name: g.name, from: g.join_date, to: g.leave_date }));
+    const moves = history.rows.map(h => ({ kind: h.to_room_number === rn || h.to_room_number == null ? 'moved_in' : 'moved_out', guest_id: h.guest_id, name: h.name, on: h.effective_from, from_room: h.from_room_number, to_room: h.to_room_number, bed: h.to_bed_number, note: h.note }));
+    res.json({
+      room: { id: room.id, room_number: room.room_number, floor: room.floor, total_beds: room.total_beds, room_type: room.room_type, monthly_rent: room.monthly_rent, status: room.status, last_inspected: room.last_inspected },
+      health,
+      residents: residents.rows,
+      maintenance: { open: open.length, total: requests.rows.length, items: requests.rows.map(r => ({ ...r, outcome: ['resolved', 'closed'].includes(r.status) ? (r.resolution_notes || r.status) : (r.assigned_username ? `with ${r.assigned_username}` : 'open') })) },
+      repeats: repeats.rows,
+      history: { lived, moves },
+      inspections: inspections.rows
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /rooms/:id/inspections { note?, condition?, date? }
+router.post('/rooms/:id/inspections', jsonSmall, auth, async (req, res) => {
+  const { note, condition, date } = req.body || {};
+  const cond = INSPECTION_CONDITIONS.includes(condition) ? condition : 'ok';
+  const when = /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? date : istToday();
+  if (note && String(note).length > 1000) return res.status(400).json({ error: 'Note is too long' });
+  try {
+    const room = (await pool.query(`SELECT id FROM rooms WHERE id=$1`, [req.params.id])).rows[0];
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+    const r = await pool.query(`INSERT INTO room_inspections(room_id, inspected_on, inspected_by, condition, note) VALUES($1,$2,$3,$4,$5) RETURNING *`,
+      [room.id, when, req.user.id, cond, (note || '').trim() || null]);
+    // Keep the map's "last inspected" in step — never let it go backwards.
+    await pool.query(`UPDATE rooms SET last_inspected = GREATEST(COALESCE(last_inspected, $2::date), $2::date) WHERE id=$1`, [room.id, when]);
+    res.status(201).json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 module.exports = router;
 module.exports.slaFrom = slaFrom;
+module.exports.roomHealth = roomHealth;
 module.exports.SLA_HOURS = SLA_HOURS;

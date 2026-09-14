@@ -39,8 +39,12 @@ function localIntent(text, user, context) {
   if (/\b(expense|purchase|bought|spent|bill)\b/i.test(t) && /\d/.test(t)) return { tool: 'prepare_expense', args: { raw: t }, via: 'local' };
   if (/^(log|report|raise|note)\b.*\b(issue|complaint|problem|leak|not working|broken)|\b(not working|leaking|broken|no water|no power)\b/i.test(t)) return { tool: 'prepare_complaint', args: { description: t }, via: 'local' };
   if (/\b(send|draft|prepare)\b.*\bremind/i.test(t) || /^remind/i.test(lower)) {
-    const m = t.match(/(\d+)\s*\+?\s*months?/i);
-    return { tool: 'prepare_reminders', args: m ? { min_months: Number(m[1]) } : {}, via: 'local' };
+    const words = { one: 1, a: 1, two: 2, three: 3, four: 4 };
+    const m = t.match(/\b(\d+|one|two|three|four)\s*\+?\s*months?/i);
+    const n = m ? (words[m[1].toLowerCase()] || Number(m[1])) : null;
+    // Sprint 13: group reminders go through the bulk preview (skips shown,
+    // cap enforced, one confirm) — the same path the sticky bar uses.
+    return { tool: 'prepare_reminders', args: n ? { min_months: n } : {}, via: 'local' };
   }
   {
     const m = t.match(/\b(?:mark|set|close|resolve|reopen|update)?\s*(?:request|complaint|issue|ticket)\s*#?\s*(\d+)\b.*?\b(resolved|done|fixed|closed|in progress|started|working|open|reopen(?:ed)?)\b/i)
@@ -266,17 +270,39 @@ async function whatChanged(f) {
 }
 
 function attentionAndRecommendations(f, user) {
-  const high = [], medium = [], low = [], recs = [];
-  if (f.complaints.urgent) { high.push(`${f.complaints.urgent} water/electrical/security request${f.complaints.urgent === 1 ? '' : 's'} open`); recs.push({ text: 'Resolve the urgent requests first', action: { label: 'Open requests', navigate: 'complaints' } }); }
-  if (f.overdue.length) { (f.overdue.some(g => g.months >= 2) ? high : medium).push(`${f.overdue.length} resident${f.overdue.length === 1 ? '' : 's'} a month or more behind (${fmt(f.overdue.reduce((t, g) => t + g.amount_due, 0))})`); recs.push({ text: `Send reminders to the ${f.overdue.length} most overdue`, action: { label: 'Draft reminders', ask: 'send reminders to residents 1+ months behind' } }); }
-  else if (f.rentDue.count) medium.push(`${fmt(f.rentDue.total)} rent outstanding from ${f.rentDue.count}`);
-  if (f.pendingClaims.n) { medium.push(`${f.pendingClaims.n} UPI payment${f.pendingClaims.n === 1 ? '' : 's'} (${fmt(f.pendingClaims.total)}) awaiting your confirmation`); if (user?.role === 'admin') recs.push({ text: 'Confirm the resident UPI claims', action: { label: 'Open payments', navigate: 'payments' } }); }
-  if (f.pendingApprovals.n && user?.role === 'admin') { low.push(`${f.pendingApprovals.n} staff entr${f.pendingApprovals.n === 1 ? 'y' : 'ies'} awaiting approval`); }
-  if (f.checklist.total && f.checklist.yesterdayDone / f.checklist.total < 0.5) { medium.push(`Checklist only ${f.checklist.yesterdayDone}/${f.checklist.total} yesterday`); recs.push({ text: "Start today's checklist early", action: { label: 'Open checklist', navigate: 'daily-checklist' } }); }
-  if (f.complaints.open && !f.complaints.urgent) low.push(`${f.complaints.open} open request${f.complaints.open === 1 ? '' : 's'}`);
-  if (f.vacantBeds >= 2) low.push(`${f.vacantBeds} beds vacant`);
-  if (!recs.length) recs.push({ text: 'Nothing urgent — a good day to fill vacant beds or clear small requests', action: { label: "Today's checklist", navigate: 'daily-checklist' } });
-  return { attention: { high, medium, low }, recommendations: recs.slice(0, 3) };
+  // Sprint 13: each line carries its own "why" — the inputs and the rule that
+  // put it there. The plain string arrays stay for the WhatsApp text and for
+  // every screen that already reads them; `items` is the explained form.
+  const items = [], recs = [];
+  const push = (level, text, why) => items.push({ level, text, why });
+  if (f.complaints.urgent) {
+    push('high', `${f.complaints.urgent} water/electrical/security request${f.complaints.urgent === 1 ? '' : 's'} open`,
+      `Rule: any open request in Water, Electrical or Security is high — they carry a 2-hour clock. Count from the register right now: ${f.complaints.urgent}.`);
+    recs.push({ text: 'Resolve the urgent requests first', action: { label: 'Open requests', navigate: 'complaints' }, why: 'Because water/electrical/security requests are open and each has a 2-hour promise.' });
+  }
+  if (f.overdue.length) {
+    const total = f.overdue.reduce((t, g) => t + g.amount_due, 0);
+    const two = f.overdue.some(g => g.months >= 2);
+    push(two ? 'high' : 'medium', `${f.overdue.length} resident${f.overdue.length === 1 ? '' : 's'} a month or more behind (${fmt(total)})`,
+      `Rule: outstanding ÷ monthly rent ≥ 1 month counts as behind; ${two ? 'someone is 2+ months behind, so this is high' : 'nobody is 2 months behind yet, so this is medium'}. ${fmt(total)} = the sum of those residents' running balances from the ledger.`);
+    recs.push({ text: `Send reminders to the ${f.overdue.length} most overdue`, action: { label: 'Draft reminders', ask: 'send reminders to residents 1+ months behind' }, why: `Because ${f.overdue.length} resident${f.overdue.length === 1 ? ' is' : 's are'} a month or more behind. Reminders are drafted, never sent automatically.` });
+  } else if (f.rentDue.count) {
+    push('medium', `${fmt(f.rentDue.total)} rent outstanding from ${f.rentDue.count}`, `Rule: rent outstanding but nobody a full month behind → medium. ${fmt(f.rentDue.total)} is the sum of every positive running balance.`);
+  }
+  if (f.pendingClaims.n) {
+    push('medium', `${f.pendingClaims.n} UPI payment${f.pendingClaims.n === 1 ? '' : 's'} (${fmt(f.pendingClaims.total)}) awaiting your confirmation`, `Rule: resident "I've paid" claims are never counted as income until an admin confirms them. ${f.pendingClaims.n} waiting now.`);
+    if (user?.role === 'admin') recs.push({ text: 'Confirm the resident UPI claims', action: { label: 'Open payments', navigate: 'payments' }, why: `Because ${fmt(f.pendingClaims.total)} is claimed but not yet income.` });
+  }
+  if (f.pendingApprovals.n && user?.role === 'admin') push('low', `${f.pendingApprovals.n} staff entr${f.pendingApprovals.n === 1 ? 'y' : 'ies'} awaiting approval`, 'Rule: staff-entered collections stay pending_approval, and out of income, until an admin approves.');
+  if (f.checklist.total && f.checklist.yesterdayDone / f.checklist.total < 0.5) {
+    push('medium', `Checklist only ${f.checklist.yesterdayDone}/${f.checklist.total} yesterday`, `Rule: under half the checklist done yesterday → medium. ${f.checklist.yesterdayDone} of ${f.checklist.total} items were ticked on ${f.checklist.yesterday}.`);
+    recs.push({ text: "Start today's checklist early", action: { label: 'Open checklist', navigate: 'daily-checklist' }, why: 'Because yesterday finished under half — tasks left undone tend to become complaints.' });
+  }
+  if (f.complaints.open && !f.complaints.urgent) push('low', `${f.complaints.open} open request${f.complaints.open === 1 ? '' : 's'}`, `Rule: open requests with none in a high category → low. ${f.complaints.open} open in the register.`);
+  if (f.vacantBeds >= 2) push('low', `${f.vacantBeds} beds vacant`, `Rule: 2 or more vacant beds is worth a mention. ${f.totalBeds} beds − ${f.headcount} residents = ${f.vacantBeds}.`);
+  if (!recs.length) recs.push({ text: 'Nothing urgent — a good day to fill vacant beds or clear small requests', action: { label: "Today's checklist", navigate: 'daily-checklist' }, why: 'Because nothing above is high or medium today.' });
+  const byLevel = l => items.filter(x => x.level === l).map(x => x.text);
+  return { attention: { high: byLevel('high'), medium: byLevel('medium'), low: byLevel('low'), items }, recommendations: recs.slice(0, 3) };
 }
 
 // The most recent month with at least three answers — one or two opinions are

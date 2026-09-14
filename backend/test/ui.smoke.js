@@ -548,7 +548,9 @@ async function runAtWidth(browser, BASE, width) {
   await page.evaluate(() => openSearch());
   await page.waitForSelector('#search-q', { timeout: 5000 });
   await page.type('#search-q', target.name.slice(0, 4));
-  await page.waitForSelector('.search-item', { timeout: 8000 });
+  // Sprint 13: commands render the moment the sheet opens, so waiting for any
+  // .search-item would resolve before the debounced search has answered.
+  await page.waitForFunction(n => (document.querySelector('.search-results') || {}).textContent?.includes(n), { timeout: 8000 }, target.name);
   const found = await page.$eval('.search-results', e => e.textContent);
   ok(found.includes(target.name), `${tag} search finds the resident`);
   await page.keyboard.press('ArrowDown');
@@ -822,9 +824,14 @@ async function runAtWidth(browser, BASE, width) {
   ok(mapHead.includes(String(mapApi.totals.residents)), `${tag} MAP: the header states the true resident count`);
   await page.screenshot({ path: path.join(SHOTS, `room-map-${width}.png`) });
   await noHScroll('room map');
+  // Sprint 13: the tile now opens Room 360. Beds moved to its Residents tab,
+  // where free ones are still listed — the old sheet's job, kept.
   await page.evaluate(() => document.querySelector('.room-tile').click());
-  await page.waitForSelector('.modal .r360-kv', { timeout: 8000 });
+  await page.waitForSelector('.modal .r360-kv', { timeout: 10000 });
+  await page.evaluate(() => { room360.tab = 'residents'; renderRoom360(); });
+  await page.waitForSelector('#room360-body', { timeout: 8000 });
   ok(await page.$eval('.modal-body', e => /Bed 1/.test(e.textContent)), `${tag} room sheet lists its beds`);
+  ok(await page.$eval('#room360-body', e => /free/.test(e.textContent)), `${tag} and shows which beds are free`);
   await page.evaluate(() => closeModal());
 
   // Request detail: clock, assignment, comment, photo
@@ -953,9 +960,23 @@ async function runAtWidth(browser, BASE, width) {
   const notifApi = await page.evaluate(() => apiFetch('/notifications'));
   if (notifApi.items.length) {
     ok(/critical|important|informational|digest/.test(notifTxt), `${tag} notifications carry a level`);
-    const levels = await page.$$eval('.notif .badge', els => els.map(e => e.textContent.trim()));
+    // notify.list() orders unread first, then by urgency WITHIN each block —
+    // so urgency is monotonic inside the unread run and inside the read run,
+    // not across the boundary between them. (Checking the whole list was only
+    // ever accidentally true: it held while no unread item was less urgent
+    // than a read one.)
+    const notifRows = await page.$$eval('.notif', els => els.map(e => ({
+      level: (e.querySelector('.badge') || {}).textContent?.trim() || '',
+      read: e.classList.contains('read') || e.classList.contains('is-read') || !!e.querySelector('.notif-read')
+    })));
     const rank = l => ['critical', 'important', 'informational', 'digest'].indexOf(l);
-    ok(levels.every((l, i) => i === 0 || rank(l) >= rank(levels[i - 1])), `${tag} shown most urgent first`);
+    const monotonic = rows => rows.every((r, i) => i === 0 || rank(r.level) >= rank(rows[i - 1].level));
+    const unreadRun = [], readRun = [];
+    let seenRead = false;
+    for (const r of notifRows) { if (r.read) seenRead = true; (seenRead ? readRun : unreadRun).push(r); }
+    ok(monotonic(unreadRun) && monotonic(readRun),
+      `${tag} shown most urgent first (unread ${unreadRun.map(r => r.level).join('>')} | read ${readRun.map(r => r.level).join('>')})`);
+    ok(!notifRows.slice(0, unreadRun.length).some(r => r.read), `${tag} unread notifications come before read ones`);
     await page.evaluate(() => markAllRead());
     await sleep(600);
     eq(await page.$eval('#bell-count', e => e.classList.contains('hidden')), true, `${tag} the badge clears once read`);
@@ -1039,6 +1060,172 @@ async function runAtWidth(browser, BASE, width) {
   const brief = await page.evaluate(() => apiFetch('/copilot/brief?force=1'));
   ok('experience' in brief.health.components, `${tag} the health score has an experience component`);
   ok(brief.health.components.experience.why.length > 10, `${tag} which explains itself either way ("${brief.health.components.experience.why.slice(0, 40)}…")`);
+
+
+  // ═══════════════ Sprint 13 ═══════════════
+  // Bulk selection, the command palette, Room 360 and the accessibility pass.
+  await page.evaluate(() => navigate('rent-due'));
+  await page.waitForSelector('#page-content .bulk-cb', { timeout: 8000 });
+  ok((await page.$$('#page-content .bulk-cb')).length >= 1, `${tag} Rent Due gives every row a checkbox`);
+  await page.evaluate(() => document.querySelector('#page-content .bulk-cb').click());
+  await page.waitForFunction(() => /Selected: 1/.test((document.getElementById('bulk-count-n') || {}).textContent || ''), { timeout: 5000 });
+  ok(true, `${tag} the sticky bar counts the selection`);
+  // The bar is fixed over the page: the LAST row's checkbox must still be
+  // tappable, not hidden underneath it.
+  const reachable = await page.evaluate(() => {
+    const boxes = [...document.querySelectorAll('#page-content .bulk-cb')];
+    const cb = boxes[boxes.length - 1];
+    cb.scrollIntoView({ block: 'center' });
+    const r = cb.getBoundingClientRect();
+    const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return !!top && (top === cb || cb.contains(top) || top.contains(cb));
+  });
+  ok(reachable, `${tag} the last row's checkbox is not buried under the sticky bar`);
+  ok(await page.$eval('#bulk-bar', b => !!b.getAttribute('aria-label')), `${tag} the bulk bar names itself for a screen reader`);
+  const cbLabel = await page.$eval('#page-content .bulk-cb', c => c.getAttribute('aria-label') || '');
+  ok(/^Select /.test(cbLabel), `${tag} each checkbox says what it selects ("${cbLabel.slice(0, 26)}")`);
+  // The preview must appear before anything happens, and say nothing is sent.
+  await page.evaluate(() => bulkStart('reminders'));
+  await page.waitForSelector('#modal-overlay .bulk-lines, #modal-overlay .alert-danger', { timeout: 8000 });
+  const previewTxt = await page.$eval('#modal-overlay .modal-body', el => el.textContent);
+  ok(/Selected: 1 resident/.test(previewTxt), `${tag} the preview names the count`);
+  ok(/othing is sent/.test(previewTxt), `${tag} the preview says nothing is sent until you tap Send`);
+  // Whoever is selected, the preview either offers a Confirm or explains that
+  // everyone was skipped — it never acts on its own. (This fixture's resident
+  // has already paid, so the honest answer here is "nothing to do".)
+  const hasConfirm = !!(await page.$('#modal-overlay button[onclick*="bulkConfirm"]'));
+  ok(hasConfirm || /Nothing to do/i.test(previewTxt), `${tag} the preview offers Confirm, or says why there is nothing to do`);
+  if (!hasConfirm) ok(/skipped|Nothing to do/i.test(previewTxt), `${tag} and the skip is shown, never silent`);
+  else ok(true, `${tag} Confirm is present`);
+  eq(await page.evaluate(() => apiFetch('/outbox?status=draft').then(d => d.length)), 0,
+    `${tag} PREVIEW DRAFTED NOTHING — the outbox is still empty`);
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.getElementById('modal-overlay'), { timeout: 5000 });
+  ok(true, `${tag} Esc closes the preview`);
+  await page.evaluate(() => bulkClear());
+  ok(await page.evaluate(() => bulkSel.ids.size === 0), `${tag} Clear empties the selection`);
+
+  // Leaving the screen drops the selection — a stale tick can never travel.
+  await page.evaluate(() => navigate('guests'));
+  await page.waitForSelector('#guests-tb', { timeout: 8000 });
+  ok(await page.evaluate(() => bulkSel.ids.size === 0), `${tag} changing screen clears the selection`);
+  ok((await page.$$('#page-content .bulk-cb')).length >= 1, `${tag} Residents gives every row a checkbox`);
+  await noHScroll('Residents with the select column');
+
+  // ── Command palette ─────────────────────────────────────────────────
+  await page.evaluate(() => openSearch());
+  await page.waitForSelector('#search-overlay .search-cmd', { timeout: 6000 });
+  const cmdCount = await page.$$eval('#search-overlay .search-cmd', els => els.length);
+  ok(cmdCount >= 8, `${tag} Ctrl+K opens with commands listed (${cmdCount})`);
+  const cmdLabels = await page.$$eval('#search-overlay .search-cmd', els => els.map(e => e.textContent.trim()).join('|'));
+  ok(/Generate owner report/.test(cmdLabels), `${tag} the owner sees the owner-report command`);
+  await page.type('#search-q', 'expense');
+  await page.waitForFunction(() => document.querySelectorAll('.search-cmd').length === 1, { timeout: 6000 });
+  ok(true, `${tag} typing filters the commands`);
+  ok(await page.$('#search-overlay .search-ask'), `${tag} Ask Siri is offered for the typed text`);
+  await page.keyboard.press('ArrowDown');
+  ok(await page.$('#search-overlay .search-item.sel'), `${tag} arrow keys move through the palette`);
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => !document.getElementById('search-overlay'), { timeout: 6000 });
+  ok(await page.evaluate(() => currentPage === 'purchases'), `${tag} Enter on "Add expense" runs it`);
+  await page.evaluate(() => { closeModal(); openSearch(); });
+  await page.waitForSelector('#search-overlay', { timeout: 5000 });
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.getElementById('search-overlay'), { timeout: 5000 });
+  ok(true, `${tag} Esc closes the palette`);
+
+  // Staff never sees an owner command.
+  const staffCmds = await page.evaluate(() => {
+    const real = localStorage.getItem('sm_user');
+    localStorage.setItem('sm_user', JSON.stringify({ role: 'staff' }));
+    const labels = commandsFor('').map(c => c.label);
+    localStorage.setItem('sm_user', real);
+    return labels;
+  });
+  ok(!staffCmds.some(l => /owner report|Post announcement|Close the day/.test(l)), `${tag} staff sees no admin command (${staffCmds.length} of ${cmdCount})`);
+
+  // ── Room 360 ────────────────────────────────────────────────────────
+  await page.evaluate(() => navigate('rooms'));
+  await page.waitForSelector('.room-tile', { timeout: 8000 });
+  await page.evaluate(() => document.querySelector('.room-tile').click());
+  await page.waitForSelector('#room360-body', { timeout: 10000 });
+  const r360Tabs = await page.$$eval('#modal-overlay .subtab', els => els.map(e => e.textContent.trim()));
+  eq(r360Tabs.length, 4, `${tag} Room 360 has four tabs (${r360Tabs.join(', ')})`);
+  ok(await page.$('#modal-overlay .health-pill'), `${tag} the room shows a health score`);
+  eq(await page.$$eval('#modal-overlay .rh-row', els => els.length), 4, `${tag} health breaks into its four parts`);
+  ok(await page.$('#modal-overlay .rh-row .why-btn'), `${tag} each part has its own "Why?"`);
+  const whyText = await page.$eval('#modal-overlay .rh-row .why-btn', b => b.dataset.why || '');
+  ok(whyText.length > 10, `${tag} the "Why?" carries real text`);
+  const inSource = await page.evaluate(async t => (await (await fetch('/js/app.js')).text()).includes(t.slice(0, 40)), whyText);
+  ok(!inSource, `${tag} NO EXPLANATION IS HARD-CODED — the text is not in app.js`);
+  await page.click('#modal-overlay .rh-row .why-btn');
+  await page.waitForSelector('#why-pop', { timeout: 5000 });
+  ok((await page.$eval('#why-pop .why-pop-t', e => e.textContent)).trim().length > 10, `${tag} the "Why?" opens non-empty text`);
+  await page.evaluate(() => closeWhy());
+  for (const t of ['residents', 'maintenance', 'history']) {
+    await page.evaluate(tab => { room360.tab = tab; renderRoom360(); }, t);
+    await page.waitForSelector('#room360-body', { timeout: 6000 });
+    ok(await page.$eval('#room360-body', e => e.textContent.trim().length > 0), `${tag} Room 360 → ${t} renders`);
+  }
+  await noHScroll('Room 360');
+  await page.evaluate(() => closeModal());
+
+  // ── Accessibility ───────────────────────────────────────────────────
+  await page.evaluate(() => navigate('dashboard'));
+  await page.waitForSelector('.home-greeting', { timeout: 15000 });
+  await page.evaluate(() => a11ySweep());
+  const unlabelled = await page.$$eval('button, a.btn', els => els.filter(b => {
+    const t = (b.textContent || '').replace(/\s+/g, ' ').trim();
+    return !t && !b.getAttribute('aria-label') && !b.getAttribute('aria-labelledby');
+  }).map(b => b.className).slice(0, 5));
+  eq(unlabelled.length, 0, `${tag} NO ICON-ONLY BUTTON IS WITHOUT A LABEL (${unlabelled.join(', ')})`);
+  eq(await page.$$eval('thead th', els => els.filter(t => !t.getAttribute('scope')).length), 0, `${tag} every table header is scope="col"`);
+  // A visible focus ring, in this theme and the other one.
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate(t => applyTheme(t), theme);
+    // The ring is :focus-visible, which only matches KEYBOARD focus — that is
+    // the point of it (no ring when you tap with a finger). So tab to it.
+    await page.evaluate(() => { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); });
+    await page.keyboard.press('Tab');
+    const ring = await page.evaluate(() => {
+      const el = document.activeElement;
+      if (!el || el === document.body) return null;
+      const s = getComputedStyle(el);
+      // A ring is a ring whether it is drawn as an outline or a box-shadow.
+      const w = parseFloat(s.outlineWidth) || 0;
+      const shadow = s.boxShadow && s.boxShadow !== 'none' ? s.boxShadow : '';
+      el.blur();
+      const restShadow = getComputedStyle(el).boxShadow;
+      el.focus();
+      return { w, style: s.outlineStyle, shadow, gainedShadow: !!shadow && shadow !== restShadow,
+        on: el.tagName.toLowerCase() + (el.className ? '.' + String(el.className).split(' ')[0] : '') };
+    });
+    const visibleRing = !!ring && ((ring.w >= 2 && ring.style !== 'none') || ring.gainedShadow);
+    ok(visibleRing, `${tag} ${theme}: the focus ring is visible on ${ring ? ring.on + ' (outline ' + ring.w + 'px ' + ring.style + (ring.gainedShadow ? ', + shadow ring' : '') + ')' : 'nothing focusable'}`);
+  }
+  await page.evaluate(() => applyTheme('light'));
+  // Focus moves into a modal, cannot Tab out, and comes back on close.
+  await page.evaluate(() => navigate('rooms'));
+  await page.waitForSelector('.room-tile', { timeout: 8000 });
+  await page.evaluate(() => document.querySelector('.room-tile').focus());
+  await page.evaluate(() => document.querySelector('.room-tile').click());
+  await page.waitForSelector('#room360-body', { timeout: 10000 });
+  ok(await page.evaluate(() => document.getElementById('modal-overlay').contains(document.activeElement)), `${tag} focus moves into the modal on open`);
+  ok(await page.$eval('#modal-overlay .modal', m => m.getAttribute('role') === 'dialog' && m.getAttribute('aria-modal') === 'true'), `${tag} the modal is announced as a dialog`);
+  ok(await page.evaluate(() => {
+    const overlay = document.getElementById('modal-overlay');
+    const f = [...overlay.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select, textarea')].filter(e => e.offsetParent !== null);
+    if (!f.length) return false;
+    f[f.length - 1].focus();
+    f[f.length - 1].dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    return overlay.contains(document.activeElement);
+  }), `${tag} Tab from the last element stays inside the modal`);
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.getElementById('modal-overlay'), { timeout: 5000 });
+  ok(await page.evaluate(() => document.activeElement && document.activeElement.classList.contains('room-tile')), `${tag} focus returns to what opened the modal`);
+  eq(await page.$$eval('#page-content input:not([type=hidden]):not([type=checkbox]), #page-content select, #page-content textarea',
+    els => els.filter(el => !el.getAttribute('aria-label') && !(el.id && document.querySelector(`label[for="${el.id}"]`))).length), 0,
+    `${tag} every input has a label or a name`);
 
   eq(jsErrors.length, 0, `${tag} no uncaught JS errors (${jsErrors.join('; ')})`);
   await page.close(); await ctx.close();

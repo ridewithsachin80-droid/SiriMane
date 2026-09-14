@@ -1574,7 +1574,13 @@ router.get('/complaints', auth, async (req, res) => {
     q += ` ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END,
                     CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, created_at DESC`;
     const r = await pool.query(q, p);
-    res.json(r.rows);
+    // Sprint 13: the priority explains itself. A hand-set priority that differs
+    // from the rule says so, rather than pretending the rule chose it.
+    const { priorityWhy } = require('../services/assistant');
+    res.json(r.rows.map(c => {
+      const w = priorityWhy(c.category, c.description);
+      return { ...c, priority_why: c.priority === w.priority ? w.why : `Set by hand to ${c.priority}. The rule alone would say ${w.priority}: ${w.why}` };
+    }));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

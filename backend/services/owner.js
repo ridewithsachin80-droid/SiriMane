@@ -186,6 +186,20 @@ async function computeAnomalies() {
     detail: `The oldest was due ${routes.fmtD(breached.rows[0].oldest)}.`,
     action: 'complaints'
   });
+  // Sprint 13: every flag carries the rule that raised it, so the "?" on the
+  // screen shows the rule and the figure together — nothing is phrased in the UI.
+  const RULES = {
+    rent_variance: 'Rule: a resident whose rent differs from the room rate, unapproved for more than 3 days.',
+    big_purchase: 'Rule: a purchase in the last 30 days more than 2× the category average of the previous 6 months (needs 3+ past purchases).',
+    overdue_30: 'Rule: at least one full month owed, and the resident joined 30+ days ago (the ledger charges the joining month on day one). High when 2+ months.',
+    refund_over_deposit: 'Rule: a deposit refund in the last 90 days larger than the deposit itself.',
+    checklist_low: 'Rule: the warden checklist below 50% on each of the last 3 days.',
+    claims_waiting: 'Rule: resident UPI claims older than 2 days still unconfirmed. They are never counted as income until confirmed.',
+    approvals_waiting: 'Rule: staff entries older than 2 days still awaiting admin approval.',
+    repeat_request: 'Rule: the same category reported 3+ times in the same room within 30 days.',
+    sla_breach: 'Rule: an open request past its promised time (2 h high · 24 h medium · 72 h low).'
+  };
+  for (const f of flags) f.why = RULES[f.id] || 'Rule not documented.';
   const order = { high: 0, medium: 1, low: 2 };
   flags.sort((a, b) => order[a.level] - order[b.level]);
   return flags;

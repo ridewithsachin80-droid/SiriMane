@@ -134,6 +134,17 @@ async function draftReminders(lang) {
 }
 
 // ── Complaint priority (rule first, model optional) ──────────────────────
+// Sprint 13: the same rule, explained. Returns { priority, why } so a screen
+// can show the reason next to the badge instead of guessing at it.
+function priorityWhy(category, description) {
+  const d = String(description || '').toLowerCase();
+  const kw = d.match(/spark|shock|fire|smoke|gas|leak.*(electric|wire)|stranger|theft|stolen|harass|unsafe|no water|no power|flood/);
+  if (kw) return { priority: 'high', why: `The description mentions "${kw[0]}" — a safety word that is always high priority (2-hour clock).` };
+  if (['Water', 'Electrical', 'Security'].includes(category)) return { priority: 'high', why: `${category} requests are always high priority (2-hour clock).` };
+  if (['Cleanliness', 'Food', 'Furniture', 'Wifi/Internet'].includes(category)) return { priority: 'medium', why: `${category} requests start at medium priority (24-hour clock).` };
+  return { priority: 'low', why: `${category || 'Other'} requests start at low priority (72-hour clock) unless the description mentions a safety word.` };
+}
+
 function rulePriority(category, description) {
   const d = String(description || '').toLowerCase();
   if (/spark|shock|fire|smoke|gas|leak.*(electric|wire)|stranger|theft|stolen|harass|unsafe|no water|no power|flood/.test(d)) return 'high';
@@ -203,4 +214,4 @@ function startScheduler({ intervalMs = 60000, log = console.log } = {}) {
   return { stop: () => clearInterval(h), tick };
 }
 
-module.exports = { computeFacts, renderBrief, getBrief, draftReminders, reminderText, rulePriority, ask, ASK_TEMPLATES, startScheduler, cacheGet, cachePut, _resetScheduler: () => { lastRunDate = null; } };
+module.exports = { computeFacts, renderBrief, getBrief, draftReminders, reminderText, rulePriority, priorityWhy, ask, ASK_TEMPLATES, startScheduler, cacheGet, cachePut, _resetScheduler: () => { lastRunDate = null; } };

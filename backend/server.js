@@ -59,6 +59,7 @@ app.use('/api', require('./routes/home'));
 app.use('/api', require('./routes/finance'));
 app.use('/api', require('./routes/experience'));
 app.use('/api', require('./routes/notify'));
+app.use('/api', require('./routes/bulk'));       // Sprint 13
 
 // Any /api path that no route claimed answers with JSON — never the landing
 // page. (Before this, a missing route returned home.html and the app showed

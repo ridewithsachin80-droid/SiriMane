@@ -57,6 +57,7 @@ function navigate(page) {
   document.getElementById('topbar-actions').innerHTML = '';
   document.getElementById('sidebar').classList.remove('open');
   if (typeof syncChrome === 'function') syncChrome(page);
+  if (typeof bulkReset === 'function') bulkReset();
   highlightNav(page);
   if (typeof smSetContext === 'function') smSetContext({ page, resident_id: null, resident_name: null, room_number: null });
   // An answer belongs to the screen it was asked on; leaving the screen clears
@@ -494,22 +495,27 @@ async function pgGuests(filter) {
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>NAME</th><th>PHONE</th><th>ROOM / BERTH</th><th>CHECK-IN</th><th>RENT</th><th>DEPOSIT</th><th>STATUS</th><th>DOCS</th><th>ACTIONS</th></tr></thead>
+            <thead><tr><th class="bulk-th" scope="col"><span class="sr-only">Select</span></th><th scope="col">NAME</th><th scope="col">PHONE</th><th scope="col">ROOM / BERTH</th><th scope="col">CHECK-IN</th><th scope="col">RENT</th><th scope="col">DEPOSIT</th><th scope="col">STATUS</th><th scope="col">DOCS</th><th scope="col">ACTIONS</th></tr></thead>
             <tbody id="guests-tb">${renderGuestRows(filtered, f)}</tbody>
           </table>
         </div>
       </div>`);
+    bulkSetup('guests', [
+      { action: 'announcement', label: 'Post notice', icon: 'megaphone' },
+      { action: 'documents', label: 'Mark documents', icon: 'receipt' }
+    ]);
   } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
 }
 
 function renderGuestRows(filtered, f) {
-  if (filtered.length === 0) return `<tr class="empty-row"><td colspan="9">${f==='left'?'Nobody has checked out yet.':'No resident matches.'}</td></tr>`;
+  if (filtered.length === 0) return `<tr class="empty-row"><td colspan="10">${f==='left'?'Nobody has checked out yet.':'No resident matches.'}</td></tr>`;
   const hasVariance = (g) => g.room_id && g.room_rent !== null && g.room_rent !== undefined && parseFloat(g.monthly_rent) !== parseFloat(g.room_rent);
   return filtered.map(g=>{
     const variance = hasVariance(g);
     const needsApproval = variance && !g.rent_variance_approved;
     return `
     <tr data-search="${g.name.toLowerCase()} ${g.phone||''}" style="${!g.is_active?'opacity:0.55':''}">
+      <td class="bulk-td">${bulkCb(g.id, g.name)}</td>
       <td><strong style="${!g.is_active?'text-decoration:line-through':''}">${g.name}</strong><br><span class="text-muted">${g.email||''}</span></td>
       <td style="${!g.is_active?'text-decoration:line-through':''}">${g.phone||'—'}</td>
       <td style="${!g.is_active?'text-decoration:line-through':''}">${g.room_number?'Room '+g.room_number+(g.bed_number?' / Bed '+g.bed_number:''):'-'}</td>
@@ -546,6 +552,7 @@ function filterGuests() {
   else if (docs === 'missing') rows = rows.filter(g => !g.id_proof_type);
   if (q) rows = rows.filter(g => `${g.name} ${g.phone||''}`.toLowerCase().includes(q));
   document.getElementById('guests-tb').innerHTML = renderGuestRows(rows, f);
+  if (typeof bulkSyncBoxes === 'function') bulkSyncBoxes();
 }
 
 async function approveRentVariance(id, refresh) {
@@ -1152,15 +1159,16 @@ async function pgComplaints(filter) {
         ${list.length===0 ? '<div style="text-align:center;padding:48px;color:var(--text-muted)">🛠️<br><br>No issues here.</div>' : `
         <div class="table-wrap">
           <table>
-            <thead><tr><th>DATE</th><th>CATEGORY</th><th>ISSUE</th><th>FROM</th><th>PRIORITY</th><th>STATUS</th><th>ACTIONS</th></tr></thead>
+            <thead><tr><th class="bulk-th" scope="col"><span class="sr-only">Select</span></th><th scope="col">DATE</th><th scope="col">CATEGORY</th><th scope="col">ISSUE</th><th scope="col">FROM</th><th scope="col">PRIORITY</th><th scope="col">STATUS</th><th scope="col">ACTIONS</th></tr></thead>
             <tbody id="complaints-tb">
               ${list.map(c => `
                 <tr data-search="${c.category.toLowerCase()} ${c.description.toLowerCase()} ${(c.guest_name||'').toLowerCase()} ${(c.room_number||'').toLowerCase()}">
+                  <td class="bulk-td">${bulkCb(c.id, c.category + (c.room_number ? ' Room ' + c.room_number : ''))}</td>
                   <td>${fmtDate(c.created_at)}</td>
                   <td>${c.category}</td>
                   <td style="max-width:260px">${c.description}${c.resolution_notes?`<br><span class="text-muted" style="font-size:12px">✔ ${c.resolution_notes}</span>`:''}</td>
                   <td>${c.guest_name || (c.raised_by==='guest'?'Guest':'Staff')}${c.room_number?' · Room '+c.room_number:''}</td>
-                  <td>${priorityBadge(c.priority)}</td>
+                  <td>${priorityBadge(c.priority)}${c.priority_why ? whyBtn(c.priority_why, 'Why this priority?') : ''}</td>
                   <td><span class="badge ${c.status==='resolved'?'badge-green':c.status==='in_progress'?'badge-blue':'badge-red'}">${c.status.replace('_',' ')}</span></td>
                   <td>
                     <button class="btn btn-outline btn-sm" onclick="requestSheet(${c.id})">Open</button>
@@ -1172,6 +1180,7 @@ async function pgComplaints(filter) {
         </div>`}
       </div>
     `);
+    bulkSetup('complaints', [{ action: 'assign', label: 'Assign to staff', icon: 'users' }]);
   } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
 }
 
@@ -2199,6 +2208,7 @@ async function pgRentDue() {
         <div class="table-wrap">
           <table>
             <thead><tr>
+              <th class="bulk-th" scope="col"><span class="sr-only">Select</span></th>
               ${rentDueSortHeader('name','NAME')}
               ${rentDueSortHeader('room_number','ROOM')}
               <th>PHONE</th>
@@ -2214,6 +2224,7 @@ async function pgRentDue() {
         </div>
       </div>`);
     loadReliability();
+    bulkSetup('rent-due', [{ action: 'reminders', label: 'Draft reminders', icon: 'whatsapp' }]);
   } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
 }
 
@@ -2253,7 +2264,7 @@ function sortRentDueRows(rows) {
 }
 
 function renderRentDueRows(list) {
-  if (list.length === 0) return `<tr class="empty-row"><td colspan="9">No resident matches.</td></tr>`;
+  if (list.length === 0) return `<tr class="empty-row"><td colspan="11">No resident matches.</td></tr>`;
   return list.map(g=>{
     const due = parseFloat(g.amount_due);
     const credit = parseFloat(g.credit);
@@ -2261,6 +2272,7 @@ function renderRentDueRows(list) {
     const totalPayable = due + depPending;
     const anyPending = due>0 || depPending>0;
     return `<tr data-search="${g.name.toLowerCase()} ${(g.room_number||'').toLowerCase()} ${(g.phone||'').toLowerCase()}">
+      <td class="bulk-td">${bulkCb(g.id, g.name)}</td>
       <td><strong>${g.name}</strong></td>
       <td>${g.room_number?'Room '+g.room_number:'—'}</td>
       <td>${g.phone||'—'}</td>
@@ -2296,6 +2308,7 @@ function filterRentDueList() {
   );
   rows = sortRentDueRows(rows);
   document.getElementById('rentdue-tb').innerHTML = renderRentDueRows(rows);
+  if (typeof bulkSyncBoxes === 'function') bulkSyncBoxes();
   loadReliability();
 }
 
@@ -3716,7 +3729,7 @@ async function loadAttention() {
       <div style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--border)">
         <span style="flex:0 0 8px;height:8px;border-radius:50%;background:${color[f.level]};margin-top:6px"></span>
         <div style="flex:1;min-width:0">
-          <div style="font-size:14px;font-weight:600">${f.title}</div>
+          <div style="font-size:14px;font-weight:600">${f.title}${f.why ? whyBtn(f.why, 'Why is this flagged?') : ''}</div>
           <div style="font-size:12px;color:var(--text-muted,var(--text-muted))">${f.detail}</div>
         </div>
         ${f.action ? `<button class="btn btn-outline btn-sm" style="min-height:36px" onclick="navigate('${f.action}')">Open</button>` : ''}
@@ -4100,6 +4113,11 @@ function openSearch() {
       <div class="search-results" id="search-results"><div class="search-group">Type at least 2 letters</div></div>
     </div>`;
   document.body.appendChild(el);
+  // Sprint 13: the sheet opens on the commands, so Ctrl+K is useful before a
+  // single letter is typed. Typing then filters commands and results together.
+  searchRows = []; searchSel = -1;
+  const host0 = document.getElementById('search-results');
+  if (host0) host0.innerHTML = renderPaletteCommands('') || '<div class="search-group">Type at least 2 letters</div>';
   const input = document.getElementById('search-q');
   input.focus();
   input.oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(runSearch, 220); };
@@ -4121,11 +4139,14 @@ async function runSearch() {
   const q = document.getElementById('search-q')?.value.trim();
   const host = document.getElementById('search-results');
   if (!host) return;
-  if (!q || q.length < 2) { host.innerHTML = '<div class="search-group">Type at least 2 letters</div>'; searchRows = []; return; }
+  searchRows = []; searchSel = -1;
+  if (!q || q.length < 2) { host.innerHTML = renderPaletteCommands('') || '<div class="search-group">Type at least 2 letters</div>'; return; }
   try {
     const r = await apiFetch(`/search?q=${encodeURIComponent(q)}`);
     searchRows = []; searchSel = -1;
-    const parts = [];
+    const cmdHtml = renderPaletteCommands(q);
+    const renderedCommands = !!cmdHtml;
+    const parts = [cmdHtml];
     const add = (label, rows, render, go) => {
       if (!rows.length) return;
       parts.push(`<div class="search-group">${label}</div>`);
@@ -4139,8 +4160,13 @@ async function runSearch() {
       () => { closeSearch(); navigate('payments'); });
     add('Requests', r.requests, c => `${icon('wrench')}<span><span>${c.category}${c.room_number ? ' · Room ' + c.room_number : ''}</span><div class="s-sub">${c.description.slice(0, 60)} · ${c.status}</div></span>`,
       () => { closeSearch(); navigate('complaints'); });
-    host.innerHTML = parts.length ? parts.join('') : `<div class="search-group">Nothing matches “${q}”</div>`;
-  } catch (e) { host.innerHTML = `<div class="search-group">${e.message}</div>`; }
+    // "Nothing matches" is about the SEARCH, so the Ask Siri row must not
+    // stand in for a result — say it plainly, then still offer to ask Siri.
+    const foundAny = parts.filter(Boolean).length > (renderedCommands ? 1 : 0);
+    if (!foundAny) parts.push(`<div class="search-group">Nothing matches “${q}”</div>`);
+    parts.push(renderPaletteAsk(q));
+    host.innerHTML = parts.filter(Boolean).join('');
+  } catch (e) { searchRows = []; host.innerHTML = (renderPaletteCommands(q) || '') + renderPaletteAsk(q) + `<div class="search-group">${e.message}</div>`; }
 }
 
 // ── Quick action ─────────────────────────────────────────────────────────
@@ -4567,7 +4593,7 @@ async function pgRoomMap() {
       <div class="home-section-h">Floor ${f.floor}</div>
       <div class="room-grid">
         ${f.rooms.map(r => `
-          <button class="room-tile ${r.status !== 'active' ? 'is-' + r.status : ''}" onclick="roomSheet(${r.id})">
+          <button class="room-tile ${r.status !== 'active' ? 'is-' + r.status : ''}" onclick="roomProfile(${r.id})" aria-label="Room ${r.room_number}">
             <div class="rt-head"><strong>${r.room_number}</strong>${r.high_issues ? `<span class="badge badge-red">${r.high_issues}!</span>` : r.open_issues ? `<span class="badge badge-amber">${r.open_issues}</span>` : ''}</div>
             <div class="rt-beds">${r.beds.map(b => `<i class="bed ${b.state}" title="${b.resident ? b.resident.name : b.state}"></i>`).join('')}${r.over_capacity ? `<i class="bed over" title="${r.over.map(o => o.name).join(', ')}"></i>`.repeat(r.over_capacity) : ''}</div>
             <div class="rt-sub">${r.occupied}/${r.total_beds}${r.over_capacity ? ' <span class="text-red">+' + r.over_capacity + '</span>' : ''}${r.bed_fix_count ? ` <span class="text-amber" title="${r.bed_fix_count} bed number${r.bed_fix_count === 1 ? '' : 's'} to correct: ${(r.bed_fixes || []).map(f => f.name).join(', ')}">⚑${r.bed_fix_count > 1 ? r.bed_fix_count : ''}</span>` : ''} · ${fmt(r.monthly_rent)}</div>
@@ -5002,6 +5028,7 @@ async function pgOutbox() {
     <div class="page-header"><h1>Outbox</h1><p>Messages Siri has drafted. Nothing is sent until you tap Send.</p></div>
     ${drafts.length ? `<div class="card"><div style="padding:4px 16px">
       ${drafts.map(m => `<div class="outbox-row">
+        <div class="outbox-pick">${bulkCb(m.id, m.guest_name + ' — ' + (kindLabel[m.kind] || m.kind))}</div>
         <div><strong>${m.guest_name}</strong> <span class="badge badge-gray">${kindLabel[m.kind] || m.kind}</span>
           <div class="outbox-body">${m.body}</div></div>
         <div class="flex gap-2">
@@ -5014,6 +5041,13 @@ async function pgOutbox() {
         <div class="t-sub">${fmtDate(m.sent_at)} by ${m.sent_by_username || '—'}</div></span></div>`).join('')}
     </div></div>` : ''}
   `);
+  pgOutboxBulk();
+}
+async function pgOutboxBulk() {
+  bulkSetup('outbox', [
+    { action: 'reminders', label: 'Draft reminders', icon: 'whatsapp' },
+    { action: 'skip_drafts', label: 'Skip', icon: 'x' }
+  ]);
 }
 async function draftOutbox() { try { const r = await apiFetch('/outbox/draft', { method: 'POST' }); toast(r.drafted ? `${r.drafted} drafted` : 'Nothing due right now', 'ok'); pgOutbox(); } catch (e) { toast(e.message); } }
 async function markSent(id) { try { await apiFetch(`/outbox/${id}/sent`, { method: 'POST' }); setTimeout(pgOutbox, 600); } catch (e) { toast(e.message); } }
@@ -5140,3 +5174,411 @@ function complaintUseFault(f) {
   window.complaintLikely = f.likely_issue || null;
   document.getElementById('cp-preview').classList.add('hidden');
 }
+
+
+/* ═══════════════════════════════════════════════════════════════
+   SPRINT 13 — bulk actions with a preview, command palette,
+   Room 360, universal "Why?", accessibility.
+   ═══════════════════════════════════════════════════════════════ */
+
+// ── 1. Bulk selection ────────────────────────────────────────────
+// One selection at a time, scoped to the screen that started it. The bar
+// only offers what the server allows this role (GET /bulk/limits), and every
+// action goes preview → confirm on the server. The UI repeats the cap; it
+// never enforces anything on its own.
+let bulkSel = { scope: null, ids: new Set(), labels: new Map(), actions: [] };
+let bulkLimits = null;
+
+async function bulkGetLimits() {
+  if (bulkLimits) return bulkLimits;
+  try { bulkLimits = await apiFetch('/bulk/limits'); } catch { bulkLimits = { cap: 15, ack_above: 8, actions: [] }; }
+  return bulkLimits;
+}
+function bulkAllowed(action) { return !bulkLimits || !bulkLimits.actions.length || bulkLimits.actions.some(a => a.action === action); }
+
+// Called by a screen after it renders. `actions` = [{ action, label, icon }]
+// in the order the bar should show them.
+async function bulkSetup(scope, actions) {
+  if (bulkSel.scope !== scope) bulkSel = { scope, ids: new Set(), labels: new Map(), actions: [] };
+  await bulkGetLimits();
+  bulkSel.actions = actions.filter(a => bulkAllowed(a.action));
+  bulkSyncBoxes();
+  bulkRenderBar();
+}
+function bulkCb(id, label) {
+  const checked = bulkSel.ids.has(Number(id)) ? 'checked' : '';
+  return `<input type="checkbox" class="bulk-cb" data-id="${id}" ${checked} aria-label="Select ${String(label).replace(/"/g, '&quot;')}" onchange="bulkToggle(${id}, this.checked, this.getAttribute('aria-label').slice(7))"/>`;
+}
+function bulkToggle(id, on, label) {
+  id = Number(id);
+  if (on) {
+    if (bulkLimits && bulkSel.ids.size >= bulkLimits.cap) {
+      toast(`At most ${bulkLimits.cap} at a time — confirm this batch first, then pick the next.`);
+      const cb = document.querySelector(`.bulk-cb[data-id="${id}"]`); if (cb) cb.checked = false;
+      return;
+    }
+    bulkSel.ids.add(id); if (label) bulkSel.labels.set(id, label);
+  } else bulkSel.ids.delete(id);
+  bulkRenderBar();
+}
+// "Select all matching this filter" — whatever rows are on screen right now.
+function bulkSelectVisible() {
+  const boxes = [...document.querySelectorAll('#page-content .bulk-cb')].filter(cb => cb.closest('tr') ? cb.closest('tr').style.display !== 'none' : true);
+  const cap = bulkLimits ? bulkLimits.cap : 15;
+  let added = 0;
+  for (const cb of boxes) {
+    if (bulkSel.ids.size >= cap) break;
+    const id = Number(cb.dataset.id);
+    if (!bulkSel.ids.has(id)) { bulkSel.ids.add(id); bulkSel.labels.set(id, cb.getAttribute('aria-label').slice(7)); added++; }
+    cb.checked = true;
+  }
+  if (boxes.length > cap) toast(`${boxes.length} match but the limit is ${cap} at a time — the first ${cap} are selected.`, 'ok');
+  bulkRenderBar();
+}
+function bulkClear() {
+  bulkSel.ids.clear(); bulkSel.labels.clear();
+  document.querySelectorAll('#page-content .bulk-cb').forEach(cb => { cb.checked = false; });
+  bulkRenderBar();
+}
+function bulkSyncBoxes() { document.querySelectorAll('#page-content .bulk-cb').forEach(cb => { cb.checked = bulkSel.ids.has(Number(cb.dataset.id)); }); }
+function bulkRenderBar() {
+  let bar = document.getElementById('bulk-bar');
+  const n = bulkSel.ids.size;
+  if (!bulkSel.scope || !bulkSel.actions.length) { if (bar) bar.remove(); document.body.classList.remove('has-bulk-bar'); return; }
+  // The bar is fixed above the tab bar, so the last rows would sit underneath
+  // it — and a checkbox you cannot tap is worse than no checkbox. Reserve the
+  // space while the bar is up.
+  document.body.classList.add('has-bulk-bar');
+  if (!bar) { bar = document.createElement('div'); bar.id = 'bulk-bar'; bar.className = 'bulk-bar'; bar.setAttribute('role', 'region'); bar.setAttribute('aria-label', 'Bulk actions'); document.body.appendChild(bar); }
+  bar.classList.toggle('bulk-bar-empty', n === 0);
+  bar.innerHTML = `
+    <div class="bulk-count"><strong id="bulk-count-n">Selected: ${n}</strong>${bulkLimits ? `<span class="t-sub"> of ${bulkLimits.cap} max</span>` : ''}</div>
+    <div class="bulk-actions">
+      <button class="btn btn-outline btn-sm" onclick="bulkSelectVisible()">Select all shown</button>
+      ${bulkSel.actions.map(a => `<button class="btn btn-primary btn-sm" ${n ? '' : 'disabled'} onclick="bulkStart('${a.action}')">${a.icon ? icon(a.icon) : ''}${a.label}</button>`).join('')}
+      ${n ? `<button class="btn btn-outline btn-sm" onclick="bulkClear()" aria-label="Clear selection">✕ Clear</button>` : ''}
+    </div>`;
+}
+// Leaving the screen drops the selection; the bar goes with it.
+function bulkReset() { bulkSel = { scope: null, ids: new Set(), labels: new Map(), actions: [] }; const b = document.getElementById('bulk-bar'); if (b) b.remove(); document.body.classList.remove('has-bulk-bar'); }
+
+// The arguments some actions need, gathered in a small form first.
+async function bulkStart(action) {
+  const ids = [...bulkSel.ids];
+  if (!ids.length) return;
+  if (action === 'reminders' || action === 'skip_drafts') return bulkPreview(action, ids, {});
+  if (action === 'announcement') {
+    return openModal(`<div class="modal"><div class="modal-header"><h3>Notice to ${ids.length} resident${ids.length === 1 ? '' : 's'}</h3><button class="modal-close" aria-label="Close" onclick="closeModal()">×</button></div>
+      <div class="modal-body">
+        <p class="t-sub" style="margin-bottom:10px">Each selected resident gets her own copy in the portal. You will see a preview before anything is posted.</p>
+        <div class="form-group"><label for="bk-an-title">Title</label><input id="bk-an-title" placeholder="e.g. Water off tomorrow 10–12"/></div>
+        <div class="form-group"><label for="bk-an-msg">Message</label><textarea id="bk-an-msg" rows="3" placeholder="What they need to know"></textarea></div>
+        <div class="form-group"><label for="bk-an-priority">Priority</label><select id="bk-an-priority"><option value="normal">Normal</option><option value="important">Important</option><option value="urgent">Urgent</option></select></div>
+        <button class="btn btn-primary" style="width:100%" onclick="bulkPreview('announcement', [${ids}], { title: document.getElementById('bk-an-title').value, message: document.getElementById('bk-an-msg').value, priority: document.getElementById('bk-an-priority').value })">Preview</button>
+      </div></div>`);
+  }
+  if (action === 'assign') {
+    let staff = [];
+    try { staff = await apiFetch('/staff-list'); } catch (e) { return toast(e.message); }
+    return openModal(`<div class="modal"><div class="modal-header"><h3>Assign ${ids.length} request${ids.length === 1 ? '' : 's'}</h3><button class="modal-close" aria-label="Close" onclick="closeModal()">×</button></div>
+      <div class="modal-body">
+        <div class="form-group"><label for="bk-assign-to">Assign to</label><select id="bk-assign-to">${staff.map(u => `<option value="${u.id}">${u.username}${u.role === 'admin' ? ' (owner)' : ''}</option>`).join('')}</select></div>
+        <button class="btn btn-primary" style="width:100%" onclick="bulkPreview('assign', [${ids}], { assigned_to: document.getElementById('bk-assign-to').value })">Preview</button>
+      </div></div>`);
+  }
+  if (action === 'documents') {
+    return openModal(`<div class="modal"><div class="modal-header"><h3>Documents for ${ids.length} resident${ids.length === 1 ? '' : 's'}</h3><button class="modal-close" aria-label="Close" onclick="closeModal()">×</button></div>
+      <div class="modal-body">
+        <div class="form-group"><label for="bk-doc-type">Document</label><select id="bk-doc-type">${['ID proof', 'Address proof', 'Agreement', 'Deposit receipt'].map(t => `<option>${t}</option>`).join('')}</select></div>
+        <div class="form-group"><label for="bk-doc-status">Mark as</label><select id="bk-doc-status"><option value="verified">Verified</option><option value="pending">Pending</option></select></div>
+        <button class="btn btn-primary" style="width:100%" onclick="bulkPreview('documents', [${ids}], { doc_type: document.getElementById('bk-doc-type').value, status: document.getElementById('bk-doc-status').value })">Preview</button>
+      </div></div>`);
+  }
+}
+
+// The preview: what the server says will happen, who is skipped and why.
+async function bulkPreview(action, ids, args) {
+  openModal(`<div class="modal"><div class="modal-header"><h3>Preview</h3><button class="modal-close" aria-label="Close" onclick="closeModal()">×</button></div>
+    <div class="modal-body"><div class="sm-skel"><div class="sm-skel-line" style="width:60%"></div><div class="sm-skel-line" style="width:40%"></div></div></div></div>`);
+  let p;
+  try { p = await apiFetch('/bulk/preview', { method: 'POST', body: { action, ids, args } }); }
+  catch (e) { return openModal(`<div class="modal"><div class="modal-header"><h3>Preview</h3><button class="modal-close" aria-label="Close" onclick="closeModal()">×</button></div><div class="modal-body"><div class="alert alert-danger" style="display:block">${e.message}</div></div></div>`); }
+  renderBulkPreview(p);
+}
+function bulkPreviewHtml(p) {
+  return `
+    <div class="bulk-lines">${p.lines.map((l, i) => `<div class="bulk-line ${i === 0 ? 'bulk-line-h' : ''}">${l}</div>`).join('')}</div>
+    ${p.eligible.length ? `<details class="bulk-list"><summary>Review list (${p.eligible.length})</summary>
+      ${p.eligible.map(r => `<div class="r360-row"><span>${r.name}${r.room_number ? ` · Room ${r.room_number}` : ''}${r.kind ? ` <span class="badge badge-gray">${r.kind === 'rent_overdue' ? 'overdue' : 'due'}</span>` : ''}</span>${r.amount_due != null && r.amount_due !== undefined && r.amount_due > 0 ? `<strong>${fmt(r.amount_due)}</strong>` : ''}</div>`).join('')}</details>` : ''}
+    ${p.skipped.length ? `<details class="bulk-list bulk-skipped"><summary>Skipped (${p.skipped.length})</summary>
+      ${p.skipped.map(r => `<div class="r360-row"><span>${r.name}${r.room_number ? ` · Room ${r.room_number}` : ''}</span><span class="t-sub">${r.reason}</span></div>`).join('')}</details>` : ''}`;
+}
+function renderBulkPreview(p) {
+  const n = p.eligible.length;
+  openModal(`<div class="modal"><div class="modal-header"><h3>${p.label}</h3><button class="modal-close" aria-label="Close" onclick="closeModal()">×</button></div>
+    <div class="modal-body">
+      ${bulkPreviewHtml(p)}
+      ${p.drafts_only ? `<p class="bulk-note">${icon('whatsapp')} Drafts go to the Outbox. Sending stays one tap per message — nothing is sent from here.</p>` : ''}
+      <div id="bulk-alert" class="alert alert-danger hidden"></div>
+      <div class="flex gap-2" style="margin-top:14px;flex-wrap:wrap">
+        ${n && p.proposal ? `<button class="btn btn-primary" id="bulk-confirm-btn" onclick="bulkConfirm('${p.proposal.id}', ${p.requires_second_confirm}, ${p.confirm_count}, this)">Confirm${p.requires_second_confirm ? '…' : ''}</button>` : `<span class="t-sub">Nothing to do — everyone is skipped.</span>`}
+        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+      </div>
+    </div></div>`);
+}
+// Above the threshold the button turns into a second, explicit confirmation
+// that names the count. The server refuses without it.
+async function bulkConfirm(proposalId, needsCount, count, btn) {
+  if (needsCount && !btn.dataset.acked) {
+    btn.dataset.acked = '1';
+    btn.className = 'btn btn-danger';
+    btn.textContent = `Yes — go ahead with all ${count}`;
+    return;
+  }
+  btn.disabled = true; btn.textContent = 'Working…';
+  try {
+    const r = await apiFetch('/bulk/confirm', { method: 'POST', body: { proposal_id: proposalId, count } });
+    closeModal(); bulkClear();
+    toast(r.answer, 'ok');
+    if (r.actions && r.actions[0] && r.actions[0].navigate && r.actions[0].navigate !== currentPage) navigate(r.actions[0].navigate); else if (currentPage) navigate(currentPage);
+  } catch (e) {
+    btn.disabled = false; btn.textContent = 'Try again';
+    const a = document.getElementById('bulk-alert'); if (a) showAlert(a, e.message); else toast(e.message);
+  }
+}
+
+// ── 2. Command palette (Ctrl+K gains commands) ───────────────────
+// Same sheet as search, three groups: Commands · Results · Ask Siri.
+// Role-filtered exactly like the sidebar (admin flag), never by hiding
+// alone — every command's target is itself role-checked on the server.
+const COMMANDS = [
+  { id: 'add-resident', icon: 'users', label: 'Add resident', run: () => { navigate('guests'); setTimeout(() => moveInWizard(), 350); } },
+  { id: 'collect', icon: 'rupee', label: 'Collect payment', run: () => navigate('collect') },
+  { id: 'expense', icon: 'cart', label: 'Add expense', run: () => { navigate('purchases'); setTimeout(() => purchaseModal(), 350); } },
+  { id: 'issue', icon: 'wrench', label: 'Report an issue', run: () => { navigate('complaints'); setTimeout(() => complaintModal(), 350); } },
+  { id: 'announce', icon: 'megaphone', label: 'Post announcement', admin: true, run: () => { navigate('guest-messages'); setTimeout(() => announcementModal(), 350); } },
+  { id: 'reminders', icon: 'whatsapp', label: 'Draft reminders', run: () => { navigate('rent-due'); setTimeout(() => toast('Tick the residents, then tap Draft reminders', 'ok'), 400); } },
+  { id: 'tasks', icon: 'check-square', label: "Today's tasks", run: () => navigate('daily-checklist') },
+  { id: 'owner-report', icon: 'receipt', label: 'Generate owner report', admin: true, run: () => { navigate('balance-sheet'); setTimeout(() => { if (typeof loadOwnerReport === 'function') loadOwnerReport(true); }, 400); } },
+  { id: 'close-day', icon: 'moon', label: 'Close the day', admin: true, run: () => navigate('finance-overview') },
+  { id: 'theme', icon: 'moon', label: 'Switch theme', run: () => toggleTheme() }
+];
+function commandsFor(q) {
+  const list = COMMANDS.filter(c => !c.admin || isAdmin());
+  if (!q) return list;
+  const t = q.toLowerCase();
+  return list.filter(c => c.label.toLowerCase().includes(t));
+}
+function paletteRunCommand(id) { const c = COMMANDS.find(x => x.id === id); if (!c || (c.admin && !isAdmin())) return; closeSearch(); c.run(); }
+function renderPaletteCommands(q) {
+  const cmds = commandsFor(q);
+  if (!cmds.length) return '';
+  const parts = ['<div class="search-group">Commands</div>'];
+  cmds.forEach(c => { const i = searchRows.length; searchRows.push({ go: () => paletteRunCommand(c.id) }); parts.push(`<button class="search-item search-cmd" data-cmd="${c.id}" data-i="${i}" onclick="searchRows[${i}].go()">${icon(c.icon)}<span>${c.label}</span></button>`); });
+  return parts.join('');
+}
+function renderPaletteAsk(q) {
+  if (!q || q.length < 2) return '';
+  const i = searchRows.length;
+  searchRows.push({ go: () => { const t = q; closeSearch(); const bar = document.getElementById('copilot-q'); if (bar) bar.value = t; copilotAsk(t); } });
+  return `<div class="search-group">Ask Siri</div><button class="search-item search-ask" data-i="${i}" onclick="searchRows[${i}].go()">${icon('sparkle')}<span>Ask Siri: “${q.replace(/</g, '&lt;')}”</span></button>`;
+}
+
+// ── 3. Room 360 ──────────────────────────────────────────────────
+const ROOM360_TABS = [{ id: 'overview', label: 'Overview' }, { id: 'residents', label: 'Residents' }, { id: 'maintenance', label: 'Maintenance' }, { id: 'history', label: 'History' }];
+let room360 = { id: null, tab: 'overview', data: null };
+
+async function roomProfile(id, tab) {
+  room360 = { id, tab: tab || 'overview', data: null };
+  openModal(`<div class="modal modal-lg"><div class="modal-header"><h3>Room</h3><button class="modal-close" aria-label="Close" onclick="closeModal()">×</button></div>
+    <div class="modal-body"><div class="sm-skel"><div class="sm-skel-line" style="width:50%"></div><div class="sm-skel-card"></div></div></div></div>`);
+  try { room360.data = await apiFetch(`/rooms/${id}/360`); smSetContext({ room_number: room360.data.room.room_number }); renderRoom360(); }
+  catch (e) { openModal(`<div class="modal"><div class="modal-header"><h3>Room</h3><button class="modal-close" aria-label="Close" onclick="closeModal()">×</button></div><div class="modal-body"><div class="alert alert-danger" style="display:block">${e.message}</div></div></div>`); }
+}
+function renderRoom360() {
+  const d = room360.data, r = d.room, h = d.health;
+  const tile = roomMapCache ? roomMapCache.floors.flatMap(f => f.rooms).find(x => String(x.id) === String(r.id)) : null;
+  const kv = rows => rows.map(([k, v]) => `<div class="r360-kv"><span>${k}</span><strong>${v || '—'}</strong></div>`).join('');
+  const cls = s => s >= 80 ? 'good' : s >= 60 ? 'ok' : 'low';
+  const body = {
+    overview: () => `
+      <div class="r360-status"><span class="health-pill ${cls(h.overall)}">Health ${h.overall}</span>${whyBtn(h.basis, 'Why this health score?')}
+        <span class="badge ${r.status === 'active' ? 'badge-green' : 'badge-amber'}">${r.status}</span></div>
+      <div class="room-health">${Object.entries(h.components).map(([k, c]) => `<div class="rh-row"><span class="rh-label">${k}</span><span class="rh-bar"><i style="width:${c.score}%" class="${cls(c.score)}"></i></span><strong>${c.score}</strong>${whyBtn(c.why, 'Why ' + k + '?')}</div>`).join('')}</div>
+      ${kv([['Floor', r.floor], ['Beds', `${d.residents.length} of ${r.total_beds} taken`], ['Rent', fmt(r.monthly_rent)], ['Type', r.room_type], ['Open requests', d.maintenance.open], ['Last inspected', r.last_inspected ? fmtDate(r.last_inspected) : 'Never']])}
+      ${(tile && tile.bed_fixes && tile.bed_fixes.length) ? tile.bed_fixes.map(o => `<div class="r360-row"><span class="text-amber">Bed number needs fixing${o.bed_number ? ` · recorded as “${o.bed_number}”` : ' · none recorded'}</span><button class="btn btn-outline btn-sm" onclick="closeModal();guestModal(null,${o.id})">${o.name}</button></div>`).join('') : ''}
+      <div class="r360-h">Inspections</div>
+      ${d.inspections.length ? d.inspections.map(i => `<div class="r360-row"><span><span class="badge ${i.condition === 'good' ? 'badge-green' : i.condition === 'poor' ? 'badge-red' : 'badge-gray'}">${i.condition}</span> ${fmtDate(i.inspected_on)}${i.note ? `<div class="t-sub">${i.note}</div>` : ''}</span><span class="t-sub">${i.username || ''}</span></div>`).join('') : '<p class="t-sub">No inspection recorded yet.</p>'}
+      <div class="flex gap-2" style="flex-wrap:wrap;margin-top:14px">
+        <button class="btn btn-primary btn-sm" onclick="inspectionForm(${r.id})">Record inspection</button>
+        ${d.residents.length < r.total_beds && r.status === 'active' ? `<button class="btn btn-outline btn-sm" onclick="closeModal();moveInWizard({ room_id: ${r.id} })">Move someone in</button>` : ''}
+        ${isAdmin() ? `<button class="btn btn-outline btn-sm" onclick="setRoomStatus(${r.id}, '${r.status === 'maintenance' ? 'active' : 'maintenance'}')">${r.status === 'maintenance' ? 'Back in service' : 'Under maintenance'}</button>` : ''}
+      </div>
+      <div id="rs-alert" class="alert alert-danger hidden" style="margin-top:10px"></div>`,
+    // Every bed, taken or free — the old tap-sheet listed them and losing that
+    // would hide the empty beds. A resident whose bed number is wrong or
+    // duplicated is listed too, flagged, never dropped to tidy the view.
+    residents: () => {
+      const byBed = new Map();
+      const odd = [];
+      for (const g of d.residents) {
+        const n = Number(g.bed_number);
+        if (Number.isInteger(n) && n >= 1 && n <= r.total_beds && !byBed.has(n)) byBed.set(n, g);
+        else odd.push(g);
+      }
+      const rows = [];
+      for (let n = 1; n <= r.total_beds; n++) {
+        const g = byBed.get(n);
+        rows.push(`<div class="r360-row"><span>Bed ${n}${g ? `<div class="t-sub"><strong>${g.name}</strong> · since ${fmtDate(g.join_date)}${g.expected_checkout ? ' · leaving ' + fmtDate(g.expected_checkout) : ''}</div>` : ''}</span>${g
+          ? `<button class="btn btn-outline btn-sm" onclick="closeModal();residentProfile(${g.id})">Open</button>`
+          : `<span class="badge badge-green">free</span>`}</div>`);
+      }
+      for (const g of odd) rows.push(`<div class="r360-row"><span class="text-amber">Bed number needs fixing${g.bed_number ? ` · recorded as “${g.bed_number}”` : ' · none recorded'}<div class="t-sub"><strong>${g.name}</strong></div></span>
+        <button class="btn btn-outline btn-sm" onclick="closeModal();residentProfile(${g.id})">Open</button></div>`);
+      return rows.join('');
+    },
+    maintenance: () => `${d.repeats.length ? `<div class="alert alert-warning" style="display:block;margin-bottom:10px">Repeated in 90 days: ${d.repeats.map(x => `${x.category} ×${x.n}`).join(', ')} — the same thing again usually means the cause is still there.</div>` : ''}
+      ${d.maintenance.items.length ? d.maintenance.items.map(c => `<div class="r360-row"><span><strong>${c.category}</strong> ${priorityBadge(c.priority)}<div class="t-sub">${fmtDate(c.created_at)} · ${c.description.slice(0, 80)}</div><div class="t-sub">Outcome: ${c.outcome}</div></span><button class="btn btn-outline btn-sm" onclick="requestSheet(${c.id})">Open</button></div>`).join('')
+        : emptyState('wrench', 'No requests ever', 'Nothing has been raised for this room.', '')}`,
+    history: () => {
+      const rows = [
+        ...d.history.lived.map(x => ({ at: x.from, html: `<strong>${x.name}</strong> ${x.kind === 'living' ? 'lives here' : 'lived here'}<div class="t-sub">${fmtDate(x.from)} → ${x.to ? fmtDate(x.to) : 'now'}</div>` })),
+        ...d.history.moves.map(x => ({ at: x.on, html: `<strong>${x.name}</strong> ${x.kind === 'moved_in' ? `moved in${x.from_room ? ' from Room ' + x.from_room : ''}` : `moved out to Room ${x.to_room}`}${x.bed ? ' · bed ' + x.bed : ''}<div class="t-sub">${fmtDate(x.on)}${x.note ? ' · ' + x.note : ''}</div>` }))
+      ].sort((a, b) => new Date(b.at) - new Date(a.at));
+      return rows.length ? `<ul class="r360-timeline">${rows.map(x => `<li><div class="tl-date">${fmtDate(x.at)}</div><div>${x.html}</div></li>`).join('')}</ul>` : emptyState('bed', 'No history yet', 'Moves and stays will appear here.', '');
+    }
+  };
+  openModal(`<div class="modal modal-lg">
+    <div class="modal-header"><h3>Room ${r.room_number}</h3><button class="modal-close" aria-label="Close" onclick="closeModal()">×</button></div>
+    <div class="modal-body">
+      <div class="subtabs" role="tablist">${ROOM360_TABS.map(t => `<button class="subtab ${t.id === room360.tab ? 'active' : ''}" role="tab" aria-selected="${t.id === room360.tab}" onclick="room360.tab='${t.id}';renderRoom360()">${t.label}</button>`).join('')}</div>
+      <div id="room360-body">${body[room360.tab]()}</div>
+    </div></div>`);
+}
+function inspectionForm(roomId) {
+  openModal(`<div class="modal"><div class="modal-header"><h3>Record inspection</h3><button class="modal-close" aria-label="Close" onclick="closeModal()">×</button></div>
+    <div class="modal-body">
+      <div class="form-group"><label for="insp-cond">Condition</label><select id="insp-cond"><option value="good">Good</option><option value="ok" selected>OK</option><option value="poor">Poor — needs work</option></select></div>
+      <div class="form-group"><label for="insp-date">Date</label><input type="date" id="insp-date" value="${nowDate()}"/></div>
+      <div class="form-group"><label for="insp-note">Note</label><textarea id="insp-note" rows="3" placeholder="What you saw — fan, geyser, walls, bathroom…"></textarea></div>
+      <button class="btn btn-primary" style="width:100%" onclick="saveInspection(${roomId})">Save</button>
+      <div id="insp-alert" class="alert alert-danger hidden" style="margin-top:10px"></div>
+    </div></div>`);
+}
+async function saveInspection(roomId) {
+  const body = { condition: document.getElementById('insp-cond').value, date: document.getElementById('insp-date').value, note: document.getElementById('insp-note').value.trim() || undefined };
+  try { await apiFetch(`/rooms/${roomId}/inspections`, { method: 'POST', body }); toast('Inspection recorded', 'ok'); if (currentPage === 'rooms') { const m = await apiFetch('/room-map'); roomMapCache = m; } roomProfile(roomId, 'overview'); }
+  catch (e) { const a = document.getElementById('insp-alert'); if (a) showAlert(a, e.message); else toast(e.message); }
+}
+
+// ── 4. Universal "Why?" ──────────────────────────────────────────
+// A small "?" beside any AI-derived figure. The text ALWAYS comes from the
+// API (`why`, `basis`, `priority_why`); nothing here composes an explanation.
+function whyBtn(text, label) {
+  if (!text) return '';
+  return `<button type="button" class="why-btn" aria-label="${(label || 'Why?').replace(/"/g, '&quot;')}" title="Why?" data-why="${String(text).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}" onclick="showWhy(this)">?</button>`;
+}
+function showWhy(btn) {
+  const text = btn.dataset.why || '';
+  const label = btn.getAttribute('aria-label') || 'Why?';
+  let pop = document.getElementById('why-pop');
+  if (pop) pop.remove();
+  pop = document.createElement('div');
+  pop.id = 'why-pop'; pop.className = 'why-pop'; pop.setAttribute('role', 'dialog'); pop.setAttribute('aria-label', label);
+  pop.innerHTML = `<div class="why-pop-h">${label}</div><div class="why-pop-t">${text.replace(/\n/g, '<br>')}</div><button class="btn btn-outline btn-sm" onclick="closeWhy()">Got it</button>`;
+  document.body.appendChild(pop);
+  // Anchor under the button on wide screens; a bottom sheet on phones.
+  const rect = btn.getBoundingClientRect();
+  if (window.innerWidth > 640) {
+    pop.style.top = `${Math.min(window.innerHeight - pop.offsetHeight - 12, rect.bottom + 8 + window.scrollY)}px`;
+    pop.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - pop.offsetWidth - 8))}px`;
+  }
+  pop.querySelector('button').focus();
+  window.__whyReturn = btn;
+}
+function closeWhy() { const p = document.getElementById('why-pop'); if (p) p.remove(); if (window.__whyReturn) { try { window.__whyReturn.focus(); } catch {} window.__whyReturn = null; } }
+
+// ── 5. Accessibility ─────────────────────────────────────────────
+// Three things the screens could not be trusted to do one by one:
+//   • every icon-only button gets an aria-label (from a real name, not the
+//     icon id when we know better);
+//   • every table header is scope="col";
+//   • every form input has a <label for>.
+// Runs on every render through the same observer the card view uses, so a
+// screen added later is covered on day one.
+const ICON_LABELS = { refresh: 'Recompute', whatsapp: 'WhatsApp', copy: 'Copy', moon: 'Evening summary', receipt: 'Download receipt', camera: 'Add photo', mic: 'Speak', search: 'Search', plus: 'Add', bell: 'Notifications', menu: 'Menu', x: 'Close', close: 'Close', chevron: 'Open', flag: 'Flag', sparkle: 'Ask Siri', trash: 'Delete', edit: 'Edit', logout: 'Log out', users: 'Residents', bed: 'Rooms', wrench: 'Requests', rupee: 'Collect', calendar: 'Date', cart: 'Expenses', megaphone: 'Announcements', 'check-square': 'Checklist', wallet: 'Finance', inbox: 'Messages', lock: 'Admin', chart: 'Chart', utensils: 'Menu' };
+function a11ySweep(root) {
+  const scope = root || document.body;
+  scope.querySelectorAll('button, a.btn, a[role=button]').forEach(b => {
+    if (b.getAttribute('aria-label') || b.getAttribute('aria-labelledby')) return;
+    const text = (b.textContent || '').replace(/\s+/g, ' ').trim();
+    if (text && !/^[×✕✓✗⬇↻+\-–—…•·?]*$/.test(text)) return;   // has readable text
+    if (b.classList.contains('modal-close') || text === '×' || text === '✕') return b.setAttribute('aria-label', 'Close');
+    if (b.classList.contains('why-btn')) return b.setAttribute('aria-label', 'Why?');
+    const use = b.querySelector('use'); const id = use ? String(use.getAttribute('href') || use.getAttribute('xlink:href') || '').replace('#i-', '') : '';
+    const label = b.getAttribute('title') || ICON_LABELS[id] || (id ? id.replace(/-/g, ' ') : '') || text || 'Button';
+    b.setAttribute('aria-label', label);
+  });
+  scope.querySelectorAll('thead th:not([scope])').forEach(th => th.setAttribute('scope', 'col'));
+  let seq = 0;
+  scope.querySelectorAll('label:not([for])').forEach(l => {
+    if (l.querySelector('input, select, textarea')) return;              // wraps its control already
+    let ctl = l.nextElementSibling;
+    if (!ctl || !/^(INPUT|SELECT|TEXTAREA)$/.test(ctl.tagName)) { const p = l.parentElement; ctl = p ? p.querySelector('input, select, textarea') : null; }
+    if (!ctl) return;
+    if (!ctl.id) ctl.id = `f-${Date.now().toString(36)}-${seq++}`;
+    l.setAttribute('for', ctl.id);
+  });
+  scope.querySelectorAll('input:not([id]):not([type=checkbox]):not([type=hidden]):not([aria-label]), select:not([id]):not([aria-label]), textarea:not([id]):not([aria-label])').forEach(el => {
+    const ph = el.getAttribute('placeholder'); if (ph) el.setAttribute('aria-label', ph.replace(/^[^\w]+/, '').trim() || 'Field');
+  });
+}
+let a11yQueued = false;
+function queueA11y() { if (a11yQueued) return; a11yQueued = true; requestAnimationFrame(() => { a11yQueued = false; try { a11ySweep(); } catch (e) { console.error(e); } }); }
+
+// Modal focus: move in on open, keep Tab inside, Esc closes, return on close.
+let modalReturnFocus = null;
+function modalFocusIn() {
+  const overlay = document.getElementById('modal-overlay');
+  if (!overlay) return;
+  if (!overlay.dataset.a11y) {
+    overlay.dataset.a11y = '1';
+    const m = overlay.querySelector('.modal'); if (m) { m.setAttribute('role', 'dialog'); m.setAttribute('aria-modal', 'true'); const h = m.querySelector('.modal-header h3'); if (h) { if (!h.id) h.id = 'modal-title-' + Date.now().toString(36); m.setAttribute('aria-labelledby', h.id); } }
+    overlay.addEventListener('keydown', e => {
+      if (e.key === 'Escape') { e.stopPropagation(); closeModal(); return; }
+      if (e.key !== 'Tab') return;
+      const f = focusables(overlay); if (!f.length) return;
+      const first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && (document.activeElement === first || !overlay.contains(document.activeElement))) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    });
+  }
+  if (!overlay.contains(document.activeElement)) {
+    // Remember where focus came from so closing can put it back — without
+    // this, Esc drops the keyboard user at the top of the page.
+    if (document.activeElement && document.activeElement !== document.body) modalReturnFocus = document.activeElement;
+    const f = focusables(overlay).filter(el => !el.classList.contains('modal-close'));
+    (f[0] || focusables(overlay)[0] || overlay).focus();
+  }
+}
+function focusables(root) { return [...root.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')].filter(el => el.offsetParent !== null); }
+
+// Wire the sweeps: the observer that mobilises tables also covers labels; the
+// modal container gets its own so focus moves the moment a modal renders.
+(function initA11y() {
+  const start = () => {
+    const pc = document.getElementById('page-content'); const mc = document.getElementById('modal-container');
+    if (pc) new MutationObserver(queueA11y).observe(pc, { childList: true, subtree: true });
+    if (mc) new MutationObserver(() => {
+      queueA11y();
+      if (document.getElementById('modal-overlay')) modalFocusIn();
+      else if (modalReturnFocus) {
+        const back = modalReturnFocus; modalReturnFocus = null;
+        if (document.body.contains(back)) { try { back.focus(); } catch (e) {} }
+      }
+    }).observe(mc, { childList: true });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeWhy(); });
+    queueA11y();
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
+})();

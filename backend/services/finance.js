@@ -99,6 +99,7 @@ async function collectionForecast(month) {
     month: m, target: Math.round(target), collected: Math.round(already), expected,
     shortfall: Math.max(0, Math.round(target - expected)),
     basis: 'Each resident’s own rent multiplied by how often she has paid by the 10th. Residents with no history are counted at 90%.',
+    why: `Target ${Math.round(target).toLocaleString('en-IN')} = the rent roll of ${rel.length} active resident${rel.length === 1 ? '' : 's'}. Expected ${expected.toLocaleString('en-IN')} = each resident's rent × her on-time rate (paid by the 10th), 90% when there is no history, never below 30%. Collected so far ${Math.round(already).toLocaleString('en-IN')} is confirmed rent this month; pending claims are not counted. ${atRisk.length} resident${atRisk.length === 1 ? '' : 's'} rated "often late" make up the likely shortfall.`,
     at_risk: atRisk.slice(0, 10).map(g => ({ id: g.id, name: g.name, room_number: g.room_number, amount_due: g.amount_due, why: g.why })),
     at_risk_total: Math.round(atRisk.reduce((t, g) => t + (g.amount_due || g.monthly_rent), 0))
   };
@@ -128,7 +129,8 @@ async function occupancyForecast() {
     next30: { low: clamp(now - out30), high: clamp(now - out30 + in30) },
     leaving: leaving.rows,
     avg_stay_days: Math.round(staysRows.rows[0].days || 0),
-    basis: `Known checkouts, plus arrivals continuing at last year’s pace (${perMonth.toFixed(1)} a month).`
+    basis: `Known checkouts, plus arrivals continuing at last year’s pace (${perMonth.toFixed(1)} a month).`,
+    why: `${now} residents now in ${total} active beds. ${out7} expected checkout${out7 === 1 ? '' : 's'} within 7 days and ${out30} within 30 (from each resident's expected checkout date). Arrivals: ${joinsLastYear.rows[0].n} joined in the last 12 months = ${perMonth.toFixed(1)} a month, so +${in7} in 7 days and +${in30} in 30. Low = leavers only; high = leavers plus arrivals; both clamped to the bed count.`
   };
 }
 
@@ -198,7 +200,16 @@ async function kpis(month) {
     expense_ratio_pct: report.totalIncome ? Math.round(report.totalExpenses * 100 / report.totalIncome) : null,
     net_operating_income: Math.round(report.netProfit),
     income: Math.round(report.totalIncome), expenses: Math.round(report.totalExpenses),
-    rent_roll: Math.round(rentRoll), rent_collected: Math.round(collectedRent.rows[0].t)
+    rent_roll: Math.round(rentRoll), rent_collected: Math.round(collectedRent.rows[0].t),
+    why: {
+      income: `Confirmed collections dated ${from} to ${to}. Pending claims and staff entries awaiting approval are not counted.`,
+      expenses: `Confirmed purchases dated ${from} to ${to}.`,
+      net_operating_income: `Income ${Math.round(report.totalIncome).toLocaleString('en-IN')} − expenses ${Math.round(report.totalExpenses).toLocaleString('en-IN')}.`,
+      collection_rate_pct: `Confirmed rent collected this month ${Math.round(collectedRent.rows[0].t).toLocaleString('en-IN')} ÷ rent roll ${Math.round(rentRoll).toLocaleString('en-IN')} (the sum of every active resident's monthly rent).`,
+      revenue_per_occupied_bed: `Income ${Math.round(report.totalIncome).toLocaleString('en-IN')} ÷ ${residents} active resident${residents === 1 ? '' : 's'}.`,
+      occupancy_pct: `${residents} active resident${residents === 1 ? '' : 's'} ÷ ${beds} bed${beds === 1 ? '' : 's'} across active rooms.`,
+      expense_ratio_pct: `Expenses ÷ income for the month.`
+    }
   };
 }
 

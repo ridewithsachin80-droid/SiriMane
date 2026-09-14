@@ -29,8 +29,12 @@ async function push({ level, category, title, detail, action_page, dedupe_key, f
 }
 
 // Runs the generators. Safe to call as often as you like.
-async function sweep() {
-  const day = istToday();
+// `opts.now` (tests only) is an IST wall-clock moment expressed as a UTC Date,
+// the same convention as ist(): new Date('2026-09-30T18:05:00Z') means 18:05 IST.
+async function sweep(opts = {}) {
+  const nowIst = opts.now ? new Date(opts.now) : ist();
+  const day = nowIst.toISOString().slice(0, 10);
+  const hour = nowIst.getUTCHours();
   const made = [];
   const add = async n => { const r = await push(n); if (r) made.push(n.dedupe_key); };
 
@@ -92,6 +96,49 @@ async function sweep() {
     title: `${m.task} ${m.next_due < day ? 'is overdue' : 'is due'}`,
     detail: `${m.vendor ? m.vendor + ' · ' : ''}due ${m.next_due}.`
   });
+
+  // ── Sprint 13: three proactive nudges, each once per window ──────────
+  // Afternoon (from 15:00 IST): one nudge, only if something is unresolved.
+  if (hour >= 15) {
+    const [highOpen, todayCollected, clToday] = await Promise.all([
+      pool.query(`SELECT COUNT(*)::int AS n FROM complaints WHERE status NOT IN ('resolved','closed') AND priority='high'`),
+      pool.query(`SELECT COUNT(*)::int AS n FROM collections WHERE is_deleted=false AND status='confirmed' AND collection_date=$1`, [day]),
+      pool.query(`SELECT COUNT(*)::int AS n FROM checklist_log l JOIN checklist_items i ON i.id=l.item_id AND i.is_active=true WHERE l.log_date=$1 AND l.is_checked=true`, [day])
+    ]);
+    const reasons = [];
+    let action = 'daily-checklist';
+    if (highOpen.rows[0].n) { reasons.push(`${highOpen.rows[0].n} high-priority request${highOpen.rows[0].n === 1 ? ' is' : 's are'} still open`); action = 'complaints'; }
+    if (facts.rentDue.count && !todayCollected.rows[0].n) { reasons.push(`nothing collected yet today with ${fmt(facts.rentDue.total)} due from ${facts.rentDue.count}`); if (action === 'daily-checklist') action = 'collect'; }
+    if (facts.checklist.total && clToday.rows[0].n / facts.checklist.total < 0.5) reasons.push(`the checklist is at ${clToday.rows[0].n} of ${facts.checklist.total}`);
+    if (reasons.length) await add({
+      level: 'important', category: 'operations', dedupe_key: `afternoon:${day}`, action_page: action,
+      title: 'Afternoon check: still open',
+      detail: reasons.map(r => r[0].toUpperCase() + r.slice(1)).join(' · ') + '. There is time before the evening summary.'
+    });
+  }
+  // Month-end (last day of the month, from 18:00 IST): what is still out.
+  const lastDay = new Date(Date.UTC(nowIst.getUTCFullYear(), nowIst.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
+  if (day === lastDay && hour >= 18) {
+    const owing = due.filter(g => g.amount_due > 0);
+    await add({
+      level: 'important', category: 'finance', dedupe_key: `monthend:${day.slice(0, 7)}`, action_page: 'rent-due',
+      title: `Month-end: ${fmt(owing.reduce((t, g) => t + g.amount_due, 0))} still outstanding from ${owing.length}`,
+      detail: `${owing.slice(0, 3).map(g => g.name).join(', ')}${owing.length > 3 ? ` +${owing.length - 3}` : ''}${owing.length ? '. ' : ''}The owner report for ${nowIst.toLocaleDateString('en-IN', { month: 'long', timeZone: 'UTC' })} is ready tomorrow morning.`
+    });
+  }
+  // Before checkout (2 days ahead): everything to settle, so nothing is rushed.
+  const soon = new Date(new Date(day + 'T00:00:00Z').getTime() + 2 * 86400000).toISOString().slice(0, 10);
+  const leaving = await pool.query(`SELECT g.id, g.name, g.deposit_amount, g.expected_checkout, r.room_number,
+        (SELECT COUNT(*)::int FROM complaints c WHERE c.guest_id=g.id AND c.status NOT IN ('resolved','closed')) AS open_requests
+      FROM guests g LEFT JOIN rooms r ON r.id=g.room_id WHERE g.is_active=true AND g.expected_checkout=$1::date`, [soon]);
+  for (const g of leaving.rows) {
+    const bal = (due.find(d => d.id === g.id) || {}).amount_due || 0;
+    await add({
+      level: 'important', category: 'residents', dedupe_key: `checkout2:${g.id}:${soon}`, action_page: 'guests',
+      title: `${g.name} checks out in 2 days${g.room_number ? ' (Room ' + g.room_number + ')' : ''}`,
+      detail: `Deposit on file ${fmt(g.deposit_amount)} · ${bal > 0 ? fmt(bal) + ' still outstanding' : 'nothing outstanding'} · ${g.open_requests ? g.open_requests + ' open request' + (g.open_requests === 1 ? '' : 's') : 'no open requests'}. Settle these before the day, not on it.`
+    });
+  }
 
   // Owner-level anomalies, folded in at digest level so they do not shout.
   try {

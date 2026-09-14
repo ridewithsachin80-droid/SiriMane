@@ -205,15 +205,33 @@ const TOOLS = {
       return { text: `${category} · ${priority} priority${room ? ' · Room ' + room : ''}: "${a.description}"`, preview, execute: { tool: 'create_complaint', label: 'Log request', args: preview } };
     }
   },
+  // Sprint 13: ONE reminder path. The Copilot and the sticky bar both land on
+  // the bulk preview — same skip rules, same cap, same confirm. The old
+  // straight-to-Reminders draft is gone; a group ask no longer has a second
+  // route that skips the preview.
   prepare_reminders: {
-    description: 'Draft WhatsApp rent reminders for residents who owe, most overdue first. Use for "send reminders", "remind the late payers".',
-    args: { min_months: 'number?', lang: 'string?', limit: 'number?' }, role: 'staff', level: 'prepare',
-    async run(a) {
-      let list = await assistant.draftReminders(a.lang === 'kn' ? 'kn' : 'en');
-      if (a.min_months) list = list.filter(r => r.months_behind >= a.min_months);
-      list.sort((x, y) => y.months_behind - x.months_behind);
-      if (a.limit) list = list.slice(0, a.limit);
-      return { text: list.length ? `${list.length} reminder${list.length === 1 ? '' : 's'} drafted — review and send from the Reminders screen.` : 'Nobody to remind ✅', reminders: list.map(r => ({ guest_id: r.guest_id, name: r.name, room: r.room_number, amount_due: r.amount_due, months_behind: r.months_behind, text: r.text })), navigate: 'reminders' };
+    description: 'Draft WhatsApp rent reminders for residents who owe, with a preview showing who is skipped and why. Use for "send reminders", "remind the late payers", "send reminders to everyone two months behind". Drafts only — sending stays one tap each.',
+    args: { min_months: 'number?', min_amount: 'number?', room: 'string?', limit: 'number?', lang: 'string?' }, role: 'staff', level: 'prepare',
+    async run(a, ctx) {
+      const bulk = require('./bulk');
+      let l = (await routes.computeRentDueList()).filter(g => g.amount_due > 0);
+      if (a.min_months) l = l.filter(g => g.monthly_rent > 0 && g.amount_due / g.monthly_rent >= a.min_months);
+      if (a.min_amount) l = l.filter(g => g.amount_due >= a.min_amount);
+      if (a.room) l = l.filter(g => String(g.room_number || '').toUpperCase() === String(a.room).toUpperCase());
+      l.sort((x, y) => y.amount_due - x.amount_due);
+      if (!l.length) return { text: 'Nobody matches — no reminders to draft ✅', rows: [] };
+      const capped = l.length > bulk.BULK_CAP;
+      const ids = l.slice(0, bulk.BULK_CAP).map(g => g.id);
+      const p = await bulk.preview({ action: 'reminders', ids, user: ctx.user });
+      const text = [
+        ...(capped ? [`${l.length} match; the first ${bulk.BULK_CAP} (most owed first) are in this batch — run it again for the rest.`] : []),
+        ...p.lines
+      ].join('\n');
+      const preview = { bulk: true, action: 'reminders', lines: p.lines, eligible: p.eligible, skipped: p.skipped, total_outstanding: p.total_outstanding, requires_second_confirm: p.requires_second_confirm, confirm_count: p.confirm_count };
+      if (!p.eligible.length) return { text, rows: p.skipped, preview };
+      return { text, rows: p.eligible, preview,
+        execute: { tool: 'bulk_execute', label: `Draft ${p.eligible.length} reminder${p.eligible.length === 1 ? '' : 's'}`,
+          args: { action: 'reminders', ids: p.eligible.map(r => r.id), acknowledged: !p.requires_second_confirm, args: {} } } };
     }
   },
   prepare_announcement: {
@@ -393,6 +411,16 @@ const TOOLS = {
     description: 'Post a notice to residents (after confirmation). ADMIN ONLY.', args: {}, role: 'admin', level: 'execute',
     async run(a, ctx) { const r = await callRoute(ctx, 'POST', '/announcements', a); return { text: `Notice posted: ${r.title}`, record: r, navigate: 'guest-messages' }; }
   }
+};
+
+// ═══════════════════ Sprint 13: the one bulk executor ═══════════════════
+// Every bulk action — from the sticky bar or the Copilot — runs through here,
+// and only via a confirmed proposal. The service re-checks eligibility, the
+// cap, the role for the specific action and the second confirmation.
+TOOLS.bulk_execute = {
+  description: 'INTERNAL — runs a confirmed bulk action (reminders, announcement, assign, documents, skip drafts). Never chosen directly.',
+  args: {}, role: 'staff', level: 'execute',
+  async run(a, ctx) { return require('./bulk').execute(a, ctx); }
 };
 
 // Role gate: 'admin' tools need admin; 'staff' tools need any logged-in user.

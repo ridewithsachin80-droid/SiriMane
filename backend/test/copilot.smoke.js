@@ -123,8 +123,16 @@ async function run(mode) {
   c = await confirmAs(staffTok, r.data.proposal.id); eq(c.status, 200, `${mode}: expense confirmed`); eq((await api('GET', '/purchases', null, adminTok)).data.length, pBefore + 1, `${mode}: one purchase row`);
   r = await askAs(staffTok, 'geyser not working in room C1'); eq(r.data.tool, 'prepare_complaint', `${mode}: complaint prepared`); eq(r.data.proposal.preview.category, 'Water', `${mode}: category Water`); eq(r.data.proposal.preview.priority, 'high', `${mode}: water → high`);
   c = await confirmAs(staffTok, r.data.proposal.id); eq(c.status, 200, `${mode}: complaint logged`); ok(/Request #\d+/.test(c.data.answer), `${mode}: request id in answer`);
-  r = await askAs(staffTok, 'send reminders to residents 1+ months behind'); eq(r.data.tool, 'prepare_reminders', `${mode}: reminders drafted`); ok(r.data.evidence.length >= 1 && r.data.evidence[0].text, `${mode}: reminder texts`); ok(r.data.actions.some(a => a.navigate === 'reminders'), `${mode}: opens Reminders`);
-  ok(!r.data.proposal, `${mode}: reminders are prepare-only (sending is the warden's tap)`);
+  // Sprint 13: a group reminder ask lands on the SAME bulk preview the sticky
+  // bar uses — skip reasons, cap, and a confirm that drafts into the Outbox.
+  // It is no longer a second path that drafts straight to the Reminders screen.
+  r = await askAs(staffTok, 'send reminders to residents 1+ months behind'); eq(r.data.tool, 'prepare_reminders', `${mode}: reminders prepared`);
+  ok(r.data.proposal && r.data.proposal.preview && r.data.proposal.preview.bulk, `${mode}: routed through the bulk preview, not a separate path`);
+  ok(Array.isArray(r.data.proposal.preview.lines) && r.data.proposal.preview.lines.length >= 1, `${mode}: the preview lines came from the server`);
+  ok(r.data.proposal.preview.lines.some(l => /Nothing is sent/i.test(l)), `${mode}: the preview says nothing is sent`);
+  ok('requires_second_confirm' in r.data.proposal.preview, `${mode}: the preview carries the second-confirmation rule`);
+  const remOutboxBefore = (await pool.query(`SELECT COUNT(*)::int AS n FROM outbox`)).rows[0].n;
+  ok((await pool.query(`SELECT COUNT(*)::int AS n FROM outbox`)).rows[0].n === remOutboxBefore, `${mode}: preview drafted nothing`);
 
   // ── request status by voice (6.1) ──────────────────────────────────────
   const openReq = (await pool.query(`SELECT id FROM complaints WHERE status<>'resolved' ORDER BY id LIMIT 1`)).rows[0];
