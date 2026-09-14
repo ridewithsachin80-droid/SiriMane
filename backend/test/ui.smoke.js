@@ -804,6 +804,12 @@ async function runAtWidth(browser, BASE, width) {
   eq(tiles, mapApi.floors.flatMap(f => f.rooms).length, `${tag} a tile per room (${tiles})`);
   const dots = await page.$$eval('.room-tile .bed', els => els.length);
   eq(dots, mapApi.totals.beds + mapApi.totals.overCapacity, `${tag} MAP: a dot per bed, plus one per over-capacity resident (${dots})`);
+  // The map and the Rooms table must never disagree about how full a room is.
+  const roomsTable = await page.evaluate(() => API.getRooms());
+  for (const t of mapApi.floors.flatMap(f => f.rooms)) {
+    const row = roomsTable.find(x => x.room_number === t.room_number);
+    if (row) eq(t.occupied, Number(row.occupied_beds), `${tag} MAP: room ${t.room_number} matches the table (${t.occupied} vs ${row.occupied_beds})`);
+  }
   eq(await page.$$eval('.room-tile .bed.occupied, .room-tile .bed.over', els => els.length), mapApi.totals.occupied, `${tag} MAP: filled dots match the API's headcount`);
   const mapHead = await page.$eval('#page-content .page-header p', e => e.textContent);
   ok(mapHead.includes(String(mapApi.totals.residents)), `${tag} MAP: the header states the true resident count`);

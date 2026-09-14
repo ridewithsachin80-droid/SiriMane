@@ -250,6 +250,26 @@ async function main() {
     const g = (await A('POST', '/guests', { name: `Packed ${b}`, phone: '7' + uniq + b + '11', room_id: packed.id, bed_number: b, join_date: today, monthly_rent: 5000, deposit_amount: 0 })).data;
     packedIds.push(g.id);
   }
+  // A duplicated or out-of-range bed number must not invent a crowd: the
+  // resident still has a bed, only the number is wrong.
+  const mixed = (await A('POST', '/rooms', { room_number: 'S5', floor: 3, total_beds: 3, monthly_rent: 5000 })).data;
+  const mixedIds = [];
+  for (const b of ['1', '1', '7000']) {
+    const g = (await A('POST', '/guests', { name: `Mixed ${mixedIds.length}`, phone: '6' + uniq + mixedIds.length + '11', room_id: mixed.id, bed_number: b, join_date: today, monthly_rent: 5000, deposit_amount: 0 })).data;
+    mixedIds.push(g.id);
+  }
+  r = await S('GET', '/room-map');
+  const mixedTile = r.data.floors.flatMap(f => f.rooms).find(x => x.room_number === 'S5');
+  eq(mixedTile.occupied, 3, 'MAP: three residents in a three-bed room read as three');
+  eq(mixedTile.on_beds, 3, 'MAP: all three are on beds');
+  eq(mixedTile.over_capacity, 0, 'MAP: none is called over capacity');
+  eq(mixedTile.free, 0, 'MAP: the room offers no free bed');
+  eq(mixedTile.bed_fix_count, 2, 'MAP: the two wrong bed numbers are flagged for correction');
+  ok(mixedTile.bed_fixes.some(f => String(f.bed_number) === '7000'), 'MAP: and the offending number is named');
+  const roomsTable = (await S('GET', '/rooms')).data.find(x => x.room_number === 'S5');
+  eq(mixedTile.occupied, Number(roomsTable.occupied_beds), 'MAP: the map agrees with the Rooms table');
+  for (const id of mixedIds) await A('PUT', `/guests/${id}`, { is_active: false, leave_date: today });
+
   r = await S('GET', '/room-map');
   const packedTile = r.data.floors.flatMap(f => f.rooms).find(x => x.room_number === 'S4');
   eq(packedTile.occupied, 3, 'MAP: a 2-bed room with 3 residents reports all 3');

@@ -41,37 +41,42 @@ router.get('/room-map', auth, async (req, res) => {
       const inRoom = residents.rows.filter(g => String(g.room_id) === String(r.id));
       // A bed is "taken" if someone names it; residents without a bed number
       // still occupy one, so they fill the unnamed beds in order.
-      // Place residents on beds, but never lose one. A bed number outside the
-      // room's capacity, or more residents than beds, produces an "over
-      // capacity" list shown on the tile — silently dropping a resident would
-      // make the map disagree with the headcount, which is worse than an
-      // ugly number.
+      // Place residents on beds without losing anyone, and without inventing
+      // a crowd. Order matters:
+      //   1. a valid, unique bed number keeps its bed;
+      //   2. everyone else — no bed number, a duplicate, or a number outside
+      //      the room (a rent figure typed into the bed box) — fills whatever
+      //      beds remain, and is flagged as needing a corrected bed number;
+      //   3. only when the beds run out is someone genuinely over capacity.
       const named = new Map();
-      const spill = [];
+      const needsBedFix = [];
       for (const g of inRoom) {
-        const b = g.bed_number ? String(g.bed_number) : null;
-        const withinRoom = b && Number(b) >= 1 && Number(b) <= r.total_beds;
+        const b = g.bed_number ? String(g.bed_number).trim() : null;
+        const withinRoom = b && /^\d+$/.test(b) && Number(b) >= 1 && Number(b) <= r.total_beds;
         if (withinRoom && !named.has(b)) named.set(b, g);
-        else if (b) spill.push(g);          // bed 3 in a 2-bed room, or two people on one bed
+        else needsBedFix.push(g);
       }
-      const unplaced = inRoom.filter(g => !g.bed_number);
+      const queue = [...needsBedFix];
       const beds = [];
+      const placedFix = [];
       for (let i = 1; i <= r.total_beds; i++) {
         const key = String(i);
         let who = named.get(key) || null;
-        if (!who && unplaced.length) who = unplaced.shift();
+        if (!who && queue.length) { who = queue.shift(); placedFix.push(who); }
         beds.push({ bed: key, state: r.status !== 'active' ? r.status : who ? 'occupied' : 'free', resident: who ? { id: who.id, name: who.name, expected_checkout: who.expected_checkout } : null });
       }
-      // Anyone still holding no bed is over capacity.
-      const over = [...spill, ...unplaced].map(g => ({ id: g.id, name: g.name, bed_number: g.bed_number }));
+      // Anyone still without a bed really is beyond the room's capacity.
+      const over = queue.map(g => ({ id: g.id, name: g.name, bed_number: g.bed_number }));
+      const bedFixes = placedFix.map(g => ({ id: g.id, name: g.name, bed_number: g.bed_number }));
       const iss = issueBy.get(String(r.room_number)) || { n: 0, high: 0 };
-      const tile = { ...r, beds, over,
-        // "occupied" counts every resident living here, including the ones
-        // over capacity, so the tile never under-reports the people present.
+      const tile = { ...r, beds, over, bed_fixes: bedFixes,
+        // "occupied" counts every resident living here, including any beyond
+        // capacity, so the tile never under-reports the people present.
         occupied: beds.filter(b => b.state === 'occupied').length + over.length,
         on_beds: beds.filter(b => b.state === 'occupied').length,
         free: beds.filter(b => b.state === 'free').length,
-        over_capacity: over.length, open_issues: iss.n, high_issues: iss.high };
+        over_capacity: over.length, bed_fix_count: bedFixes.length,
+        open_issues: iss.n, high_issues: iss.high };
       (floors[r.floor] = floors[r.floor] || []).push(tile);
     }
     const list = Object.keys(floors).sort((a, b) => Number(a) - Number(b)).map(f => ({ floor: f, rooms: floors[f] }));
@@ -86,6 +91,7 @@ router.get('/room-map', auth, async (req, res) => {
       occupied: inRooms,                 // people the tiles show
       noRoom,                            // active residents not in any active room
       overCapacity: tiles.reduce((t, r) => t + r.over_capacity, 0),
+      bedFixes: tiles.reduce((t, r) => t + r.bed_fix_count, 0),
       residents: residents.rows.length   // the headcount everything else uses
     };
     totals.free = Math.max(0, totals.beds - tiles.reduce((t, r) => t + r.on_beds, 0));

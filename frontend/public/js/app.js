@@ -4552,11 +4552,11 @@ async function pgRoomMap() {
   roomMapCache = m;
   setContent(`
     <div class="page-header"><h1>Rooms</h1><p>${m.totals.residents} resident${m.totals.residents === 1 ? '' : 's'} · ${m.totals.beds} beds · ${m.totals.free} free</p></div>
-    ${(m.totals.overCapacity || m.totals.noRoom) ? `<div class="alert alert-warning" style="display:block;margin-bottom:14px">
-      ${m.totals.overCapacity ? `${m.totals.overCapacity} resident${m.totals.overCapacity === 1 ? '' : 's'} beyond the beds their room has. ` : ''}
-      ${m.totals.noRoom ? `${m.totals.noRoom} resident${m.totals.noRoom === 1 ? '' : 's'} with no room assigned. ` : ''}
-      Everyone is counted — fix the room or bed number so the map matches reality.
-      ${m.totals.noRoom ? `<button class="btn btn-outline btn-sm" style="margin-top:8px" onclick="pgGuests('all')">Show residents</button>` : ''}
+    ${(m.totals.overCapacity || m.totals.noRoom || m.totals.bedFixes) ? `<div class="alert alert-warning" style="display:block;margin-bottom:14px">
+      ${m.totals.overCapacity ? `<div>${m.totals.overCapacity} resident${m.totals.overCapacity === 1 ? ' is' : 's are'} beyond the beds their room has.</div>` : ''}
+      ${m.totals.noRoom ? `<div>${m.totals.noRoom} resident${m.totals.noRoom === 1 ? ' has' : 's have'} no room assigned.</div>` : ''}
+      ${m.totals.bedFixes ? `<div>${m.totals.bedFixes} bed number${m.totals.bedFixes === 1 ? ' needs' : 's need'} correcting — they have a bed, but the number recorded is wrong or duplicated.</div>` : ''}
+      ${(m.totals.noRoom || m.totals.bedFixes) ? `<button class="btn btn-outline btn-sm" style="margin-top:8px" onclick="pgGuests('all')">Show residents</button>` : ''}
     </div>` : ''}
     <div class="flex gap-2 mb-5" style="flex-wrap:wrap">
       <button class="btn btn-primary btn-sm" onclick="pgRoomMap()">Map</button>
@@ -4570,7 +4570,7 @@ async function pgRoomMap() {
           <button class="room-tile ${r.status !== 'active' ? 'is-' + r.status : ''}" onclick="roomSheet(${r.id})">
             <div class="rt-head"><strong>${r.room_number}</strong>${r.high_issues ? `<span class="badge badge-red">${r.high_issues}!</span>` : r.open_issues ? `<span class="badge badge-amber">${r.open_issues}</span>` : ''}</div>
             <div class="rt-beds">${r.beds.map(b => `<i class="bed ${b.state}" title="${b.resident ? b.resident.name : b.state}"></i>`).join('')}${r.over_capacity ? `<i class="bed over" title="${r.over.map(o => o.name).join(', ')}"></i>`.repeat(r.over_capacity) : ''}</div>
-            <div class="rt-sub">${r.occupied}/${r.total_beds}${r.over_capacity ? ' <span class="text-red">+' + r.over_capacity + '</span>' : ''} · ${fmt(r.monthly_rent)}</div>
+            <div class="rt-sub">${r.occupied}/${r.total_beds}${r.over_capacity ? ' <span class="text-red">+' + r.over_capacity + '</span>' : ''}${r.bed_fix_count ? ' <span class="text-amber" title="Bed number needs correcting">⚑</span>' : ''} · ${fmt(r.monthly_rent)}</div>
           </button>`).join('')}
       </div>`).join('')}
   `);
@@ -4589,6 +4589,8 @@ function roomSheet(id) {
       <div class="r360-kv"><span>Condition</span><strong>${r.status}</strong></div>
       <div class="r360-kv"><span>Last inspected</span><strong>${r.last_inspected ? fmtDate(r.last_inspected) : 'Never'}</strong></div>
       <div class="r360-h">Beds</div>
+      ${(r.bed_fixes || []).map(o => `<div class="r360-row"><span class="text-amber">Bed number needs fixing${o.bed_number ? ` · recorded as “${o.bed_number}”` : ' · none recorded'}</span>
+        <button class="btn btn-outline btn-sm" onclick="closeModal();guestModal(${o.id})">${o.name}</button></div>`).join('')}
       ${(r.over || []).map(o => `<div class="r360-row"><span class="text-red">Over capacity${o.bed_number ? ' · bed ' + o.bed_number : ' · no bed'}</span>
         <button class="btn btn-outline btn-sm" onclick="closeModal();residentProfile(${o.id})">${o.name}</button></div>`).join('')}
       ${r.beds.map(b => `<div class="r360-row"><span>Bed ${b.bed}</span>${b.resident
