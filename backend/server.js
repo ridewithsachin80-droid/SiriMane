@@ -57,6 +57,7 @@ app.use('/api/owner', require('./routes/owner'));
 app.use('/api/copilot', require('./routes/copilot'));
 app.use('/api', require('./routes/home'));
 app.use('/api', require('./routes/finance'));
+app.use('/api', require('./routes/experience'));
 
 // Any /api path that no route claimed answers with JSON — never the landing
 // page. (Before this, a missing route returned home.html and the app showed

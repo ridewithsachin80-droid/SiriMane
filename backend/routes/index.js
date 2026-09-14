@@ -635,12 +635,14 @@ router.get('/announcements', auth, async (req, res) => {
 });
 
 router.post('/announcements', auth, requireAdmin, async (req, res) => {
-  const { title, message, priority } = req.body;
+  const { title, message, priority, target_type, target_value, publish_at, expires_at } = req.body;
   if (!title || !message) return res.status(400).json({ error: 'Title and message required' });
+  const tt = ['all', 'floor', 'room', 'resident'].includes(target_type) ? target_type : 'all';
+  if (tt !== 'all' && !String(target_value || '').trim()) return res.status(400).json({ error: 'Choose who this notice is for' });
   try {
     const r = await pool.query(
-      `INSERT INTO announcements(title,message,priority) VALUES($1,$2,$3) RETURNING *`,
-      [title, message, priority||'normal']);
+      `INSERT INTO announcements(title,message,priority,target_type,target_value,publish_at,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [title, message, priority||'normal', tt, tt === 'all' ? null : String(target_value).trim(), publish_at || null, expires_at || null]);
     res.status(201).json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1906,6 +1908,7 @@ router.get('/guests/:id/timeline', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+module.exports.guestAuth = guestAuth;
 module.exports.computeReportData = computeReportData;
 module.exports.computeTrend = computeTrend;
 module.exports.computeBalanceSheetData = computeBalanceSheetData;

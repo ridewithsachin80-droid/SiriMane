@@ -65,6 +65,8 @@ async function runAtWidth(browser, BASE, width, fixtures) {
   ok(duesTop < 520, `${tag} dues visible without scrolling (top ${Math.round(duesTop)}px)`);
 
   // ── Dues card is first and shows the real balance ─────────────────────
+  // Sprint 11 makes Home the landing tab; the dues card lives on Pay.
+  await page.evaluate(() => showTab('pay'));
   await page.waitForSelector('.dues-hero .dues-amount', { timeout: 8000 });
   const shown = await page.$eval('.dues-hero .dues-amount', e => e.textContent.trim());
   const expected = '₹' + Math.abs(fixtures.balance).toLocaleString('en-IN');
@@ -220,7 +222,7 @@ async function runAtWidth(browser, BASE, width, fixtures) {
   if (await page.$('#login-mobile')) {
     await page.type('#login-mobile', PHONE);
     await page.type('#login-password', PHONE);
-    await page.click('#login-btn');
+    await page.evaluate(() => document.getElementById('login-btn').click());
     await page.waitForFunction(() => !document.getElementById('portal-section').classList.contains('hidden'), { timeout: 8000 });
   }
   const tabLabels = await page.$$eval('.tab', els => els.map(e => ({ label: e.textContent.trim(), tab: e.dataset.tab })));
@@ -239,6 +241,83 @@ async function runAtWidth(browser, BASE, width, fixtures) {
   const idW = await page.evaluate(() => Math.round(document.querySelector('.idcard').getBoundingClientRect().right));
   ok(idW <= width + 1, `${tag} ID card fits the screen (${idW}px)`);
   await page.screenshot({ path: path.join(SHOTS, `portal-id-${width}.png`) });
+
+  // ── Sprint 11: portal home, meals, visitors, emergency, satisfaction ───
+  if (await page.$('#login-mobile')) {
+    await page.type('#login-mobile', PHONE); await page.type('#login-password', PHONE); await page.evaluate(() => document.getElementById('login-btn').click());
+    await page.waitForFunction(() => !document.getElementById('portal-section').classList.contains('hidden'), { timeout: 8000 });
+  }
+  await page.evaluate(() => showTab('home'));
+  await page.waitForSelector('.h-due .amt', { timeout: 12000 });
+  const homeTxt = await page.$eval('#p-home', e => e.textContent);
+  ok(/Good (morning|afternoon|evening)/.test(homeTxt), `${tag} portal home greets her`);
+  ok(/Today's meals/.test(homeTxt), `${tag} today's meals on home`);
+  ok(await page.$('.p-bottomnav'), `${tag} bottom navigation present`);
+  eq(await page.$$eval('.p-bottomnav button', els => els.length), 5, `${tag} five bottom-nav items`);
+  eq(await page.$eval('.p-bottomnav button.active', e => e.dataset.nav), 'home', `${tag} Home highlighted`);
+  const navH = await page.$eval('.p-bottomnav button', e => e.getBoundingClientRect().height);
+  ok(navH >= 44, `${tag} bottom-nav targets are thumb-sized (${Math.round(navH)}px)`);
+  await page.screenshot({ path: path.join(SHOTS, `portal-home-${width}.png`) });
+  const homeW = await page.evaluate(() => document.documentElement.scrollWidth);
+  ok(homeW <= width + 1, `${tag} portal home fits (${homeW}px)`);
+
+  // Meal rating: one tap, and it sticks
+  const hasStars = await page.$('.stars[data-meal] button:nth-child(4)');
+  if (hasStars) {
+    // The bottom nav can overlap the last star on a short viewport, so click
+    // it through the DOM rather than by coordinates.
+    await page.evaluate(() => document.querySelector('.stars[data-meal] button:nth-child(4)').click());
+    await page.waitForFunction(() => /Thanks!/.test(document.querySelector('.stars[data-meal]')?.parentElement.textContent || ''), { timeout: 8000 })
+      .catch(async () => { console.log('   DEBUG meals:', (await page.$eval('#p-home', e => e.innerText)).replace(/\s+/g, ' ').slice(0, 200)); throw new Error('rating did not stick'); });
+    ok(true, `${tag} a meal can be rated in one tap`);
+    const saved = await page.evaluate(() => apiGuest('/guest-home'));
+    ok(saved.menu.some(m => m.my_rating === 4), `${tag} the rating is stored and comes back`);
+    const insight = await fetch(`${BASE}/api/food-insight`, { headers: { Authorization: 'Bearer ' + fixtures.adminTok } }).then(r => r.json());
+    ok(insight && 'headline' in insight, `${tag} food insight computes for the owner`);
+    ok(!JSON.stringify(insight).includes('Portal Resident'), `${tag} PRIVACY: food insight names no resident`);
+  }
+
+  await page.evaluate(() => showTab('visitors'));
+  await page.waitForSelector('#vis-name', { timeout: 8000 });
+  // Fresh each run so "the newest visitor" is unambiguous.
+  await pool.query('DELETE FROM visitors');
+  await page.evaluate(() => loadVisitors());
+  const visitorName = `Amma ${width}`;
+  await page.type('#vis-name', visitorName);
+  await page.type('#vis-rel', 'Mother');
+  await page.evaluate(() => registerVisitor());
+  await page.waitForFunction(n => (document.querySelector('#vis-list')?.textContent || '').includes(n), { timeout: 8000 }, visitorName)
+    .catch(async () => { console.log('   DEBUG visitors:', await page.$eval('#vis-list', e => e.innerText.slice(0, 120)), '| alert:', await page.$eval('#vis-alert', e => e.textContent)); throw new Error('visitor not listed'); });
+  ok(true, `${tag} a visitor can be registered`);
+  ok(/Expected/.test(await page.$eval('#vis-list', e => e.textContent)), `${tag} and waits for the warden`);
+  const vlist = await fetch(`${BASE}/api/visitors`, { headers: { Authorization: 'Bearer ' + fixtures.adminTok } }).then(r => r.json());
+  const vis = vlist.find(v => v.visitor_name === visitorName);
+  ok(vis, `${tag} the warden sees the visitor`);
+  const ci = await fetch(`${BASE}/api/visitors/${vis.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + fixtures.adminTok }, body: JSON.stringify({ action: 'check_in' }) });
+  const ciBody = await ci.json();
+  eq(ci.status, 200, `${tag} the warden checks the visitor in (${JSON.stringify(ciBody).slice(0, 80)})`);
+  await page.evaluate(() => loadVisitors());
+  await page.waitForFunction(() => /At the PG now/.test(document.querySelector('#vis-list')?.textContent || ''), { timeout: 8000 });
+  ok(true, `${tag} the resident sees the check-in`);
+
+  await page.evaluate(() => showTab('emergency'));
+  await page.waitForSelector('#emergency-list .emg-row', { timeout: 8000 });
+  const emg = await page.$$eval('#emergency-list a', els => els.map(e => e.getAttribute('href')));
+  ok(emg.includes('tel:112') && emg.includes('tel:1091'), `${tag} emergency numbers are one tap to call`);
+  ok(emg.some(h => /tel:\d{10}/.test(h)), `${tag} the warden's own number is listed`);
+
+  await page.evaluate(() => showTab('home'));
+  await page.waitForSelector('.h-due .amt', { timeout: 10000 });
+  if (await page.$('#sat-card')) {
+    await page.evaluate(() => { setSat('cleanliness', 4); setSat('food', 3); setSat('safety', 5); setSat('staff', 5); setSat('wifi', 2); });
+    await page.evaluate(() => sendSatisfaction());
+    await page.waitForFunction(() => /Thank you/.test(document.querySelector('#sat-card')?.textContent || ''), { timeout: 8000 });
+    ok(true, `${tag} the monthly card can be answered`);
+    const sat = await fetch(`${BASE}/api/satisfaction`, { headers: { Authorization: 'Bearer ' + fixtures.adminTok } }).then(r => r.json());
+    ok(sat.months.length >= 1 && sat.months[0].responses >= 1, `${tag} the owner sees the averages`);
+    const rows = await pool.query('SELECT * FROM satisfaction_responses LIMIT 1');
+    ok(!('guest_id' in rows.rows[0]), `${tag} PRIVACY: the answer carries no resident id at all`);
+  }
 
   eq(jsErrors.length, 0, `${tag} no uncaught JS errors (${jsErrors.join('; ')})`);
   await page.close(); await ctx.close();
@@ -265,7 +344,7 @@ async function runAtWidth(browser, BASE, width, fixtures) {
   // The portal's own view of the balance is the source of truth for the test.
   const gLogin = await (await fetch(BASE + '/api/guest-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mobile: PHONE, password: PHONE }) })).json();
   const portal = await (await fetch(BASE + '/api/guest-portal', { headers: { Authorization: 'Bearer ' + gLogin.token } })).json();
-  const fixtures = { balance: parseFloat(portal.current_balance || 0), adminTok: login.token };
+  const fixtures = { balance: parseFloat(portal.current_balance || 0), adminTok: login.token, guestId: guest.id, roomNumber: 'P1' };
 
   const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox', '--disable-gpu'] });
   try {

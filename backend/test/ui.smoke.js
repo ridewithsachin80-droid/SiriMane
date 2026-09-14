@@ -894,6 +894,38 @@ async function runAtWidth(browser, BASE, width) {
   ok(relTxt.length >= 1, `${tag} reliability badge per resident (${relTxt[0]})`);
   ok(relTxt.every(t => /on time|late|new resident/.test(t)), `${tag} badges read as plain words, not scores`);
 
+  // ── Sprint 11: visitors, feedback, targeted notices ────────────────────
+  await page.evaluate(() => navigate('visitors'));
+  await page.waitForFunction(() => /Visitors/.test(document.querySelector('#page-content h1')?.textContent || ''), { timeout: 12000 });
+  ok(await page.$eval('#page-content', e => /registered|Registered/i.test(e.textContent)), `${tag} visitors screen renders`);
+  await noHScroll('visitors');
+  await page.evaluate(() => navigate('feedback'));
+  await page.waitForFunction(() => /Feedback/.test(document.querySelector('#page-content h1')?.textContent || ''), { timeout: 12000 });
+  const fbTxt = await page.$eval('#page-content', e => e.textContent);
+  ok(/Food/.test(fbTxt), `${tag} feedback shows the food section`);
+  ok(!/scored|score/i.test(fbTxt) || /never/i.test(fbTxt), `${tag} nothing on the screen scores a resident`);
+  await page.screenshot({ path: path.join(SHOTS, `feedback-${width}.png`) });
+  await noHScroll('feedback');
+  // A targeted notice must not reach someone it is not for.
+  await page.evaluate(() => navigate('guest-messages'));
+  await page.waitForFunction(() => document.querySelector('#page-content'), { timeout: 10000 });
+  await page.evaluate(() => announcementModal());
+  await page.waitForSelector('#an-target-type', { timeout: 8000 });
+  await page.type('#an-title', `Floor 9 only ${width}`);
+  await page.type('#an-msg', 'This notice is for floor 9.');
+  await page.select('#an-target-type', 'floor');
+  await page.type('#an-target-value', '9');
+  await page.evaluate(() => saveAnnouncement());
+  await page.waitForFunction(w => document.body.innerText.includes(`Floor 9 only ${w}`), { timeout: 10000 }, width);
+  ok(true, `${tag} a notice can be aimed at one floor`);
+  const seenByResident = await page.evaluate(async (phone) => {
+    const l = await (await fetch('/api/guest-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mobile: phone, password: phone }) })).json();
+    if (!l.token) return null;
+    const n = await (await fetch('/api/guest-notices', { headers: { Authorization: 'Bearer ' + l.token } })).json();
+    return n.map(x => x.title);
+  }, target.phone);
+  if (seenByResident) ok(!seenByResident.some(t => t.startsWith('Floor 9 only')), `${tag} PRIVACY: a resident on another floor never sees it`);
+
   eq(jsErrors.length, 0, `${tag} no uncaught JS errors (${jsErrors.join('; ')})`);
   await page.close(); await ctx.close();
 }

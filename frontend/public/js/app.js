@@ -52,7 +52,7 @@ let currentPage = null;
 function navigate(page) {
   currentPage = page;
   document.querySelectorAll('.nav-item[data-page]').forEach(b => b.classList.toggle('active', b.dataset.page===page));
-  const titles = { dashboard:'Home', rooms:'Rooms', guests:'Residents', 'daily-menu':'Daily Menu', 'daily-checklist':'Daily Checklist', complaints:'Maintenance & Requests', payments:'Payments', 'guest-messages':'Announcements', inbox:'Inbox', purchases:'Purchases', collections:'Collections', 'rent-due':'Rent Due', reports:'Reports', 'balance-sheet':'Owner & Assets', admin:'Admin', collect:'Collect Rent', reminders:'Rent Reminders', finance:'Finance', operations:'Operations', 'finance-overview':'Finance' };
+  const titles = { dashboard:'Home', rooms:'Rooms', guests:'Residents', 'daily-menu':'Daily Menu', 'daily-checklist':'Daily Checklist', complaints:'Maintenance & Requests', payments:'Payments', 'guest-messages':'Announcements', inbox:'Inbox', purchases:'Purchases', collections:'Collections', 'rent-due':'Rent Due', reports:'Reports', 'balance-sheet':'Owner & Assets', admin:'Admin', collect:'Collect Rent', reminders:'Rent Reminders', finance:'Finance', operations:'Operations', 'finance-overview':'Finance', visitors:'Visitors', feedback:'Feedback' };
   document.getElementById('page-title').textContent = titles[page]||page;
   document.getElementById('topbar-actions').innerHTML = '';
   document.getElementById('sidebar').classList.remove('open');
@@ -70,7 +70,7 @@ function navigate(page) {
     const cQ = document.getElementById('copilot-q');
     if (cQ) cQ.value = '';
   }
-  const pages = { dashboard:pgHome, rooms:pgRoomMap, 'rooms-table':pgRooms, guests:pgGuests, 'daily-menu':pgMenu, 'daily-checklist':pgChecklist, complaints:pgComplaints, payments:pgPayments, 'guest-messages':pgAnnouncements, inbox:pgInbox, purchases:pgPurchases, collections:pgCollections, 'rent-due':pgRentDue, reports:pgReports, 'balance-sheet':pgBalanceSheet, admin:pgAdmin, collect:pgCollect, reminders:pgReminders, finance:pgFinance, operations:pgOperations, 'finance-overview':pgFinanceOverview };
+  const pages = { dashboard:pgHome, rooms:pgRoomMap, 'rooms-table':pgRooms, guests:pgGuests, 'daily-menu':pgMenu, 'daily-checklist':pgChecklist, complaints:pgComplaints, payments:pgPayments, 'guest-messages':pgAnnouncements, inbox:pgInbox, purchases:pgPurchases, collections:pgCollections, 'rent-due':pgRentDue, reports:pgReports, 'balance-sheet':pgBalanceSheet, admin:pgAdmin, collect:pgCollect, reminders:pgReminders, finance:pgFinance, operations:pgOperations, 'finance-overview':pgFinanceOverview, visitors:pgVisitors, feedback:pgFeedback };
   if(!pages[page]) return;
   // Error boundary: a thrown error inside any screen shows a retry card
   // instead of a blank page.
@@ -1386,6 +1386,14 @@ function announcementModal() {
       <div class="modal-body">
         <div id="an-alert" class="alert alert-danger hidden"></div>
         <div class="form-group"><label>Title *</label><input id="an-title" placeholder="e.g. Water supply maintenance"/></div>
+        <div class="form-row">
+          <div class="form-group"><label>Who is this for?</label>
+            <select id="an-target-type" onchange="document.getElementById('an-target-value').classList.toggle('hidden', this.value==='all')">
+              <option value="all">Everyone</option><option value="floor">One floor</option><option value="room">One room</option>
+            </select>
+          </div>
+          <div class="form-group"><label>Which one?</label><input id="an-target-value" class="hidden" placeholder="e.g. 2 or 204"/></div>
+        </div>
         <div class="form-group"><label>Priority</label>
           <select id="an-priority">
             <option value="normal">Normal</option>
@@ -1404,7 +1412,10 @@ function announcementModal() {
 
 async function saveAnnouncement() {
   const al = document.getElementById('an-alert');
-  const d = { title:document.getElementById('an-title').value.trim(), message:document.getElementById('an-msg').value.trim(), priority:document.getElementById('an-priority').value };
+  const tt = document.getElementById('an-target-type')?.value || 'all';
+  const d = { title:document.getElementById('an-title').value.trim(), message:document.getElementById('an-msg').value.trim(), priority:document.getElementById('an-priority').value,
+    target_type: tt, target_value: tt === 'all' ? null : (document.getElementById('an-target-value')?.value || '').trim() };
+  if (tt !== 'all' && !d.target_value) { showAlert(al, 'Say which floor or room this is for'); return; }
   if(!d.title||!d.message) { showAlert(al,'Title and message required'); return; }
   try { await API.createAnnouncement(d); closeModal(); pgAnnouncements(); } catch(e) { showAlert(al,e.message); }
 }
@@ -4043,7 +4054,8 @@ const NAV_GROUPS = {
     { page: 'reports', label: 'Reports' }, { page: 'balance-sheet', label: 'Owner & Assets', admin: true } ] },
   operations: { label: 'Operations', tabs: [
     { page: 'daily-checklist', label: 'Checklist' }, { page: 'complaints', label: 'Requests' },
-    { page: 'daily-menu', label: 'Menu' }, { page: 'guest-messages', label: 'Announcements' } ] }
+    { page: 'daily-menu', label: 'Menu' }, { page: 'guest-messages', label: 'Announcements' },
+    { page: 'visitors', label: 'Visitors' }, { page: 'feedback', label: 'Feedback' } ] }
 };
 const PAGE_GROUP = {};
 for (const [g, def] of Object.entries(NAV_GROUPS)) for (const t of def.tabs) PAGE_GROUP[t.page] = g;
@@ -4838,4 +4850,76 @@ async function loadReliability() {
     const cls = { high: 'badge-green', medium: 'badge-amber', at_risk: 'badge-red', new: 'badge-gray' }[r.level];
     el.innerHTML = `<span class="badge ${cls}" title="${r.why}">${label}</span>`;
   });
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   SPRINT 11 — what residents tell us: visitors, food, experience.
+   Everything here is aggregated to a room, a floor or a dish. No
+   resident is ever scored.
+   ═══════════════════════════════════════════════════════════════ */
+async function pgVisitors() {
+  skeleton('cards');
+  document.getElementById('topbar-actions').innerHTML = '';
+  const list = await apiFetch('/visitors');
+  const label = { expected: 'Expected', in: 'Inside now', out: 'Left', denied: 'Not allowed' };
+  const badge = { expected: 'badge-blue', in: 'badge-green', out: 'badge-gray', denied: 'badge-red' };
+  const today = list.filter(v => v.status === 'expected' || v.status === 'in');
+  setContent(`
+    <div class="page-header"><h1>Visitors</h1><p>Registered by residents · ${today.length} expected or inside</p></div>
+    ${list.length ? `<div class="card"><div class="table-wrap"><table>
+      <thead><tr><th>VISITOR</th><th>FOR</th><th>EXPECTED</th><th>STATUS</th><th>ACTIONS</th></tr></thead>
+      <tbody>${list.map(v => `<tr>
+        <td><strong>${v.visitor_name}</strong>${v.relation ? `<div class="t-sub">${v.relation}</div>` : ''}</td>
+        <td>${v.resident_name}${v.room_number ? `<div class="t-sub">Room ${v.room_number}</div>` : ''}</td>
+        <td>${v.expected_at ? fmtDate(v.expected_at) : '—'}${v.checked_in_at ? `<div class="t-sub">in ${new Date(v.checked_in_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</div>` : ''}</td>
+        <td><span class="badge ${badge[v.status]}">${label[v.status] || v.status}</span></td>
+        <td><div class="flex gap-2">
+          ${v.status === 'expected' ? `<button class="btn btn-primary btn-sm" onclick="visitorAction(${v.id},'check_in')">Check in</button>
+            <button class="btn btn-outline btn-sm" onclick="visitorAction(${v.id},'deny')">Deny</button>` : ''}
+          ${v.status === 'in' ? `<button class="btn btn-outline btn-sm" onclick="visitorAction(${v.id},'check_out')">Check out</button>` : ''}
+        </div></td></tr>`).join('')}</tbody></table></div></div>`
+      : emptyState('users', 'No visitors registered', 'Residents register their visitors from the portal; they appear here for you to check in.', '')}
+  `);
+}
+async function visitorAction(id, action) {
+  try { await apiFetch(`/visitors/${id}`, { method: 'PUT', body: { action } }); toast('Updated', 'ok'); pgVisitors(); }
+  catch (e) { toast(e.message); }
+}
+
+async function pgFeedback() {
+  skeleton('cards');
+  document.getElementById('topbar-actions').innerHTML = '';
+  const [food, exp, sat] = await Promise.all([
+    apiFetch('/food-insight'),
+    isAdmin() ? apiFetch('/experience-insight').catch(() => null) : Promise.resolve(null),
+    isAdmin() ? apiFetch('/satisfaction').catch(() => null) : Promise.resolve(null)
+  ]);
+  const stars = n => '★'.repeat(Math.round(n)) + '☆'.repeat(5 - Math.round(n));
+  setContent(`
+    <div class="page-header"><h1>Feedback</h1><p>What residents are telling us — grouped, never per person</p></div>
+
+    <div class="home-section-h">Food</div>
+    <div class="card"><div style="padding:14px 16px">
+      <p style="font-size:14px">${food.headline}</p>
+      ${food.favourites.length ? `<div class="r360-h">Best liked</div>${food.favourites.map(d => `<div class="r360-row"><span>${d.dish}<div class="t-sub">${d.meal_type} · ${d.votes} votes</div></span><strong>${stars(d.avg_stars)} ${d.avg_stars}</strong></div>`).join('')}` : ''}
+      ${food.needs_work.length ? `<div class="r360-h">Least liked</div>${food.needs_work.map(d => `<div class="r360-row"><span>${d.dish}<div class="t-sub">${d.meal_type} · ${d.votes} votes</div></span><strong class="text-amber">${stars(d.avg_stars)} ${d.avg_stars}</strong></div>`).join('')}` : ''}
+      ${food.comments.length ? `<div class="r360-h">In their words</div>${food.comments.map(c => `<div class="rq-comment">“${c.comment}” <span class="t-sub">· ${c.meal_type}, ${fmtDate(c.rating_date)}</span></div>`).join('')}` : ''}
+    </div></div>
+
+    ${sat && sat.months.length ? `<div class="home-section-h">Monthly satisfaction</div>
+    <div class="card"><div style="padding:14px 16px">
+      ${sat.months.slice(0, 3).map(m => `<div class="r360-row"><span>${new Date(m.month + '-01T00:00:00Z').toLocaleDateString('en-IN', { month: 'long', year: 'numeric', timeZone: 'UTC' })}
+        <div class="t-sub">${m.responses} answer${m.responses === 1 ? '' : 's'} · cleanliness ${m.cleanliness ?? '—'} · food ${m.food ?? '—'} · safety ${m.safety ?? '—'} · staff ${m.staff ?? '—'} · wifi ${m.wifi ?? '—'}</div></span>
+        <strong>${m.overall ?? '—'}/5</strong></div>`).join('')}
+      <p class="t-sub" style="margin-top:8px">${sat.note}</p>
+    </div></div>` : ''}
+
+    ${exp && exp.rooms.length ? `<div class="home-section-h">Rooms worth looking at</div>
+    <div class="card"><div style="padding:4px 16px">
+      ${exp.rooms.map(r => `<div class="today-row">${icon('wrench')}<span class="t-main">${r.note}</span>
+        <button class="btn btn-outline btn-sm" onclick="navigate('rooms')">Open</button></div>`).join('')}
+      <p class="t-sub" style="padding:8px 0">${exp.note}</p>
+    </div></div>` : ''}
+  `);
 }

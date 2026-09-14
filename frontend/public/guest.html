@@ -56,6 +56,26 @@
     .idcard-kv { flex:1; min-width:160px; }
     .idcard-kv div { display:flex; justify-content:space-between; gap:10px; padding:6px 0; font-size:13px; border-bottom:1px solid var(--p-border); }
     .idcard-kv div span { color: var(--p-text-muted); }
+    .p-bottomnav { position: fixed; left:0; right:0; bottom:0; z-index:80; display:grid; grid-template-columns:repeat(5,1fr);
+      background: var(--p-card); border-top:1px solid var(--p-border); padding-bottom: env(safe-area-inset-bottom); box-shadow:0 -2px 12px rgba(0,0,0,.06); }
+    .p-bottomnav button { background:none; border:none; font-family:inherit; font-size:10.5px; font-weight:600; color:var(--p-text-muted);
+      display:flex; flex-direction:column; align-items:center; gap:2px; padding:8px 2px 10px; min-height:56px; cursor:pointer; }
+    .p-bottomnav button span { font-size:18px; line-height:1; }
+    .p-bottomnav button.active { color: var(--p-accent); }
+    .container { padding-bottom: 84px; }
+    .h-card { background: var(--p-card); border:1px solid var(--p-border); border-radius:14px; padding:14px 16px; margin-bottom:12px; }
+    .h-row { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid var(--p-border); font-size:14px; }
+    .h-row:last-child { border-bottom:none; }
+    .h-due { text-align:center; padding:6px 0 2px; }
+    .h-due .amt { font-size:32px; font-weight:800; }
+    .stars { display:inline-flex; gap:2px; }
+    .stars button { background:none; border:none; font-size:20px; cursor:pointer; padding:0 1px; line-height:1; color:var(--p-text-light); }
+    .stars button.on { color: var(--p-accent); }
+    .meal-row { padding:10px 0; border-bottom:1px solid var(--p-border); }
+    .meal-row:last-child { border-bottom:none; }
+    .meal-row .m-name { font-size:11px; letter-spacing:.05em; text-transform:uppercase; color:var(--p-text-muted); font-weight:700; }
+    .emg-row { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:12px 0; border-bottom:1px solid var(--p-border); }
+    .emg-row a { text-decoration:none; }
     #p-theme { background:none; border:none; cursor:pointer; font-size:18px; padding:6px 8px; border-radius:8px; line-height:1; }
 
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
@@ -233,18 +253,25 @@
 
     <!-- Tab bar -->
     <div class="tab-bar">
-      <button class="tab active" data-tab="pay" onclick="showTab('pay')">Pay Rent</button>
+      <button class="tab active" data-tab="home" onclick="showTab('home')">Home</button>
+      <button class="tab" data-tab="pay" onclick="showTab('pay')">Pay Rent</button>
       <button class="tab" data-tab="details" onclick="showTab('details')">My Details</button>
       <button class="tab" data-tab="idcard" onclick="showTab('idcard')">My ID</button>
       <button class="tab" data-tab="menu" onclick="showTab('menu')">Daily Menu</button>
       <button class="tab" data-tab="notices" onclick="showTab('notices')">Notices</button>
       <button class="tab" data-tab="complaint" onclick="showTab('complaint')">Report Issue</button>
+      <button class="tab" data-tab="visitors" onclick="showTab('visitors')">Visitors</button>
+      <button class="tab" data-tab="emergency" onclick="showTab('emergency')">Emergency</button>
       <button class="tab" data-tab="message" onclick="showTab('message')">Message Us</button>
       <button class="tab" data-tab="settings" onclick="showTab('settings')">Settings</button>
     </div>
 
     <!-- PAY RENT TAB -->
-    <div id="tab-pay">
+    <div id="tab-home">
+      <div id="p-home"><p style="text-align:center;color:var(--p-text-muted);padding:20px">Loading…</p></div>
+    </div>
+
+    <div id="tab-pay" class="hidden">
       <div class="card">
         <div class="card-h">💳 Pay Rent</div>
         <div class="card-b" id="p-pay-content">
@@ -327,6 +354,29 @@
     </div>
 
     <!-- MESSAGE US TAB -->
+    <div id="tab-visitors" class="hidden">
+      <div class="card"><div class="card-h">👋 Register a visitor</div>
+        <div class="card-b">
+          <p style="font-size:12px;color:var(--p-text-muted);margin-bottom:10px">Tell the warden who is coming. She checks them in at the gate.</p>
+          <div class="form-group"><label>Visitor's name *</label><input id="vis-name" placeholder="Who is visiting?"/></div>
+          <div class="form-row">
+            <div class="form-group"><label>Relation</label><input id="vis-rel" placeholder="Mother, friend…"/></div>
+            <div class="form-group"><label>Phone</label><input id="vis-phone" inputmode="numeric" placeholder="Optional"/></div>
+          </div>
+          <div class="form-group"><label>Expected</label><input id="vis-when" type="datetime-local"/></div>
+          <button class="btn btn-amber" onclick="registerVisitor()">Register visitor</button>
+          <div id="vis-alert" class="alert alert-danger hidden" style="margin-top:10px"></div>
+        </div>
+      </div>
+      <div class="card"><div class="card-h">📋 My visitors</div><div class="card-b" id="vis-list"></div></div>
+    </div>
+
+    <div id="tab-emergency" class="hidden">
+      <div class="card"><div class="card-h">🚨 Emergency contacts</div>
+        <div class="card-b" id="emergency-list"></div>
+      </div>
+    </div>
+
     <div id="tab-message" class="hidden">
       <div class="card">
         <div class="card-h">💬 Send a Message</div>
@@ -400,7 +450,7 @@ window.onload = () => {
     guestToken = saved;
     guestData = JSON.parse(savedData);
     showPortal();
-    loadGuestData();
+    loadGuestData().then(() => showTab('home'));
   }
   registerPortalSW();
 };
@@ -472,7 +522,7 @@ async function guestLogin() {
     sessionSave(guestToken, guestData, document.getElementById('login-remember')?.checked);
     al.classList.add('hidden');
     showPortal();
-    loadGuestData();
+    loadGuestData().then(() => showTab('home'));
     showInstallBar();
   } catch(e) {
     showAl(al, 'Connection error. Try again.', 'danger');
@@ -506,6 +556,154 @@ function showPortal() {
 }
 
 // ── LOAD FULL DATA ────────────────────────────────
+// ── Portal home ─────────────────────────────────────────────────
+let homeData = null;
+async function loadPortalHome() {
+  const host = document.getElementById('p-home');
+  if (!host) return;
+  try {
+    const [h, portal] = await Promise.all([
+      apiGuest('/guest-home'),
+      guestData ? Promise.resolve(guestData) : apiGuest('/guest-portal')
+    ]);
+    homeData = h;
+    const bal = parseFloat((portal && portal.current_balance) || 0);
+    const due = bal < -0.5 ? Math.abs(bal) : 0;
+    const dueDay = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + 1, 1));
+    const daysToDue = Math.max(0, Math.round((dueDay - Date.now()) / 86400000));
+    host.innerHTML = `
+      <div class="h-card">
+        <div style="font-size:18px;font-weight:700">${h.greeting}, ${h.resident.name ? h.resident.name.split(' ')[0] : ''}</div>
+        <div style="font-size:13px;color:var(--p-text-muted)">${h.resident.room_number ? 'Room ' + h.resident.room_number : ''}${h.resident.bed_number ? ' · Bed ' + h.resident.bed_number : ''}</div>
+      </div>
+
+      <div class="h-card h-due">
+        <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--p-text-muted)">${due > 0 ? 'Amount due' : 'Rent'}</div>
+        <div class="amt ${due > 0 ? 'text-red' : 'text-green'}">${due > 0 ? fmt(due) : 'All settled'}</div>
+        <div style="font-size:12px;color:var(--p-text-muted)">${due > 0 ? `Next rent due in ${daysToDue} day${daysToDue === 1 ? '' : 's'}` : 'Nothing pending'}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px">
+          <button class="btn btn-amber" style="margin:0" onclick="showTab('pay')">💳 Pay rent</button>
+          <button class="btn btn-outline" style="margin:0" onclick="showTab('complaint')">🛠️ Report an issue</button>
+        </div>
+      </div>
+
+      <div class="h-card">
+        <div style="font-weight:700;margin-bottom:6px">Today's meals</div>
+        ${h.menu.map(m => `
+          <div class="meal-row">
+            <div class="m-name">${m.meal_type}</div>
+            <div style="font-size:14px;margin:2px 0 6px">${m.items || '—'}</div>
+            ${m.items ? `<div class="stars" data-meal="${m.meal_type}">${[1,2,3,4,5].map(n => `<button class="${m.my_rating >= n ? 'on' : ''}" onclick="rateMeal('${m.meal_type}', ${n})" aria-label="${n} star">★</button>`).join('')}
+              <span style="font-size:12px;color:var(--p-text-muted);margin-left:6px">${m.my_rating ? 'Thanks!' : 'Rate it'}</span></div>` : ''}
+          </div>`).join('')}
+      </div>
+
+      <div class="h-card">
+        <div class="h-row"><span>My requests</span><strong>${h.open_requests.length ? h.open_requests.length + ' open' : 'None open'}</strong></div>
+        <div class="h-row"><span>Notices</span><strong>${h.unread_notices ? h.unread_notices + ' new' : 'Up to date'}</strong></div>
+        <div class="h-row"><span>Visitors expected</span><strong>${h.visitors.length || 'None'}</strong></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
+          <button class="btn btn-outline" style="margin:0" onclick="showTab('notices')">Read notices</button>
+          <button class="btn btn-outline" style="margin:0" onclick="showTab('visitors')">Register a visitor</button>
+        </div>
+      </div>
+
+      ${h.satisfaction_due ? `<div class="h-card" id="sat-card">
+        <div style="font-weight:700;margin-bottom:4px">How is this month going?</div>
+        <p style="font-size:12px;color:var(--p-text-muted);margin-bottom:8px">Five taps. Answers are anonymous — the warden sees the averages, never who said what.</p>
+        ${['cleanliness','food','safety','staff','wifi'].map(k => `
+          <div class="h-row"><span style="text-transform:capitalize">${k === 'wifi' ? 'WiFi' : k}</span>
+            <span class="stars" data-sat="${k}">${[1,2,3,4,5].map(n => `<button onclick="setSat('${k}',${n})" aria-label="${n}">★</button>`).join('')}</span></div>`).join('')}
+        <button class="btn btn-amber" style="margin-top:10px" onclick="sendSatisfaction()">Send</button>
+        <div id="sat-alert" class="alert alert-danger hidden" style="margin-top:8px"></div>
+      </div>` : ''}`;
+  } catch (e) { host.innerHTML = `<p style="text-align:center;color:var(--p-red);padding:20px">${e.message}</p>`; }
+}
+
+// Small fetch helper for the portal's own endpoints.
+async function apiGuest(path, options = {}) {
+  const res = await fetch('/api' + path, {
+    method: options.method || 'GET',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + guestToken },
+    body: options.body ? JSON.stringify(options.body) : undefined
+  });
+  const text = await res.text();
+  let data; try { data = JSON.parse(text); } catch { data = { error: 'Unexpected response' }; }
+  if (!res.ok) throw new Error(data.error || 'Request failed');
+  return data;
+}
+
+async function rateMeal(meal, stars) {
+  try {
+    await apiGuest('/guest-meal-rating', { method: 'POST', body: { meal_type: meal, stars } });
+    const row = document.querySelector(`.stars[data-meal="${meal}"]`);
+    if (row) { [...row.querySelectorAll('button')].forEach((b, i) => b.classList.toggle('on', i < stars)); const t = row.querySelector('span'); if (t) t.textContent = 'Thanks!'; }
+  } catch (e) { alert(e.message); }
+}
+
+const satAnswers = {};
+function setSat(key, n) {
+  satAnswers[key] = n;
+  const row = document.querySelector(`.stars[data-sat="${key}"]`);
+  if (row) [...row.querySelectorAll('button')].forEach((b, i) => b.classList.toggle('on', i < n));
+}
+async function sendSatisfaction() {
+  const al = document.getElementById('sat-alert');
+  try {
+    await apiGuest('/guest-satisfaction', { method: 'POST', body: satAnswers });
+    const card = document.getElementById('sat-card');
+    if (card) card.innerHTML = '<p style="text-align:center;padding:8px">Thank you — that helps.</p>';
+  } catch (e) { if (al) { al.textContent = e.message; al.classList.remove('hidden'); } }
+}
+
+// ── Visitors ────────────────────────────────────────────────────
+async function registerVisitor() {
+  const al = document.getElementById('vis-alert');
+  const body = {
+    visitor_name: document.getElementById('vis-name').value.trim(),
+    relation: document.getElementById('vis-rel').value.trim(),
+    visitor_phone: document.getElementById('vis-phone').value.trim(),
+    expected_at: document.getElementById('vis-when').value || null
+  };
+  try {
+    await apiGuest('/guest-visitor', { method: 'POST', body });
+    ['vis-name','vis-rel','vis-phone','vis-when'].forEach(id => document.getElementById(id).value = '');
+    if (al) al.classList.add('hidden');
+    loadVisitors();
+  } catch (e) { if (al) { al.textContent = e.message; al.classList.remove('hidden'); } }
+}
+async function loadVisitors() {
+  const host = document.getElementById('vis-list');
+  if (!host) return;
+  try {
+    const list = await apiGuest('/guest-visitors');
+    const label = { expected: 'Expected', in: 'At the PG now', out: 'Left', denied: 'Not allowed in' };
+    host.innerHTML = list.length ? list.map(v => `
+      <div class="h-row"><span><strong>${v.visitor_name}</strong>${v.relation ? ' · ' + v.relation : ''}
+        <div style="font-size:12px;color:var(--p-text-muted)">${v.expected_at ? fmtDate(v.expected_at) : ''}${v.checked_in_at ? ' · in ' + new Date(v.checked_in_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : ''}</div></span>
+        <span class="badge ${v.status === 'in' ? 'badge-green' : v.status === 'denied' ? 'badge-red' : 'badge-blue'}">${label[v.status] || v.status}</span></div>`).join('')
+      : '<p style="text-align:center;color:var(--p-text-muted);font-size:13px">No visitors registered yet</p>';
+  } catch { host.innerHTML = ''; }
+}
+
+// ── Emergency ───────────────────────────────────────────────────
+function loadEmergency() {
+  const host = document.getElementById('emergency-list');
+  if (!host) return;
+  const pg = guestData && guestData.pg_phone;
+  const rows = [
+    pg ? { label: 'Siri Mane warden', num: pg } : null,
+    { label: 'Police', num: '100' },
+    { label: 'Emergency (all services)', num: '112' },
+    { label: 'Ambulance', num: '108' },
+    { label: 'Women\'s helpline', num: '1091' },
+    { label: 'Women\'s helpline (domestic abuse)', num: '181' },
+    { label: 'Fire', num: '101' }
+  ].filter(Boolean);
+  host.innerHTML = rows.map(r => `<div class="emg-row"><span>${r.label}</span><a class="btn btn-amber" style="width:auto;margin:0;padding:8px 16px" href="tel:${r.num}">📞 ${r.num}</a></div>`).join('')
+    + '<p style="font-size:12px;color:var(--p-text-muted);margin-top:10px">In an emergency call first, then tell the warden.</p>';
+}
+
 async function loadIdCard() {
   const host = document.getElementById('idcard-body');
   if (!host) return;
@@ -864,12 +1062,16 @@ async function changePassword() {
 
 // ── TABS ──────────────────────────────────────────
 function showTab(tab) {
-  ['pay','details','idcard','menu','notices','complaint','message','settings'].forEach(t => {
+  ['home','pay','details','idcard','menu','notices','complaint','visitors','emergency','message','settings'].forEach(t => {
     document.getElementById('tab-'+t).classList.add('hidden');
   });
   document.getElementById('tab-'+tab).classList.remove('hidden');
+  if (tab === 'home') loadPortalHome();
   if (tab === 'idcard') loadIdCard();
+  if (tab === 'visitors') loadVisitors();
+  if (tab === 'emergency') loadEmergency();
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelectorAll('.p-bottomnav button').forEach(b => b.classList.toggle('active', b.dataset.nav === tab));
   if (tab === 'complaint') loadComplaintHistory();
 }
 
@@ -883,5 +1085,13 @@ function showAl(el, msg, type) {
 function fmt(n) { return '₹' + parseFloat(n||0).toLocaleString('en-IN'); }
 function fmtDate(d) { if(!d) return '—'; return new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}); }
 </script>
+
+<nav class="p-bottomnav" id="p-bottomnav">
+  <button data-nav="home" onclick="showTab('home')"><span>🏠</span>Home</button>
+  <button data-nav="pay" onclick="showTab('pay')"><span>💳</span>Pay</button>
+  <button data-nav="menu" onclick="showTab('menu')"><span>🍽️</span>Menu</button>
+  <button data-nav="complaint" onclick="showTab('complaint')"><span>🛠️</span>Requests</button>
+  <button data-nav="__more" onclick="document.querySelector('.tab-bar').scrollIntoView({behavior:'smooth'})"><span>⋯</span>More</button>
+</nav>
 </body>
 </html>
