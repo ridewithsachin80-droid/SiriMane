@@ -126,6 +126,17 @@ Extract ONLY these fields and reply with a single JSON object, nothing else:
 }
 Use the grand total, not a sub-total. If the image is not a bill, set every field to null and confidence to "low".`;
 
+const FAULT_PROMPT = `You are looking at a photo a resident or warden took of something broken in an Indian paying-guest hostel: a leak, a light, a fan, a door, a geyser, mould, an insect problem, a damaged fitting.
+Reply with a single JSON object, nothing else:
+{
+  "category": <one of Water | Electrical | Wifi/Internet | Cleanliness | Food | Furniture | Security | Noise | Other>,
+  "priority": <"low" | "medium" | "high" — water, electrical and security problems are usually high>,
+  "likely_issue": <one short sentence naming the most likely cause, e.g. "Tap washer worn — dripping at the spout">,
+  "description": <8-15 words describing what is visible, as a warden would write it>,
+  "confidence": <"high" | "medium" | "low">
+}
+Do not guess at anything not visible. If the photo shows nothing broken, set category "Other", priority "low" and confidence "low".`;
+
 const ID_PROMPT = `You are reading a photo of an Indian identity document (Aadhaar, Voter ID, Driving Licence, Passport or PAN).
 Extract ONLY these fields and reply with a single JSON object, nothing else:
 {
@@ -166,15 +177,16 @@ router.get('/probe', auth, async (req, res) => {
 // ── POST /ai/vision ── { kind: 'bill'|'id', image: dataURL } ─────────────
 router.post('/vision', auth, async (req, res) => {
   const kind = req.body && req.body.kind;
-  if (!['bill', 'id'].includes(kind)) return res.status(400).json({ error: 'kind must be "bill" or "id"' });
+  if (!['bill', 'id', 'fault'].includes(kind)) return res.status(400).json({ error: 'kind must be "bill", "id" or "fault"' });
   const img = readImage(req.body);
   if (img.error) return res.status(400).json({ error: img.error });
   if (!process.env.GEMINI_API_KEY && !providers._stub) return res.status(503).json({ error: 'Photo scanning is not enabled on this server' });
   try {
-    const text = await providers.geminiVision({ mimeType: img.mimeType, base64: img.base64, prompt: kind === 'bill' ? BILL_PROMPT : ID_PROMPT });
+    const prompt = kind === 'bill' ? BILL_PROMPT : kind === 'fault' ? FAULT_PROMPT : ID_PROMPT;
+    const text = await providers.geminiVision({ mimeType: img.mimeType, base64: img.base64, prompt });
     const parsed = parseJsonLoose(text);
     if (!parsed) return res.status(502).json({ error: 'Could not read that photo — try again with better light' });
-    const fields = kind === 'bill' ? normaliseBill(parsed) : normaliseId(parsed);
+    const fields = kind === 'bill' ? normaliseBill(parsed) : kind === 'fault' ? normaliseFault(parsed) : normaliseId(parsed);
     // Never log the image or the extracted ID number. Log only that a scan happened.
     console.log(`[ai] vision ${kind} by user ${req.user.id} (${Math.round(img.bytes / 1024)} kB) confidence=${fields.confidence}`);
     res.json({ kind, fields });
@@ -196,6 +208,19 @@ function normaliseBill(p) {
     category: cat,
     description: p.description ? String(p.description).trim().slice(0, 140) : null,
     payment_mode: mode,
+    confidence: ['high', 'medium', 'low'].includes(p.confidence) ? p.confidence : 'low'
+  };
+}
+
+// A photo of a fault only ever *suggests*; the warden confirms, exactly as
+// with a bill or an ID.
+function normaliseFault(p) {
+  const cats = ['Water', 'Electrical', 'Wifi/Internet', 'Cleanliness', 'Food', 'Furniture', 'Security', 'Noise', 'Other'];
+  return {
+    category: cats.find(c => c.toLowerCase() === String(p.category || '').toLowerCase()) || 'Other',
+    priority: ['low', 'medium', 'high'].includes(p.priority) ? p.priority : 'medium',
+    likely_issue: p.likely_issue ? String(p.likely_issue).trim().slice(0, 160) : null,
+    description: p.description ? String(p.description).trim().slice(0, 200) : null,
     confidence: ['high', 'medium', 'low'].includes(p.confidence) ? p.confidence : 'low'
   };
 }
@@ -251,4 +276,4 @@ router.post('/parse', auth, async (req, res) => {
 
 module.exports = router;
 module.exports.providers = providers;
-module.exports._internal = { parseJsonLoose, normaliseBill, normaliseId, readImage, PURCHASE_CATEGORIES };
+module.exports._internal = { parseJsonLoose, normaliseBill, normaliseId, normaliseFault, readImage, PURCHASE_CATEGORIES };

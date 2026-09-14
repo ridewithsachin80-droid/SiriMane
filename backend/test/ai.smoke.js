@@ -85,7 +85,8 @@ console.log('✓ speech parser');
 const calls = [];
 ai.providers._stub = true;
 ai.providers.geminiVision = async ({ mimeType, base64, prompt }) => {
-  calls.push({ kind: 'vision', mimeType, bytes: base64.length, promptHasBill: /bill/i.test(prompt), promptHasId: /identity/i.test(prompt) });
+  calls.push({ kind: 'vision', mimeType, bytes: base64.length, promptHasBill: /bill/i.test(prompt), promptHasId: /identity/i.test(prompt), promptHasFault: /broken/i.test(prompt) });
+  if (/broken/i.test(prompt)) return '{"category":"Water","priority":"high","likely_issue":"Tap washer worn — dripping at the spout","description":"Water dripping steadily from the bathroom tap","confidence":"high"}';
   if (/identity/i.test(prompt)) return '```json\n{"name":"Asha Rao","id_proof_type":"Aadhaar","id_proof_number":"1234 5678 9012","address":"12 MG Road, Tumakuru 572101","confidence":"high"}\n```';
   return '{"amount":"1,250.00","paid_to":"Sri Ganesh Stores","purchase_date":"2026-09-10","category":"groceries","description":"Rice, dal and cooking oil","payment_mode":"upi","confidence":"medium"}';
 };
@@ -181,6 +182,29 @@ const api = async (method, path, body, token) => {
     ai.providers.geminiVision = async () => '{"amount":"abc","category":"Space Travel","confidence":"???"}';
     r = await api('POST', '/ai/vision', { kind: 'bill', image: tinyPng }, staffTok); eq(r.status, 200, 'odd fields still 200');
     eq(r.data.fields.amount, null, 'non-numeric amount → null'); eq(r.data.fields.category, null, 'unknown category → null'); eq(r.data.fields.confidence, 'low', 'bad confidence → low');
+
+    // ── Fault photo → triage (Phase 2 completion) ──────────────────────
+    // An earlier block swapped the provider out to test failures; put the
+    // stub back before exercising a new prompt.
+    ai.providers.geminiVision = async ({ prompt }) => {
+      calls.push({ kind: 'vision', promptHasFault: /broken/i.test(prompt) });
+      return '{"category":"Water","priority":"high","likely_issue":"Tap washer worn — dripping at the spout","description":"Water dripping steadily from the bathroom tap","confidence":"high"}';
+    };
+    calls.length = 0;
+    r = await api('POST', '/ai/vision', { kind: 'fault', image: tinyPng }, staffTok); eq(r.status, 200, 'fault photo read');
+    eq(calls[0].promptHasFault, true, 'the fault prompt was used');
+    eq(r.data.fields.category, 'Water', 'category suggested'); eq(r.data.fields.priority, 'high', 'water is high priority');
+    ok(/washer/.test(r.data.fields.likely_issue), 'a likely cause is named');
+    const noReq = await pool.query(`SELECT COUNT(*)::int AS n FROM complaints WHERE description ILIKE '%dripping%'`);
+    eq(noReq.rows[0].n, 0, 'AI never files the request itself');
+    ai.providers.geminiVision = async () => '{"category":"Space Travel","priority":"urgent","confidence":"???"}';
+    r = await api('POST', '/ai/vision', { kind: 'fault', image: tinyPng }, staffTok);
+    eq(r.data.fields.category, 'Other', 'an unknown category falls back to Other');
+    eq(r.data.fields.priority, 'medium', 'an invalid priority falls back to medium');
+    r = await api('POST', '/ai/vision', { kind: 'nonsense', image: tinyPng }, staffTok); eq(r.status, 400, 'only bill, id and fault are accepted');
+    // The suggestion reaches the record only when the warden saves it
+    r = await api('POST', '/complaints', { category: 'Water', description: 'Dripping tap', priority: 'high', likely_issue: 'Tap washer worn', source: 'photo' }, staffTok);
+    eq(r.status, 201, 'the warden files it'); eq(r.data.likely_issue, 'Tap washer worn', 'the likely cause is kept on the record'); eq(r.data.source, 'photo', 'and where it came from');
 
     // ── 3. source column + guest address/ID linkage fix ────────────────
     const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);

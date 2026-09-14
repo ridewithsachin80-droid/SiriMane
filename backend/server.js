@@ -18,13 +18,13 @@ app.use(cors({
   allowedHeaders: ['Content-Type','Authorization']
 }));
 
-// Global limit: 600 requests / 15 min per IP. Raised from 200 in Sprint 6 —
-// the Copilot bar, brief and attention card make the app chattier, and a
-// warden working through a busy morning was within reach of the old cap.
+// Global limit: 2,000 requests / 15 min per IP. Raised again in Sprint 12 —
+// the bell polls, Home is one call but every screen refreshes, and a whole PG
+// sits behind one office IP. This is a brake on abuse, not on work.
 // Login attempts are limited separately below (10 / 15 min).
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 600,
+  max: 2000,
   standardHeaders: true,
   legacyHeaders: false
 }));

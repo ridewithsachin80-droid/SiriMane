@@ -22,7 +22,9 @@ if (!CHROME) { console.error('CHROME_PATH is required'); process.exit(1); }
 delete process.env.GEMINI_API_KEY; delete process.env.GROQ_API_KEY;
 const ai = require('../routes/ai');
 ai.providers._stub = true;
-ai.providers.geminiVision = async ({ prompt }) => /identity/i.test(prompt)
+ai.providers.geminiVision = async ({ prompt }) => /broken/i.test(prompt)
+  ? '{"category":"Water","priority":"high","likely_issue":"Tap washer worn","description":"Water dripping from the bathroom tap","confidence":"high"}'
+  : /identity/i.test(prompt)
   ? '{"name":"Scan Test","id_proof_type":"Aadhaar","id_proof_number":"9999 8888 7777","address":"5th Cross, Tumakuru","confidence":"high"}'
   : '{"amount":845,"paid_to":"Nandini Milk Parlour","purchase_date":"2026-09-11","category":"Groceries","description":"Milk and curd for the week","payment_mode":"Cash","confidence":"high"}';
 ai.providers.geminiText = async () => 'OK';
@@ -996,6 +998,34 @@ async function runAtWidth(browser, BASE, width) {
   ok(/Accepted/.test(aiTxt) && /Entries not typed/.test(aiTxt), `${tag} AI impact shows acceptance and entry share`);
   ok(/Acceptance is proposals confirmed/.test(aiTxt), `${tag} and explains what the number means`);
   await page.screenshot({ path: path.join(SHOTS, `ai-impact-${width}.png`) });
+
+  // ── Phase 2 completion: fault photo triage, health score's fifth part ──
+  await page.evaluate(() => navigate('complaints'));
+  await page.waitForFunction(() => document.querySelector('#page-content h1'), { timeout: 10000 });
+  await page.evaluate(() => complaintModal());
+  await page.waitForSelector('#cp-cam', { timeout: 8000 });
+  ok(true, `${tag} the request form offers a camera`);
+  const faultFields = await page.evaluate(async () => {
+    const c = document.createElement('canvas'); c.width = 40; c.height = 40; c.getContext('2d').fillRect(0, 0, 40, 40);
+    return (await apiFetch('/ai/vision', { method: 'POST', body: { kind: 'fault', image: c.toDataURL('image/jpeg', 0.7) } })).fields;
+  });
+  eq(faultFields.category, 'Water', `${tag} the photo suggests a category`);
+  eq(faultFields.priority, 'high', `${tag} and how urgent it is`);
+  const reqBefore = (await page.evaluate(() => apiFetch('/requests?status=open'))).length;
+  await page.evaluate(f => { document.getElementById('cp-preview').classList.remove('hidden'); complaintUseFault(f); }, faultFields);
+  eq(await page.$eval('#cp-category', e => e.value), 'Water', `${tag} "Use this" fills the form`);
+  eq((await page.evaluate(() => apiFetch('/requests?status=open'))).length, reqBefore, `${tag} nothing is filed by the suggestion alone`);
+  await page.evaluate(() => saveComplaint());
+  await sleep(1200);
+  const filed = (await page.evaluate(() => apiFetch('/requests?status=open'))).find(r => /dripping/i.test(r.description || ''));
+  ok(filed, `${tag} the warden files it`);
+  eq(filed.priority, 'high', `${tag} with the suggested priority`);
+  eq(filed.likely_issue, 'Tap washer worn', `${tag} and the likely cause kept on the record`);
+  eq(filed.source, 'photo', `${tag} recorded as coming from a photo`);
+  // Health score gains its fifth part once residents have rated the month
+  const brief = await page.evaluate(() => apiFetch('/copilot/brief?force=1'));
+  ok('experience' in brief.health.components, `${tag} the health score has an experience component`);
+  ok(brief.health.components.experience.why.length > 10, `${tag} which explains itself either way ("${brief.health.components.experience.why.slice(0, 40)}…")`);
 
   eq(jsErrors.length, 0, `${tag} no uncaught JS errors (${jsErrors.join('; ')})`);
   await page.close(); await ctx.close();

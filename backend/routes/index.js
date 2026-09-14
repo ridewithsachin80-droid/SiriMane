@@ -1598,11 +1598,12 @@ router.post('/complaints', auth, async (req, res) => {
       }
     }
     const r = await pool.query(
-      `INSERT INTO complaints(guest_id, guest_name, room_number, category, description, status, raised_by, created_by, source, priority, sla_due_at)
-       VALUES($1,$2,$3,$4,$5,'open','staff',$6,$7,$8, NOW() + (CASE $8::varchar WHEN 'high' THEN INTERVAL '2 hours' WHEN 'low' THEN INTERVAL '72 hours' ELSE INTERVAL '24 hours' END)) RETURNING *`,
+      `INSERT INTO complaints(guest_id, guest_name, room_number, category, description, status, raised_by, created_by, source, priority, likely_issue, sla_due_at)
+       VALUES($1,$2,$3,$4,$5,'open','staff',$6,$7,$8,$9, NOW() + (CASE $8::varchar WHEN 'high' THEN INTERVAL '2 hours' WHEN 'low' THEN INTERVAL '72 hours' ELSE INTERVAL '24 hours' END)) RETURNING *`,
       [guestId, guestName, roomNumber, (category || 'Other').trim(), String(description).trim(), req.user.id,
        ['manual','voice','photo','copilot'].includes(req.body.source) ? req.body.source : 'manual',
-       ['low','medium','high'].includes(req.body.priority) ? req.body.priority : require('../services/assistant').rulePriority(category || 'Other', description)]);
+       ['low','medium','high'].includes(req.body.priority) ? req.body.priority : require('../services/assistant').rulePriority(category || 'Other', description),
+       req.body.likely_issue ? String(req.body.likely_issue).slice(0, 160) : null]);
     await logActivity(req, 'complaint_add', `${category || 'Other'}: ${String(description).trim().slice(0, 80)}`);
     res.status(201).json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }

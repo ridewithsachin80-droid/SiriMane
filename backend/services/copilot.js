@@ -236,7 +236,9 @@ function healthScore(f, extra = {}) {
   c.operations = { score: ops, why: f.checklist.total ? `Yesterday's checklist ${f.checklist.yesterdayDone}/${f.checklist.total}` : 'Checklist not set up' };
   const maint = Math.max(0, 100 - f.complaints.open * 8 - f.complaints.urgent * 12);
   c.maintenance = { score: maint, why: f.complaints.open ? `${f.complaints.open} open request${f.complaints.open === 1 ? '' : 's'}, ${f.complaints.urgent} water/electrical/security` : 'No open requests' };
-  c.experience = extra.satisfaction != null ? { score: Math.round(extra.satisfaction * 20), why: `Resident satisfaction ${extra.satisfaction}/5` } : { score: null, why: 'Not measured yet (arrives with resident feedback)' };
+  c.experience = extra.satisfaction != null
+    ? { score: Math.round(extra.satisfaction * 20), why: `Residents rate the month ${extra.satisfaction}/5 (${extra.satisfactionResponses} answers)` }
+    : { score: null, why: 'Not measured yet — three residents need to answer the monthly card' };
   const parts = Object.values(c).filter(x => x.score != null);
   const overall = Math.round(parts.reduce((t, x) => t + x.score, 0) / parts.length);
   return { overall, components: c };
@@ -277,6 +279,20 @@ function attentionAndRecommendations(f, user) {
   return { attention: { high, medium, low }, recommendations: recs.slice(0, 3) };
 }
 
+// The most recent month with at least three answers — one or two opinions are
+// not a property-wide score.
+async function latestSatisfaction() {
+  const r = await pool.query(`
+    SELECT month, COUNT(*)::int AS responses,
+           AVG((COALESCE(cleanliness,0)+COALESCE(food,0)+COALESCE(safety,0)+COALESCE(staff,0)+COALESCE(wifi,0))::numeric
+             / NULLIF((CASE WHEN cleanliness IS NULL THEN 0 ELSE 1 END + CASE WHEN food IS NULL THEN 0 ELSE 1 END
+             + CASE WHEN safety IS NULL THEN 0 ELSE 1 END + CASE WHEN staff IS NULL THEN 0 ELSE 1 END
+             + CASE WHEN wifi IS NULL THEN 0 ELSE 1 END),0))::float AS overall
+      FROM satisfaction_responses GROUP BY month HAVING COUNT(*) >= 3 ORDER BY month DESC LIMIT 1`).catch(() => ({ rows: [] }));
+  const x = r.rows[0];
+  return x ? { month: x.month, responses: x.responses, overall: Math.round(x.overall * 10) / 10 } : { overall: null, responses: 0 };
+}
+
 async function monthlyBilled() { const r = await pool.query(`SELECT COALESCE(SUM(monthly_rent),0)::float AS t FROM guests WHERE is_active=true`); return r.rows[0].t; }
 
 async function briefV2({ user, force } = {}) {
@@ -284,8 +300,10 @@ async function briefV2({ user, force } = {}) {
   if (!force) { const hit = await assistant.cacheGet(key); if (hit) return { ...hit.data, cached: true, computed_at: hit.computed_at }; }
   const base = await assistant.getBrief({ force });
   const f = base.facts;
-  const [changed, billed] = await Promise.all([whatChanged(f), monthlyBilled()]);
-  const health = healthScore(f, { monthlyBilled: billed });
+  const [changed, billed, satisfaction] = await Promise.all([whatChanged(f), monthlyBilled(), latestSatisfaction()]);
+  // Sprint 11 gave residents a way to rate the month; that is what the fifth
+  // component of the health score has been waiting for.
+  const health = healthScore(f, { monthlyBilled: billed, satisfaction: satisfaction.overall, satisfactionResponses: satisfaction.responses });
   const { attention, recommendations } = attentionAndRecommendations(f, user);
   const greeting = (() => { const h = istNow().getUTCHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; })();
   const dateLabel = new Date(f.date + 'T00:00:00Z').toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
@@ -359,4 +377,4 @@ function startEveningScheduler({ intervalMs = 60000, log = console.log } = {}) {
   return { stop: () => clearInterval(h), tick };
 }
 
-module.exports = { ask, confirm, localIntent, modelIntent, healthScore, briefV2, eveningSummary, attentionAndRecommendations, startEveningScheduler, modelAvailable, _reset: () => { lastEvening = null; } };
+module.exports = { ask, confirm, localIntent, modelIntent, healthScore, latestSatisfaction, briefV2, eveningSummary, attentionAndRecommendations, startEveningScheduler, modelAvailable, _reset: () => { lastEvening = null; } };

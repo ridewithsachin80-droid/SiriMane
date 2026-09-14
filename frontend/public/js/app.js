@@ -1184,7 +1184,8 @@ function complaintModal() {
         <div id="cp-alert" class="alert alert-danger hidden"></div>
         <div class="voice-row">
           <button type="button" id="cp-mic" class="mic-btn" onclick="complaintVoiceToggle()" aria-label="Describe by voice">🎤</button>
-          <span id="cp-voice-status" class="voice-status">Tap the mic and say the problem, e.g. "geyser not working room 5"</span>
+          <button type="button" id="cp-cam" class="mic-btn" style="background:var(--amber)" onclick="complaintScanFault()" aria-label="Photograph the fault">${icon('camera')}</button>
+          <span id="cp-voice-status" class="voice-status">Say the problem, or photograph it — Siri suggests the category and how urgent it is.</span>
         </div>
         <div id="cp-preview" class="hidden"></div>
         <div class="form-row">
@@ -1207,8 +1208,9 @@ async function saveComplaint() {
   const description = document.getElementById('cp-desc').value.trim();
   if (!description) { showAlert(al, 'Enter a description'); return; }
   try {
-    await API.createComplaint({ category: document.getElementById('cp-category').value, guest_name: document.getElementById('cp-room').value.trim() || null, description, source: window.complaintSource || 'manual' });
-    window.complaintSource = 'manual';
+    await API.createComplaint({ category: document.getElementById('cp-category').value, guest_name: document.getElementById('cp-room').value.trim() || null, description, source: window.complaintSource || 'manual',
+      priority: window.complaintPriority || undefined, likely_issue: window.complaintLikely || undefined });
+    window.complaintSource = 'manual'; window.complaintPriority = undefined; window.complaintLikely = undefined;
     closeModal(); pgComplaints(complaintsCurrentFilter); loadComplaintsCount();
   } catch(e) { showAlert(al, e.message); }
 }
@@ -5102,4 +5104,37 @@ async function renderAdminAiTab() {
           <p class="t-sub" style="margin-top:10px">${m.note}</p>
         </div></div>`;
   } catch (e) { const h = host(); if (h) h.innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
+}
+
+
+// ── Photograph a fault: Siri suggests, the warden confirms ──────
+async function complaintScanFault() {
+  const status = document.getElementById('cp-voice-status');
+  try {
+    const r = await smScan('fault', status);
+    if (!r) return;
+    const f = r.fields;
+    const box = document.getElementById('cp-preview');
+    box.classList.remove('hidden');
+    box.innerHTML = `
+      <div class="card" style="padding:12px;border:2px solid var(--primary);background:var(--accent-soft);margin-bottom:12px">
+        <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted)">Read from the photo (${f.confidence} confidence) — please check</div>
+        <div style="font-size:14px;margin:6px 0"><strong>${f.category}</strong> · ${f.priority} priority<br>${f.description || ''}
+          ${f.likely_issue ? `<div class="t-sub">Likely: ${f.likely_issue}</div>` : ''}</div>
+        <div class="flex gap-2">
+          <button class="btn btn-primary btn-sm" onclick='complaintUseFault(${JSON.stringify(f).replace(/'/g, "&#39;")})'>✓ Use this</button>
+          <button class="btn btn-outline btn-sm" onclick="document.getElementById('cp-preview').classList.add('hidden')">✗ Ignore</button>
+        </div>
+      </div>`;
+    if (status) status.textContent = 'Photo read. Check the suggestion and tap "Use this".';
+  } catch (e) { if (status) { status.textContent = e.message; status.classList.add('voice-error'); } }
+}
+function complaintUseFault(f) {
+  const sel = document.getElementById('cp-category');
+  if (sel && [...sel.options].some(o => o.value === f.category)) smFill('cp-category', f.category);
+  if (f.description) smFill('cp-desc', f.description);
+  window.complaintSource = 'photo';
+  window.complaintPriority = f.priority;
+  window.complaintLikely = f.likely_issue || null;
+  document.getElementById('cp-preview').classList.add('hidden');
 }
