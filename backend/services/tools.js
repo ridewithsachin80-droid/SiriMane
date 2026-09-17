@@ -17,7 +17,7 @@ const assistant = require('./assistant');
 const owner = require('./owner');
 const SMParse = require('../../frontend/public/js/speech-parser.js');
 
-const fmt = n => 'Rs ' + Math.round(Number(n) || 0).toLocaleString('en-IN');
+const fmt = n => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');   // ₹, as everywhere else in the app
 const istToday = () => new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
 const isIsoDate = s => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
 

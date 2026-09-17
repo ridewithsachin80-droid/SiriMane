@@ -19,7 +19,7 @@ const SMParse = require('../../frontend/public/js/speech-parser.js');
 const quick = require('./quick');              // Sprint 14: Quick Entry
 
 const PROPOSAL_TTL_MIN = 10;
-const fmt = n => 'Rs ' + Math.round(Number(n) || 0).toLocaleString('en-IN');
+const fmt = n => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');   // shown in the Copilot box, so ₹ like the rest of the UI
 const istNow = () => new Date(Date.now() + 5.5 * 3600 * 1000);
 const istToday = () => istNow().toISOString().slice(0, 10);
 
