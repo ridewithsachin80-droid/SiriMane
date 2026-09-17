@@ -3984,7 +3984,9 @@ function renderCopilotResult(r) {
   }).join('')}${(r.evidence || []).length > 8 ? `<div class="text-muted">…and ${r.evidence.length - 8} more</div>` : ''}</div>` : '';
   const preview = r.proposal ? `<div class="copilot-preview"><div class="copilot-preview-h">Siri prepared — check before confirming</div>${previewRows(r.proposal.preview)}</div>` : '';
   const wizardBtn = r.openWizard ? `<button class="btn btn-success" onclick='openWizardFromCopilot(${JSON.stringify(r.openWizard).replace(/'/g, "&#39;")});copilotDismiss()'>${r.openWizard.kind === 'checkout' ? 'Open checkout' : 'Open move-in form'}</button>` : '';
-  const buttons = wizardBtn + (r.actions || []).map(a => {
+  const catChips = (r.actions || []).filter(a => a.chip === 'category');
+  const catRow = catChips.length ? `<div class="copilot-cats"><span class="copilot-cats-l">${r.proposal && r.proposal.preview && r.proposal.preview.category === 'Other' ? 'Category?' : 'Not ' + (r.proposal && r.proposal.preview ? r.proposal.preview.category : 'this') + '?'}</span>${catChips.map(a => `<button class="chip-cat" onclick='copilotRetool(${JSON.stringify(a).replace(/'/g, "&#39;")})'>${a.label}</button>`).join('')}</div>` : '';
+  const buttons = wizardBtn + (r.actions || []).filter(a => a.chip !== 'category').map(a => {
     if (a.confirm) return `<button class="btn btn-success" onclick="copilotConfirm('${a.confirm}', this)">✓ ${a.label}</button>`;
     if (a.navigate) return `<button class="btn btn-outline btn-sm" onclick="navigate('${a.navigate}')">${a.label}</button>`;
     if (a.download) return `<button class="btn btn-outline btn-sm" onclick="API.downloadExport('${a.download}','${a.filename || 'file'}').catch(e=>toast(e.message))">📄 ${a.label}</button>`;
@@ -3994,7 +3996,7 @@ function renderCopilotResult(r) {
   const conf = r.confidence === 'low' ? '<span class="copilot-conf">not sure</span>' : '';
   out.innerHTML = `<div class="copilot-answer ${r.clarify ? 'copilot-ask' : ''}">
     <div class="copilot-text">${(r.answer || '').replace(/\n/g, '<br>')} ${conf}</div>${evidence}${preview}
-    ${buttons ? `<div class="copilot-actions">${buttons}${r.proposal ? '<button class="btn btn-outline btn-sm" onclick="copilotDismiss()">✗ Cancel</button>' : ''}</div>` : ''}
+    ${buttons ? `<div class="copilot-actions">${buttons}${r.proposal ? '<button class="btn btn-outline btn-sm" onclick="copilotDismiss()">✗ Cancel</button>' : ''}</div>` : ''}${catRow}
   </div>`;
   // Sprint 14: "What was ₹300 for?" leaves "300 " in the box, cursor at the
   // end — she types the item and presses Enter. No retyping the number.

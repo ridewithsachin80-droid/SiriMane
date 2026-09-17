@@ -198,21 +198,23 @@ const daysAgo = n => new Date(Date.now() - n * 86400000).toISOString().slice(0, 
     ai.providers.groqText = async ({ system, user }) => {
       vseen.push(system + '\n' + user);
       if (/category/i.test(system) && !/Transcripts/.test(user)) return JSON.stringify({ category: 'Other' });
-      if (/union/i.test(user)) return JSON.stringify({ phrase: 'onion 100', confidence: 'high' });
+      if (/opinion/i.test(user)) return JSON.stringify({ phrase: 'onion 100', confidence: 'high' });
       if (/janvi/i.test(user)) return JSON.stringify({ phrase: `Jhanavi ${alpha} 5000 upi`, confidence: 'high' });
       if (/tab leaking/i.test(user)) return JSON.stringify({ phrase: `tap leaking room ${roomNo}`, confidence: 'high' });
       return JSON.stringify({ phrase: user.split('\n')[1].replace(/^\d+\. /, ''), confidence: 'low' });
     };
-    // Typed "union 100" is what she typed — NOT repaired, filed as typed.
+    // Typed "opinion 100" is what she typed — NOT repaired, filed as typed.
     vseen.length = 0;
-    i = await quick.intent('union 100', adminUser, {});
-    eq(i.args.description, 'union', 'TYPED text is never "corrected" by the model');
+    i = await quick.intent('opinion 100', adminUser, {});
+    eq(i.args.description, 'opinion', 'TYPED text is never "corrected" by the model');
+    // (Since 14.4, "union" resolves to onion by SOUND with no model at all.)
+    i = await quick.intent('union 100', adminUser, {}); eq(i.args.category, 'Groceries', '"union" → Groceries phonetically, no repair needed');
     ok(!vseen.some(x => /Transcripts/.test(x)), '…and no repair call was made for typed text');
     // Spoken, mis-heard, with Chrome's alternatives → repaired, then classified as usual.
     vseen.length = 0;
-    i = await quick.intent('union hundred rupees', adminUser, {}, { voice: true, alternatives: ['union hundred rupees', 'onion hundred rupees'] });
-    eq(i.tool, 'prepare_expense', 'VOICE: "union hundred rupees" → an expense'); eq(i.args.description, 'onion', '…for onion'); eq(i.args.category, 'Groceries', '…in Groceries'); eq(i.args.amount, 100, '…₹100');
-    eq(i.heard, 'union hundred rupees', 'it records what was heard'); eq(i.understood, 'onion 100', '…and what it understood');
+    i = await quick.intent('opinion hundred rupees', adminUser, {}, { voice: true, alternatives: ['opinion hundred rupees', 'onion hundred rupees'] });
+    eq(i.tool, 'prepare_expense', 'VOICE: "opinion hundred rupees" → an expense'); eq(i.args.description, 'onion', '…for onion'); eq(i.args.category, 'Groceries', '…in Groceries'); eq(i.args.amount, 100, '…₹100');
+    eq(i.heard, 'opinion hundred rupees', 'it records what was heard'); eq(i.understood, 'onion 100', '…and what it understood');
     eq(vseen.filter(x => /Transcripts/.test(x)).length, 1, 'exactly one repair call');
     ok(/onion hundred rupees/.test(vseen[0]), 'the repair saw Chrome\'s alternatives');
     ok(new RegExp(`Jhanavi ${alpha}`).test(vseen[0]), 'the repair saw the resident names (allowed)');
@@ -228,15 +230,15 @@ const daysAgo = n => new Date(Date.now() - n * 86400000).toISOString().slice(0, 
     i = await quick.intent('onion 100', adminUser, {}, { voice: true, alternatives: ['onion 100'] });
     eq(i.args.category, 'Groceries', 'a clearly-heard phrase classifies at once'); ok(!i.heard, '…with no repair'); eq(vseen.length, 0, '…and no model call: fast path');
     // Through the API, the answer shows the correction.
-    r = await api('POST', '/copilot/ask', { text: 'union hundred rupees', voice: true, alternatives: ['union hundred rupees', 'onion hundred rupees'] }, adminTok);
-    eq(r.data.tool, 'prepare_expense', 'API: voice repair reaches the preview'); ok(/Heard “union hundred rupees” — understood as “onion 100”/.test(r.data.answer), 'API: the answer says what was heard and what was understood');
+    r = await api('POST', '/copilot/ask', { text: 'opinion hundred rupees', voice: true, alternatives: ['opinion hundred rupees', 'onion hundred rupees'] }, adminTok);
+    eq(r.data.tool, 'prepare_expense', 'API: voice repair reaches the preview'); ok(/Heard “opinion hundred rupees” — understood as “onion 100”/.test(r.data.answer), 'API: the answer says what was heard and what was understood');
     eq(r.data.proposal.preview.description, 'onion', 'API: the preview is for onion'); eq(r.data.proposal.preview.source, 'quick', 'API: still source=quick');
     // Model down or keyless → behaves exactly as before, never an error.
     ai.providers.groqText = async () => { throw new Error('down'); };
-    i = await quick.intent('union hundred rupees', adminUser, {}, { voice: true, alternatives: [] });
-    eq(i.tool, 'prepare_expense', 'model down: still an expense'); eq(i.args.description, 'union', '…as heard'); ok(!i.heard, '…no false repair');
+    i = await quick.intent('opinion hundred rupees', adminUser, {}, { voice: true, alternatives: [] });
+    eq(i.tool, 'prepare_expense', 'model down: still an expense'); eq(i.args.description, 'opinion', '…as heard'); ok(!i.heard, '…no false repair');
     ai.providers._stub = realStub; ai.providers.groqText = realGroq;
-    i = await quick.intent('union hundred rupees', adminUser, {}, { voice: true, alternatives: [] });
+    i = await quick.intent('opinion hundred rupees', adminUser, {}, { voice: true, alternatives: [] });
     eq(i.args.category, 'Other', 'KEYLESS: voice still files, as Other');
     // A forged request cannot smuggle a phrase past the bounds.
     const many = await api('POST', '/copilot/ask', { text: 'onion 100', voice: true, alternatives: Array(20).fill('x'.repeat(300)) }, adminTok);
@@ -265,6 +267,33 @@ const daysAgo = n => new Date(Date.now() - n * 86400000).toISOString().slice(0, 
     const purchasesNow = (await pool.query(`SELECT COUNT(*)::int AS n FROM purchases WHERE description ILIKE '%janavi%' OR description ILIKE '%jhanvi%'`)).rows[0].n;
     eq(purchasesNow, 0, 'NO expense named after a resident was ever created');
     console.log('✓ fuzzy names');
+
+    // ── 14.4 Kannada / Hindi words, by sound ─────────────────────────────
+    i = await quick.intent('eruli 500rs', adminUser, {});
+    eq(i.tool, 'prepare_expense', 'SCREENSHOT: "eruli 500rs" is an expense'); eq(i.args.category, 'Groceries', '…in Groceries (ಈರುಳ್ಳಿ = onion)'); eq(i.args.amount, 500, '…₹500');
+    for (const [t, cat] of [['yerulli 40', 'Groceries'], ['irully 40', 'Groceries'], ['tamaate 60', 'Groceries'], ['aalugadde 80', 'Groceries'], ['haloo 50', 'Groceries'], ['pyaz 40', 'Groceries'], ['tamatar 60', 'Groceries'], ['chaaval 900', 'Groceries'], ['pudina soppu 20', 'Groceries'],
+                            ['nally repair 300', 'Repairs'], ['jhaadoo 80', 'Cleaning'], ['sabboo 45', 'Cleaning'], ['fenayil 120', 'Cleaning'], ['neeru tanker 900', 'Water'], ['current bill 4300', 'Electricity'], ['kurchee 1200', 'Furniture'], ['cook sambala 9000', 'Salary']]) {
+      i = await quick.intent(t, adminUser, {}); ok(i && i.tool === 'prepare_expense' && i.args.category === cat, `"${t}" → ${cat} (got ${i && i.args && i.args.category})`);
+    }
+    // Unseen spellings resolve by SOUND, not by being in the list.
+    ok(!quick.DICT.Groceries.includes('yerulli') && !quick.DICT.Cleaning.includes('jhaadoo'), 'those spellings are NOT in the dictionary — the match is phonetic');
+    // English words that are not items stay unrecognised — no wild category.
+    for (const t of ['laptop 30000', 'saree 1500', 'medicine 400', 'dinner 600']) { i = await quick.intent(t, adminUser, {}); ok(i && i.args.category === 'Other', `"${t}" stays Other (no false phonetic hit)`); }
+    // Correct-then-learn loop: an unknown item, category fixed at the preview, remembered next time.
+    r = await ask('zzkumbla 300');
+    eq(r.data.proposal.preview.category, 'Other', 'unknown item previews as Other');
+    const catChips = (r.data.actions || []).filter(a => a.chip === 'category');
+    ok(catChips.length >= 9, `the preview offers the other categories as taps (${catChips.length})`);
+    ok(/Tap the right category/.test(r.data.answer), '…and says tapping will be remembered');
+    const groc = catChips.find(a => a.label === 'Groceries');
+    r = await api('POST', '/copilot/ask', { text: 'zzkumbla 300', tool: groc.tool, args: groc.args }, adminTok);
+    eq(r.data.proposal.preview.category, 'Groceries', 'tapping Groceries re-previews as Groceries'); eq(r.data.proposal.preview.description, 'zzkumbla', '…same item'); eq(r.data.proposal.preview.source, 'quick', '…still source=quick');
+    const fewer = (r.data.actions || []).filter(a => a.chip === 'category');
+    ok(fewer.length >= 1 && fewer.length <= 4, `a recognised category shows only a short "change" row (${fewer.length})`);
+    const c4 = await A('POST', '/copilot/confirm', { proposal_id: r.data.proposal.id }); eq(c4.status, 200, 'confirmed as Groceries');
+    i = await quick.intent('zzkumbla 120', adminUser, {}); eq(i.args.category, 'Groceries', 'LEARNED: next "zzkumbla" is Groceries without asking');
+    ok(/filed "zzkumbla" under Groceries/.test(i.category_basis), '…and says it learned it from her');
+    console.log('✓ kannada/hindi + learn loop');
 
     // ── Audit ────────────────────────────────────────────────────────────
     const au = await pool.query(`SELECT COUNT(*)::int AS n FROM ai_actions WHERE interpretation::text LIKE '%"via":"quick"%' OR interpretation::text LIKE '%quick%'`);

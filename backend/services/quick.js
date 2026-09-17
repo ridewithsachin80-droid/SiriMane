@@ -39,6 +39,19 @@ const DICT = {
   Salary: 'salary wages wage staff pay cook maid watchman advance to staff'.split(/\s+/),
   'Building Rent': 'building rent owner rent lease'.split(/\s+/)
 };
+// Kannada (ಕನ್ನಡ) and Hindi words as the warden types them. One or two
+// spellings each is enough: matching below is phonetic, so eruli / eerulli /
+// irulli / eerulli all land on the same entry.
+const DICT_KN_HI = {
+  Groceries: 'eerulli eruli irulli pyaz pyaaz tamate tamatar aloogadde alugadde aalu aloo akki chawal bele togari bele dal daal godhi atta sakkare cheeni uppu namak enne tel haalu halu doodh mosaru dahi tuppa ghee motte anda balehannu bale hannu kela tenginakayi tengina kayi kobbari nariyal menasinakayi menasu mirchi hunase imli bella gud tarkari sabzi sabji soppu saag kottambari dhaniya pudina shunti adrak bellulli lehsun lahsun nimbe nimbu huralikayi hurali badanekayi badane baingan bendekayi bende bhindi kosu gobi patta gajjari gajar kumbalakayi kaddu southekayi sowthe kheera nuggekayi drumstick hagalakayi karela dappa menasinakayi shimla mirch mulangi mooli beetroot avarekayi avare kadalekayi kadale chana bataani matar palak methi menthya chapati roti idli dosa dose upittu uppittu chitranna avalakki poha ragi mudde jola navane sajje rava thindi tiffin oota bhojana naashta nasta kirani kirana anganadi angadi bakery brede biscat biskut'.split(/\s+/),
+  Cleaning: 'sabbu sabun soap fenail phenyl phenoyl pore porake kasabarige jhadu jhaadu balti bakeet bucket mugu mug bleach harpik lizol safai swachhata dustbin kasa kasada dabbi tholeyuva powder washing powder'.split(/\s+/),
+  Repairs: 'nalli nal tap nalli repair pipu pipe geyser giser heater fan fanu bulbu bulb tube light tubelight switch swich socket wire wiring current repair karpentar carpenter bagilu darwaza door kitaki khidki window beega lock chavi key kili welding painting bannna paint sement cement marali sand itige eent brick plumber plumbar electrician electrishian mistri mechanic motoru motor pump pumpu'.split(/\s+/),
+  Water: 'neeru pani water tanker tankar borewell bore motor water bill'.split(/\s+/),
+  Electricity: 'current bill bijli bill karent vidyut bescom'.split(/\s+/),
+  Furniture: 'manca mancha khat cot hasige gadde gadi mattress dimbu takiya pillow chaddar bedsheet hodike kambali blanket parade curtain kurchi kursi chair meju mez table kapatu almirah beeru cupboard'.split(/\s+/),
+  Salary: 'sambala sambla tankha pagar salary adugeyavaru cook kelasadavaru maid kavalugara watchman'.split(/\s+/)
+};
+for (const [cat, words] of Object.entries(DICT_KN_HI)) DICT[cat] = (DICT[cat] || []).concat(words);
 const DICT_INDEX = new Map();
 for (const [cat, words] of Object.entries(DICT)) for (const w of words) if (!DICT_INDEX.has(w)) DICT_INDEX.set(w, cat);
 
@@ -86,9 +99,20 @@ async function categorise(item, opts = {}) {
   for (const w of words) { const e = hist.get(w); if (e) for (const [c, n] of Object.entries(e)) votes[c] = (votes[c] || 0) + n; }
   const ranked = Object.entries(votes).sort((a, b) => b[1] - a[1]);
   if (ranked.length && (ranked.length === 1 || ranked[0][1] > ranked[1][1])) return { category: ranked[0][0], basis: `you have filed "${words.find(w => hist.get(w))}" under ${ranked[0][0]} ${ranked[0][1]} time${ranked[0][1] === 1 ? '' : 's'}` };
-  // (b) the dictionary
+  // (b) the dictionary — exact, then by sound
   for (const w of words) { const c = DICT_INDEX.get(w); if (c) return { category: c, basis: `"${w}" is usually ${c}` }; }
   for (const w of words) for (const [dw, c] of DICT_INDEX) if (dw.length >= 4 && w.length >= 4 && (dw.startsWith(w) || w.startsWith(dw))) return { category: c, basis: `"${w}" looks like ${dw} (${c})` };
+  // Kannada and Hindi in Latin letters have no fixed spelling: eruli, eerulli,
+  // irulli, eeruli are one word. Compare phonetic keys, then near-misses.
+  for (const w of words) {
+    if (w.length < 4) continue;
+    const kw = looseKey(w), skw = kw.replace(/[aeiou]/g, '');
+    for (const [dw, c] of DICT_KEYS) {
+      if (dw.key.length >= 4 && dw.key === kw) return { category: c, basis: `"${w}" sounds like ${dw.word} (${c})` };
+      if (dw.word.length >= 5 && w.length >= 5 && similarity(w, dw.word) >= 0.8) return { category: c, basis: `"${w}" looks like ${dw.word} (${c})` };
+      if (skw.length >= 4 && dw.skel === skw) return { category: c, basis: `"${w}" sounds like ${dw.word} (${c})` };
+    }
+  }
   // (c) the model — item words only. Never a name, never a rupee figure.
   if (opts.allowModel !== false && (process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY || ai.providers._stub)) {
     try {
@@ -245,6 +269,12 @@ function editDistance(a, b) {
 }
 function similarity(a, b) { a = String(a).toLowerCase(); b = String(b).toLowerCase(); const L = Math.max(a.length, b.length); return L ? 1 - editDistance(a, b) / L : 0; }
 
+// A looser key than the name key: Kannada/Hindi transliteration also swaps
+// e↔i and o↔u ("eruli"/"irulli", "sowthe"/"southe"), and "th"/"t", "sh"/"s".
+function looseKey(w) { return phoneticKey(w).replace(/e/g, 'i').replace(/o/g, 'u').replace(/(.)\1+/g, '$1'); }
+const DICT_KEYS = [];
+for (const [word, cat] of DICT_INDEX) { const key = looseKey(word); DICT_KEYS.push([{ word, key, skel: key.replace(/[aeiou]/g, '') }, cat]); }
+
 // Residents whose name is CLOSE to something in the text, best first.
 // Returns [] when nothing is close enough — never a wild guess.
 function fuzzyResidents(text, residents, hist) {
@@ -289,4 +319,4 @@ async function matchVendor(item) {
   return null;
 }
 
-module.exports = { intent, classify, repairVoice, fuzzyResidents, phoneticKey, similarity, categorise, normaliseAmount, historyIndex, invalidateHistory, CATEGORIES, DICT, FAULT_WORDS, QUESTION };
+module.exports = { intent, classify, repairVoice, fuzzyResidents, phoneticKey, looseKey, similarity, categorise, normaliseAmount, historyIndex, invalidateHistory, CATEGORIES, DICT, FAULT_WORDS, QUESTION };

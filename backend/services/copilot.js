@@ -187,6 +187,19 @@ async function ask({ user, text, context, tap, voice, alternatives, authorizatio
     if (intent.category_basis && result.text) result.text += ` Category: ${intent.category_basis}.`;
     // 14.1: she sees the correction, so a wrong guess is caught at the preview.
     if (intent.heard && result.text) result.text = `Heard “${intent.heard}” — understood as “${intent.understood}”. ` + result.text;
+    // 14.4: an expense preview offers the other categories as taps. Fixing it
+    // here — before Confirm — is what teaches the PG's history, so the next
+    // "eruli" is Groceries without anyone asking. Shown widest when the
+    // category was not recognised; a one-tap "change" otherwise.
+    if (result.execute && result.execute.tool === 'create_expense') {
+      const cur = result.preview.category;
+      // A tapped category is a deliberate choice: short row. Only a genuinely
+      // unrecognised item (or Other) gets the full list.
+      const unsure = cur === 'Other' || (intent.via === 'quick' && (!intent.category_via || intent.category_via === 'none'));
+      const cats = quick.CATEGORIES.filter(c => c !== cur);
+      result.category_chips = (unsure ? cats : cats.slice(0, 4)).map(c => ({ label: c, tool: 'prepare_expense', args: { ...v.args, category: c, source: 'quick' }, level: 'prepare', chip: 'category' }));
+      if (unsure && result.text) result.text += ' Tap the right category below — I will remember it.';
+    }
   }
   // Decision 1: a collection with no mode said asks, with the answers as taps.
   if (result && result.clarify && result.chips && result.chips.length) {
@@ -194,6 +207,7 @@ async function ask({ user, text, context, tap, voice, alternatives, authorizatio
       actions: result.chips.map(c => ({ label: c, tool: intent.tool, args: { ...v.args, mode: c, ...(intent.via === 'quick' ? { source: 'quick' } : {}) }, level: 'prepare' })) });
   }
 
+  if (result.category_chips) { result.extra_actions = result.category_chips; }
   if (result.clarify) {
     return finish({ answer: result.clarify, clarify: result.clarify, candidates: result.candidates || [], actions: (result.candidates || []).map(c => ({ label: `${c.name}${c.room_number ? ' (Room ' + c.room_number + ')' : ''}`, tool: intent.tool, args: { ...v.args, name: undefined, resident_id: c.id }, level: 'prepare' })), confidence: 'low', tool: intent.tool, via: intent.via });
   }
@@ -212,6 +226,7 @@ async function ask({ user, text, context, tap, voice, alternatives, authorizatio
     audit.proposal_id = id;
     out.proposal = { id, tool: result.execute.tool, preview: result.preview, expires_in_minutes: PROPOSAL_TTL_MIN };
     out.actions.unshift({ label: result.execute.label, confirm: id, level: 'execute' });
+    if (result.extra_actions) out.actions.push(...result.extra_actions);
   }
   return finish(out);
 }
