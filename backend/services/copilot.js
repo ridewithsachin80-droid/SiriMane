@@ -16,6 +16,7 @@ const ai = require('../routes/ai');
 const assistant = require('./assistant');
 const tools = require('./tools');
 const SMParse = require('../../frontend/public/js/speech-parser.js');
+const quick = require('./quick');              // Sprint 14: Quick Entry
 
 const PROPOSAL_TTL_MIN = 10;
 const fmt = n => 'Rs ' + Math.round(Number(n) || 0).toLocaleString('en-IN');
@@ -116,7 +117,7 @@ async function modelIntent(text, user, context) {
 // prepare_* tools built from a raw sentence use the on-device parser to fill args.
 async function enrichRawArgs(toolName, args, context) {
   if (!args.raw) return args;
-  const raw = args.raw; delete args.raw;
+  const raw = quick.normaliseAmount(args.raw); delete args.raw;   // "rs5000" → "5000"
   if (toolName === 'prepare_payment') {
     const roster = (await pool.query(`SELECT g.id, g.name, r.room_number FROM guests g LEFT JOIN rooms r ON r.id=g.room_id WHERE g.is_active=true`)).rows;
     const p = SMParse.parseCollection(raw, roster);
@@ -132,7 +133,7 @@ async function enrichRawArgs(toolName, args, context) {
 }
 
 // ── 2. Ask ────────────────────────────────────────────────────────────────
-async function ask({ user, text, context, authorization, port }) {
+async function ask({ user, text, context, tap, authorization, port }) {
   const t0 = Date.now();
   const q = String(text || '').trim().slice(0, 500);
   const audit = { user_id: user.id, request_text: q, context: context || null, interpretation: null, tools_read: [], proposal_id: null, result_text: null, error: null };
@@ -145,16 +146,25 @@ async function ask({ user, text, context, authorization, port }) {
   };
   if (!q) return finish({ answer: 'Try: "who has not paid?", "record 6000 rent from Priya by UPI", "what\'s wrong here?"', actions: [], confidence: 'high' });
 
-  let intent = localIntent(q, user, context);
+  // A tapped chip names the tool and args outright — only a tool this role
+  // may use, and only at prepare/inform level: a tap can never execute.
+  let intent = null;
+  if (tap && tools.TOOLS[tap.tool] && tools.TOOLS[tap.tool].level !== 'execute' && tools.allowed(tools.TOOLS[tap.tool], user)) {
+    intent = { tool: tap.tool, args: { ...tap.args }, via: 'tap' };
+  }
+  if (!intent) intent = localIntent(q, user, context);
+  // Sprint 14: a bare phrase — "onion 100rs", "jhanavi 500", "tap leaking
+  // room 106" — needs no verb. Deterministic, keyless, before the model.
+  if (!intent) intent = await quick.intent(q, user, context);
   if (!intent) intent = await modelIntent(q, user, context);
   if (intent && intent.error) audit.error = intent.error;
   if (!intent || (!intent.tool && !intent.clarify)) {
     // Last resort: Sprint 4 templates (pure keyword, read-only)
     const a = await assistant.ask(q);
     if (a.template) { audit.interpretation = { tool: 'template:' + a.template, via: 'template' }; return finish({ answer: a.answer, actions: [], evidence: [], confidence: 'medium', via: 'template' }); }
-    return finish({ answer: modelAvailable() ? `I'm not sure what to do with that. Try "who has not paid?", "record 6000 rent from Priya by UPI", or "what needs attention?"` : `I can answer these without AI keys: who has not paid · vacant rooms · open requests · record a payment/expense · draft reminders · today's brief.`, actions: [], clarify: intent?.clarify || null, confidence: 'low', via: intent?.via || 'none' });
+    return finish({ answer: modelAvailable() ? `I'm not sure what to do with that. Try "onion 100", "Priya 6000 upi", "tap leaking room 106", or "who has not paid?"` : `Without AI keys I still understand: "onion 100" · "Priya 6000 upi" · "tap leaking room 106" · who has not paid · vacant rooms · open requests · draft reminders · today's brief.`, actions: [], clarify: intent?.clarify || null, confidence: 'low', via: intent?.via || 'none' });
   }
-  if (!intent.tool && intent.clarify) { audit.interpretation = { tool: null, via: intent.via, clarify: intent.clarify }; return finish({ answer: intent.clarify, clarify: intent.clarify, actions: [], confidence: 'low', via: intent.via }); }
+  if (!intent.tool && intent.clarify) { audit.interpretation = { tool: null, via: intent.via, clarify: intent.clarify }; return finish({ answer: intent.clarify, clarify: intent.clarify, retry_text: intent.retry_text || null, actions: [], confidence: 'low', via: intent.via }); }
 
   const tool = tools.TOOLS[intent.tool];
   audit.interpretation = { tool: intent.tool, args: intent.args, via: intent.via };
@@ -169,6 +179,18 @@ async function ask({ user, text, context, authorization, port }) {
   let result;
   try { result = await tool.run(v.args, ctx); } catch (e) { audit.error = e.message; return finish({ answer: `Could not do that: ${e.message}`, actions: [], confidence: 'low', tool: intent.tool, via: intent.via }); }
   audit.tools_read = [intent.tool];
+  // Sprint 14: entries that arrived through Quick Entry say so — AI impact
+  // counts them separately from the Copilot's verb path and the forms.
+  if ((intent.via === 'quick' || intent.via === 'tap') && result && result.preview && (intent.args.source === 'quick' || intent.via === 'quick')) {
+    result.preview.source = 'quick';
+    if (result.execute && result.execute.args) result.execute.args.source = 'quick';
+    if (intent.category_basis && result.text) result.text += ` Category: ${intent.category_basis}.`;
+  }
+  // Decision 1: a collection with no mode said asks, with the answers as taps.
+  if (result && result.clarify && result.chips && result.chips.length) {
+    return finish({ answer: result.clarify, clarify: result.clarify, confidence: 'low', tool: intent.tool, via: intent.via,
+      actions: result.chips.map(c => ({ label: c, tool: intent.tool, args: { ...v.args, mode: c, ...(intent.via === 'quick' ? { source: 'quick' } : {}) }, level: 'prepare' })) });
+  }
 
   if (result.clarify) {
     return finish({ answer: result.clarify, clarify: result.clarify, candidates: result.candidates || [], actions: (result.candidates || []).map(c => ({ label: `${c.name}${c.room_number ? ' (Room ' + c.room_number + ')' : ''}`, tool: intent.tool, args: { ...v.args, name: undefined, resident_id: c.id }, level: 'prepare' })), confidence: 'low', tool: intent.tool, via: intent.via });

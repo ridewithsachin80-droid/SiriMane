@@ -3937,7 +3937,7 @@ function initCopilotBar() {
   bar.innerHTML = `
     <div class="copilot-row">
       <span class="copilot-orb" aria-hidden="true">✦</span>
-      <input type="text" id="copilot-q" placeholder="Ask Siri… or tell me what to record" autocomplete="off"
+      <input type="text" id="copilot-q" placeholder="onion 100 · Jhanavi 5000 upi · tap leaking… or ask" autocomplete="off"
         onkeydown="if(event.key==='Enter'){copilotAsk(this.value)}" onfocus="document.getElementById('copilot-bar').classList.add('focus')" onblur="document.getElementById('copilot-bar').classList.remove('focus')"/>
       <button type="button" class="mic-btn" id="copilot-mic" onclick="copilotVoice()" aria-label="Speak">🎤</button>
       <button type="button" class="btn btn-primary btn-sm" id="copilot-go" onclick="copilotAsk(document.getElementById('copilot-q').value)">Ask</button>
@@ -3993,6 +3993,9 @@ function renderCopilotResult(r) {
     <div class="copilot-text">${(r.answer || '').replace(/\n/g, '<br>')} ${conf}</div>${evidence}${preview}
     ${buttons ? `<div class="copilot-actions">${buttons}${r.proposal ? '<button class="btn btn-outline btn-sm" onclick="copilotDismiss()">✗ Cancel</button>' : ''}</div>` : ''}
   </div>`;
+  // Sprint 14: "What was ₹300 for?" leaves "300 " in the box, cursor at the
+  // end — she types the item and presses Enter. No retyping the number.
+  if (r.retry_text) { const q = document.getElementById('copilot-q'); if (q) { q.value = r.retry_text; q.focus(); q.setSelectionRange(q.value.length, q.value.length); } }
 }
 function previewRows(p) {
   if (!p) return '';
@@ -4018,7 +4021,7 @@ async function copilotRetool(a) {
   out.innerHTML = `<div class="copilot-answer"><div class="sm-skel"><div class="sm-skel-line" style="width:60%"></div></div></div>`;
   try {
     const q = document.getElementById('copilot-q').value;
-    const r = await apiFetch('/copilot/ask', { method: 'POST', body: { text: q, context: { page: smContext.page, resident_id: a.args && a.args.resident_id, resident_name: a.label } } });
+    const r = await apiFetch('/copilot/ask', { method: 'POST', body: { text: q, tool: a.tool, args: a.args, context: { page: smContext.page, resident_id: a.args && a.args.resident_id, resident_name: a.label } } });
     renderCopilotResult(r);
   } catch (e) { out.innerHTML = `<div class="copilot-answer copilot-err">${e.message}</div>`; }
 }
@@ -4181,9 +4184,39 @@ function openQuickActions() {
   if (document.getElementById('qa-sheet')) return closeQuickActions();
   const back = document.createElement('div'); back.id = 'qa-backdrop'; back.className = 'qa-backdrop'; back.onclick = closeQuickActions;
   const sheet = document.createElement('div'); sheet.id = 'qa-sheet'; sheet.className = 'qa-sheet';
-  sheet.innerHTML = QUICK_ACTIONS.filter(a => !a.admin || isAdmin())
+  // Sprint 14: one box before the forms. "onion 100", "Jhanavi 5000 upi",
+  // "tap leaking room 106" — no verb needed. It hands the text to Siri, who
+  // previews before anything is saved.
+  sheet.innerHTML = `<form class="qe-form" onsubmit="return quickEntrySubmit(event)">
+      <label for="qe-input" class="qe-label">Just say what happened</label>
+      <div class="qe-row">
+        <input type="text" id="qe-input" class="qe-input" autocomplete="off" inputmode="text"
+          placeholder="onion 100 · Jhanavi 5000 upi · tap leaking room 106" aria-label="Quick entry">
+        <button type="button" class="qe-mic" id="qe-mic" aria-label="Voice input" onclick="quickEntryVoice()">${icon('mic')}</button>
+        <button type="submit" class="btn btn-primary qe-go" aria-label="Enter">${icon('sparkle')}</button>
+      </div>
+      <div class="qe-hint" id="qe-voice-status">Siri shows a preview — nothing is saved until you confirm.</div>
+    </form>
+    <div class="qe-or">or open a form</div>` +
+    QUICK_ACTIONS.filter(a => !a.admin || isAdmin())
     .map((a, i) => `<button class="qa-item" onclick="runQuickAction(${i})">${icon(a.icon, 'ic ic-lg')} ${a.label}</button>`).join('');
   document.body.appendChild(back); document.body.appendChild(sheet);
+  setTimeout(() => { const i = document.getElementById('qe-input'); if (i) i.focus(); }, 30);
+}
+function quickEntrySubmit(e) {
+  if (e) e.preventDefault();
+  const text = (document.getElementById('qe-input') || {}).value || '';
+  if (!text.trim()) return false;
+  closeQuickActions();
+  const bar = document.getElementById('copilot-q');
+  if (bar) { bar.value = text; bar.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+  copilotAsk(text);
+  return false;
+}
+function quickEntryVoice() {
+  // Same recogniser as the Copilot bar (on-device on Android, Gemini fallback
+  // on iOS); the words land in the box so she sees them before they go anywhere.
+  smVoice('qe-mic', 'qe-voice-status', t => { const i = document.getElementById('qe-input'); if (i) { i.value = t; i.focus(); } }, 'say what happened');
 }
 function closeQuickActions() { ['qa-sheet', 'qa-backdrop'].forEach(id => { const e = document.getElementById(id); if (e) e.remove(); }); }
 function runQuickAction(i) { const list = QUICK_ACTIONS.filter(a => !a.admin || isAdmin()); closeQuickActions(); list[i].run(); }

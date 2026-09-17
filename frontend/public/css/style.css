@@ -1033,3 +1033,16 @@ body.has-bulk-bar .sm-fab, body.has-bulk-bar #sm-fab { display: none; }
 /* The first block above set flex-wrap:wrap, which a later rule does not reset
    unless it says so — that is why the buttons stacked into three rows. */
 .bulk-bar, .bulk-actions { flex-wrap: nowrap; }
+
+/* ── Sprint 14: Quick Entry ─────────────────────────────────────────────── */
+.qe-form { padding: 4px 4px 10px; }
+.qe-label { display: block; font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 8px; }
+.qe-row { display: flex; gap: 8px; align-items: stretch; }
+.qe-input { flex: 1 1 auto; min-width: 0; min-height: 48px; font-size: 16px; padding: 10px 14px;
+  border: 2px solid var(--accent); border-radius: 12px; background: var(--card); color: var(--text); font-family: inherit; }
+.qe-mic, .qe-go { flex: 0 0 auto; min-width: 48px; min-height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; }
+.qe-mic { border: 1px solid var(--border); background: var(--card); color: var(--text); cursor: pointer; }
+.qe-mic.listening { background: var(--accent); color: #fff; animation: qe-pulse 1s infinite; }
+@keyframes qe-pulse { 50% { opacity: .6; } }
+.qe-hint { font-size: 12px; color: var(--text-muted); margin-top: 8px; }
+.qe-or { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); padding: 10px 4px 6px; border-top: 1px solid var(--border); margin-top: 4px; }

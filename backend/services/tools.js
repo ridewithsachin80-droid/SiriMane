@@ -162,27 +162,30 @@ const TOOLS = {
   // ═══════════════════ PREPARE ═══════════════════
   prepare_payment: {
     description: 'Draft a rent/deposit payment record from a sentence like "record 8000 rent from Ananya by UPI". Returns a preview; the user confirms before anything is saved.',
-    args: { name: 'string?', resident_id: 'number?', room: 'string?', amount: 'number?', mode: 'string?', type: 'string?', date: 'string?' }, role: 'staff', level: 'prepare',
+    args: { name: 'string?', resident_id: 'number?', room: 'string?', amount: 'number?', mode: 'string?', type: 'string?', date: 'string?', source: 'string?' }, role: 'staff', level: 'prepare',
     async run(a, ctx) {
       const { match, candidates } = await resolveResident({ id: a.resident_id || ctx.context?.resident_id, name: a.name, room: a.room });
       if (!match) return { clarify: candidates.length ? 'Which resident do you mean?' : 'I could not find that resident — check the name or room.', candidates };
       const amount = Number(a.amount);
       if (!amount || amount <= 0) return { clarify: `How much did ${match.name} pay?`, resident: match };
       const mode = ['Cash', 'UPI', 'Bank Transfer'].find(m => m.toLowerCase() === String(a.mode || '').toLowerCase()) || (SMParse.extractMode(String(a.mode || '')) || {}).mode || null;
+      // Sprint 14 (Sachin): never assume the mode — the ledger and the day's
+      // cash-up both depend on it. Ask, with the answers as one-tap chips.
+      if (!mode) return { clarify: `How did ${match.name} pay ${fmt(amount)} — UPI, cash or bank transfer?`, chips: ['UPI', 'Cash', 'Bank Transfer'], resident: match };
       const type = ['rent', 'deposit', 'advance'].includes(a.type) ? a.type : 'rent';
       const date = isIsoDate(a.date) ? a.date : istToday();
       const month = new Date(date + 'T00:00:00Z').toLocaleDateString('en-IN', { month: 'long', year: 'numeric', timeZone: 'UTC' });
       const preview = { guest_id: match.id, guest_name: match.name, amount, payment_mode: mode || 'Cash', collection_type: type, collection_date: date, collection_month: type === 'rent' ? month : '', description: '', source: 'copilot' };
       const note = match.amount_due > 0 && Math.abs(match.amount_due - amount) > 0.5 ? ` Her running balance is ${fmt(match.amount_due)}.` : '';
       return {
-        text: `${fmt(amount)} ${type} from ${match.name}${match.room_number ? ' (Room ' + match.room_number + ')' : ''} by ${preview.payment_mode} on ${date}.${mode ? '' : ' Mode not stated — assuming Cash.'}${note}`,
+        text: `${fmt(amount)} ${type} from ${match.name}${match.room_number ? ' (Room ' + match.room_number + ')' : ''} by ${preview.payment_mode} on ${date}.${note}`,
         preview, execute: { tool: 'create_payment', label: 'Confirm payment', args: preview }
       };
     }
   },
   prepare_expense: {
     description: 'Draft an expense/purchase from a sentence like "500 rupees vegetables paid to Ramesh cash". Preview only.',
-    args: { amount: 'number?', category: 'string?', paid_to: 'string?', mode: 'string?', description: 'string?', date: 'string?' }, role: 'staff', level: 'prepare',
+    args: { amount: 'number?', category: 'string?', paid_to: 'string?', mode: 'string?', description: 'string?', date: 'string?', source: 'string?' }, role: 'staff', level: 'prepare',
     async run(a) {
       const amount = Number(a.amount);
       if (!amount || amount <= 0) return { clarify: 'How much was spent?' };
@@ -393,7 +396,7 @@ const TOOLS = {
   },
   create_expense: {
     description: 'Save an expense (after confirmation).', args: {}, role: 'staff', level: 'execute',
-    async run(a, ctx) { const r = await callRoute(ctx, 'POST', '/purchases', a); return { text: `Expense ${fmt(r.amount)} recorded${r.status !== 'confirmed' ? ' (pending admin approval)' : ''}.`, record: r, navigate: 'purchases' }; }
+    async run(a, ctx) { const r = await callRoute(ctx, 'POST', '/purchases', a); try { require('./quick').invalidateHistory(); } catch (e) {} return { text: `Expense ${fmt(r.amount)} recorded${r.status !== 'confirmed' ? ' (pending admin approval)' : ''}.`, record: r, navigate: 'purchases' }; }
   },
   create_complaint: {
     description: 'Log a maintenance request (after confirmation).', args: {}, role: 'staff', level: 'execute',

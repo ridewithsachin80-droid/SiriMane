@@ -16,7 +16,11 @@ router.post('/ask', auth, async (req, res) => {
     room_number: req.body.context.room_number ? String(req.body.context.room_number).slice(0, 20) : undefined
   } : null;
   try {
-    res.json(await copilot.ask({ user: req.user, text, context: ctx, authorization: req.headers.authorization, port: req.socket.localPort }));
+    // Sprint 14: a tapped chip ("UPI", a resident name) re-sends the same
+    // text with the chosen args. Still validated, still preview-only.
+    const tap = req.body.tool && typeof req.body.tool === 'string' && req.body.args && typeof req.body.args === 'object'
+      ? { tool: String(req.body.tool).slice(0, 60), args: req.body.args } : null;
+    res.json(await copilot.ask({ user: req.user, text, context: ctx, tap, authorization: req.headers.authorization, port: req.socket.localPort }));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
