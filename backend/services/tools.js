@@ -45,7 +45,10 @@ async function resolveResident({ id, name, room }) {
   if (m) return { match: m, candidates: [] };
   // Ambiguity: return the candidates so the caller can ask "which one?"
   const tokens = String(name || '').toLowerCase().split(/\s+/).filter(Boolean);
-  const candidates = residents.filter(r => tokens.some(t => t.length >= 3 && r.name.toLowerCase().includes(t)));
+  let candidates = residents.filter(r => tokens.some(t => t.length >= 3 && r.name.toLowerCase().includes(t)));
+  // 14.2: nothing contains it? Look for names that are CLOSE — "janavi",
+  // "jhanvi", "jahnavi" all suggest Jhanavi. Suggested, never assumed.
+  if (!candidates.length) { try { candidates = require('./quick').fuzzyResidents(text, residents); } catch (e) {} }
   return { match: null, candidates: candidates.slice(0, 5) };
 }
 
@@ -165,7 +168,7 @@ const TOOLS = {
     args: { name: 'string?', resident_id: 'number?', room: 'string?', amount: 'number?', mode: 'string?', type: 'string?', date: 'string?', source: 'string?' }, role: 'staff', level: 'prepare',
     async run(a, ctx) {
       const { match, candidates } = await resolveResident({ id: a.resident_id || ctx.context?.resident_id, name: a.name, room: a.room });
-      if (!match) return { clarify: candidates.length ? 'Which resident do you mean?' : 'I could not find that resident — check the name or room.', candidates };
+      if (!match) return { clarify: candidates.length ? (candidates.some(c => c.why) ? `Did you mean ${candidates.length === 1 ? candidates[0].name : 'one of these'}?` : 'Which resident do you mean?') : 'I could not find that resident — check the name or room.', candidates };
       const amount = Number(a.amount);
       if (!amount || amount <= 0) return { clarify: `How much did ${match.name} pay?`, resident: match };
       const mode = ['Cash', 'UPI', 'Bank Transfer'].find(m => m.toLowerCase() === String(a.mode || '').toLowerCase()) || (SMParse.extractMode(String(a.mode || '')) || {}).mode || null;

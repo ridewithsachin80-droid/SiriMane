@@ -245,6 +245,27 @@ const daysAgo = n => new Date(Date.now() - n * 86400000).toISOString().slice(0, 
     eq(huge.status, 413, 'a 25 kB body is refused by the global limit before it reaches the parser');
     console.log('✓ voice repair');
 
+    // ── 14.2 Fuzzy names: suggest the resident, never file an expense ──────
+    // Sachin's phone screenshot, verbatim: filed a ₹5,000 expense called "janavi".
+    i = await quick.intent('rupees 5000 janavi', adminUser, {});
+    eq(i && i.tool, 'prepare_payment', 'SCREENSHOT: "rupees 5000 janavi" is a collection, NOT an expense');
+    ok(!i.args.resident_id, '…nobody chosen: it will ask'); ok(i.fuzzy && i.fuzzy.some(f => f.id === jh.id), '…and Jhanavi is the suggestion');
+    for (const t of [`jhanvi 5000 upi`, `jahnavi 500`, `janvi 500`, `janavi paid 5000`]) {
+      i = await quick.intent(t, adminUser, {}); ok(i && i.tool === 'prepare_payment' && i.fuzzy && i.fuzzy.some(f => f.id === jh.id), `spelling "${t.split(' ')[0]}" suggests Jhanavi`);
+    }
+    r = await ask('rupees 5000 janavi');
+    eq(r.data.tool, 'prepare_payment', 'API: routed as a collection'); ok(/did you mean/i.test(r.data.clarify || ''), 'API: asks "Did you mean…?"');
+    ok((r.data.candidates || []).some(c => c.id === jh.id), 'API: Jhanavi offered as a tap'); ok(!r.data.proposal, 'API: nothing prepared until she taps');
+    const tapJ = (r.data.actions || []).find(a => a.args && a.args.resident_id === jh.id);
+    ok(tapJ, 'the tap carries her resident id');
+    r = await api('POST', '/copilot/ask', { text: 'rupees 5000 janavi', tool: tapJ.tool, args: tapJ.args }, adminTok);
+    ok(r.data.clarify && /how did .* pay/i.test(r.data.clarify), 'after the tap it asks the mode (no mode was said)');
+    // Expense items that resemble names stay expenses.
+    for (const t of ['rice 500', 'dal 200', 'milk 60', 'tomato 40', 'phenyl 120']) { i = await quick.intent(t, adminUser, {}); ok(i && i.tool === 'prepare_expense', `"${t}" is still an expense`); }
+    const purchasesNow = (await pool.query(`SELECT COUNT(*)::int AS n FROM purchases WHERE description ILIKE '%janavi%' OR description ILIKE '%jhanvi%'`)).rows[0].n;
+    eq(purchasesNow, 0, 'NO expense named after a resident was ever created');
+    console.log('✓ fuzzy names');
+
     // ── Audit ────────────────────────────────────────────────────────────
     const au = await pool.query(`SELECT COUNT(*)::int AS n FROM ai_actions WHERE interpretation::text LIKE '%"via":"quick"%' OR interpretation::text LIKE '%quick%'`);
     ok(au.rows[0].n >= 2, 'quick entries are in the Copilot log');

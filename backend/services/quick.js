@@ -193,6 +193,15 @@ async function classify(text, user, context, copts = {}) {
     return { tool: 'prepare_complaint', args: { description: raw, room: room || undefined }, via: 'quick', kind: 'request' };
   }
 
+  // 3b. A name that is nearly a resident's ("janavi" → Jhanavi) → still a
+  //     collection: hand the candidates to prepare_payment, which asks
+  //     "Did you mean…?" with taps. Never an expense called "janavi".
+  const near = fuzzyResidents(nameText, residents, await historyIndex());
+  if (near.length) {
+    const said = tokens(nameText).find(w => near.some(r => String(r.name).toLowerCase().split(/\s+/).some(p => similarity(w, p) >= 0.75 || phoneticKey(w) === phoneticKey(p)))) || tokens(nameText)[0];
+    return { tool: 'prepare_payment', args: { name: said, amount: amount || undefined, mode: mode || undefined, type }, via: 'quick', kind: 'collection', fuzzy: near.map(r => ({ id: r.id, name: r.name, room_number: r.room_number, why: r.why })) };
+  }
+
   // 4. Money without a name → an expense.
   if (amount) {
     const item = sansRoom.replace(amt.matched, ' ').replace(MODE_WORDS, ' ').replace(NOISE, ' ').replace(/\b(room|rum)\s*[a-z]?\d{1,3}[a-z]?\b/gi, ' ').replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim();
@@ -205,6 +214,59 @@ async function classify(text, user, context, copts = {}) {
     return { tool: 'prepare_expense', args: { amount, category: category || 'Other', description: item, mode: mode || undefined, paid_to: vendor || undefined }, via: 'quick', kind: 'expense', category_basis: basis, category_via: via || (category ? 'local' : 'none') };
   }
   return null;
+}
+
+// ── Fuzzy resident matching (14.2) ──────────────────────────────────────────
+// "janavi", "jhanvi", "jahnavi", "janvi" are all Jhanavi. Indian names have
+// many spellings and Chrome invents more; a one-letter miss must SUGGEST the
+// resident, not file a ₹5,000 expense called "janavi". Two signals:
+//   1. a phonetic key that folds the usual variants (jh→j, bh→b, ee→i, v→w,
+//      double letters, trailing a/aa/ah, y/i)
+//   2. edit-distance similarity on the raw tokens
+// A token that is a known expense item (dictionary or this PG's history) is
+// never treated as a name — "rice 500" stays an expense even if Riya lives here.
+function phoneticKey(w) {
+  return String(w || '').toLowerCase()
+    .replace(/[^a-z]/g, '')
+    .replace(/(jh|zh)/g, 'j').replace(/bh/g, 'b').replace(/dh/g, 'd').replace(/th/g, 't').replace(/kh/g, 'k').replace(/gh/g, 'g').replace(/ph/g, 'f').replace(/ch/g, 'c').replace(/sh/g, 's')
+    .replace(/ee|ea/g, 'i').replace(/oo/g, 'u').replace(/w/g, 'v').replace(/y/g, 'i').replace(/z/g, 'j').replace(/ck|q/g, 'k').replace(/x/g, 'ks')
+    .replace(/(.)\1+/g, '$1')
+    .replace(/(a|ah|aa)$/,'').replace(/h(?=[^aeiou]|$)/g, '');
+}
+function editDistance(a, b) {
+  const m = a.length, n = b.length; if (!m) return n; if (!n) return m;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[n];
+}
+function similarity(a, b) { a = String(a).toLowerCase(); b = String(b).toLowerCase(); const L = Math.max(a.length, b.length); return L ? 1 - editDistance(a, b) / L : 0; }
+
+// Residents whose name is CLOSE to something in the text, best first.
+// Returns [] when nothing is close enough — never a wild guess.
+function fuzzyResidents(text, residents, hist) {
+  const words = tokens(text).filter(w => w.length >= 3 && !NOISE.test(' ' + w + ' ') && !DICT_INDEX.has(w) && !(hist && hist.has(w)));
+  const out = [];
+  for (const r of residents) {
+    const parts = String(r.name || '').toLowerCase().split(/\s+/).filter(p => p.length >= 3);
+    let best = 0, via = '';
+    for (const w of words) for (const p of parts) {
+      const sim = similarity(w, p);
+      const kw = phoneticKey(w), kp = phoneticKey(p);
+      const ph = kw === kp && kp.length >= 3;
+      // "janvi" ↔ "jhanavi": same consonants once the vowels go (jnv). Needs
+      // three consonants so two-letter skeletons cannot collide.
+      const sk = kp.replace(/[aeiou]/g, ''), skw = kw.replace(/[aeiou]/g, '');
+      const skel = sk.length >= 3 && sk === skw && w.length >= 4;
+      const score = ph ? Math.max(0.9, sim) : skel ? Math.max(0.8, sim) : sim;
+      if (score > best) { best = score; via = ph ? `sounds like ${p}` : `${w} ≈ ${p}`; }
+    }
+    if (best >= 0.75) out.push({ ...r, score: Math.round(best * 100) / 100, why: via });
+  }
+  return out.sort((a, b) => b.score - a.score).slice(0, 5);
 }
 
 function nameScore(r, text) {
@@ -227,4 +289,4 @@ async function matchVendor(item) {
   return null;
 }
 
-module.exports = { intent, classify, repairVoice, categorise, normaliseAmount, historyIndex, invalidateHistory, CATEGORIES, DICT, FAULT_WORDS, QUESTION };
+module.exports = { intent, classify, repairVoice, fuzzyResidents, phoneticKey, similarity, categorise, normaliseAmount, historyIndex, invalidateHistory, CATEGORIES, DICT, FAULT_WORDS, QUESTION };
