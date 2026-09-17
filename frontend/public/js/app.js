@@ -3460,13 +3460,16 @@ function smVoice(btnId, statusId, onText, hint) {
   try {
     const rec = new Ctor();
     smRec = rec;
-    rec.lang = 'en-IN'; rec.continuous = false; rec.interimResults = false; rec.maxAlternatives = 1;
+    // 14.1: Chrome's 2nd or 3rd guess is often the right one for Indian
+    // English and Kannada words — keep five and let the server choose.
+    rec.lang = 'en-IN'; rec.continuous = false; rec.interimResults = false; rec.maxAlternatives = 5;
     rec.onstart = () => { btn.classList.add('listening'); btn.textContent = '⏹'; say('Listening… ' + (hint || 'speak now')); };
     rec.onresult = e => {
       const t = e.results && e.results[0] && e.results[0][0] ? e.results[0][0].transcript : '';
       if (!t) { say('Didn\'t catch that — tap the mic and try again', true); return; }
+      const alts = e.results && e.results[0] ? Array.from(e.results[0]).map(a => a.transcript).filter(Boolean) : [t];
       say(`Heard: "${t}"`);
-      try { onText(t); } catch (err) { console.error(err); say('Couldn\'t understand that — please fill the form', true); }
+      try { onText(t, alts); } catch (err) { console.error(err); say('Couldn\'t understand that — please fill the form', true); }
     };
     rec.onerror = e => {
       const m = { 'no-speech': 'Didn\'t hear anything — tap the mic and try again', 'audio-capture': 'No microphone found', 'not-allowed': 'Microphone permission denied — allow it in Chrome settings', 'network': 'Network error — check your signal', 'aborted': '' };
@@ -3950,10 +3953,10 @@ function initCopilotBar() {
   renderCopilotChips();
   document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); document.getElementById('copilot-q').focus(); } });
 }
-function copilotVoice() { smVoice('copilot-mic', 'copilot-voice-status', t => copilotAsk(t), 'ask or tell me what to record'); }
+function copilotVoice() { smVoice('copilot-mic', 'copilot-voice-status', (t, alts) => copilotAsk(t, { voice: true, alternatives: alts }), 'ask or tell me what to record'); }
 
 let copilotBusy = false;
-async function copilotAsk(text) {
+async function copilotAsk(text, opts) {
   const q = String(text || '').trim();
   if (!q || copilotBusy) return;
   const out = document.getElementById('copilot-out');
@@ -3963,7 +3966,7 @@ async function copilotAsk(text) {
   out.innerHTML = `<div class="copilot-answer"><div class="sm-skel"><div class="sm-skel-line" style="width:70%"></div><div class="sm-skel-line" style="width:40%"></div></div></div>`;
   copilotBusy = true;
   try {
-    const r = await apiFetch('/copilot/ask', { method: 'POST', body: { text: q, context: { page: smContext.page, resident_id: smContext.resident_id, resident_name: smContext.resident_name, room_number: smContext.room_number } } });
+    const r = await apiFetch('/copilot/ask', { method: 'POST', body: { text: q, voice: !!(opts && opts.voice), alternatives: (opts && opts.alternatives) || [], context: { page: smContext.page, resident_id: smContext.resident_id, resident_name: smContext.resident_name, room_number: smContext.room_number } } });
     renderCopilotResult(r);
   } catch (e) { out.innerHTML = `<div class="copilot-answer copilot-err">${e.message}</div>`; }
   finally { copilotBusy = false; input.select(); }
@@ -4205,18 +4208,23 @@ function openQuickActions() {
 }
 function quickEntrySubmit(e) {
   if (e) e.preventDefault();
-  const text = (document.getElementById('qe-input') || {}).value || '';
+  const inp = document.getElementById('qe-input') || {};
+  const text = inp.value || '';
   if (!text.trim()) return false;
+  // Spoken, and not edited since? Then the server may repair what was heard.
+  const spoken = inp.dataset && inp.dataset.voice === '1';
+  let alts = []; try { alts = spoken ? JSON.parse(inp.dataset.alts || '[]') : []; } catch (e) {}
+  const voice = spoken && alts.length && alts[0] === text;
   closeQuickActions();
   const bar = document.getElementById('copilot-q');
   if (bar) { bar.value = text; bar.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
-  copilotAsk(text);
+  copilotAsk(text, { voice, alternatives: voice ? alts : [] });
   return false;
 }
 function quickEntryVoice() {
   // Same recogniser as the Copilot bar (on-device on Android, Gemini fallback
   // on iOS); the words land in the box so she sees them before they go anywhere.
-  smVoice('qe-mic', 'qe-voice-status', t => { const i = document.getElementById('qe-input'); if (i) { i.value = t; i.focus(); } }, 'say what happened');
+  smVoice('qe-mic', 'qe-voice-status', (t, alts) => { const i = document.getElementById('qe-input'); if (i) { i.value = t; i.dataset.voice = '1'; i.dataset.alts = JSON.stringify(alts || []); i.focus(); } }, 'say what happened');
 }
 function closeQuickActions() { ['qa-sheet', 'qa-backdrop'].forEach(id => { const e = document.getElementById(id); if (e) e.remove(); }); }
 function runQuickAction(i) { const list = QUICK_ACTIONS.filter(a => !a.admin || isAdmin()); closeQuickActions(); list[i].run(); }

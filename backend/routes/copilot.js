@@ -20,7 +20,9 @@ router.post('/ask', auth, async (req, res) => {
     // text with the chosen args. Still validated, still preview-only.
     const tap = req.body.tool && typeof req.body.tool === 'string' && req.body.args && typeof req.body.args === 'object'
       ? { tool: String(req.body.tool).slice(0, 60), args: req.body.args } : null;
-    res.json(await copilot.ask({ user: req.user, text, context: ctx, tap, authorization: req.headers.authorization, port: req.socket.localPort }));
+    const voice = req.body.voice === true;
+    const alternatives = Array.isArray(req.body.alternatives) ? req.body.alternatives.slice(0, 5).map(a => String(a || '').slice(0, 200)) : [];
+    res.json(await copilot.ask({ user: req.user, text, context: ctx, tap, voice, alternatives, authorization: req.headers.authorization, port: req.socket.localPort }));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

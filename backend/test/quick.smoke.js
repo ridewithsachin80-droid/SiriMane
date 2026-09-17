@@ -192,6 +192,59 @@ const daysAgo = n => new Date(Date.now() - n * 86400000).toISOString().slice(0, 
     i = await quick.intent('zzquark 750', adminUser, {}); eq(i.args.category, 'Other', 'model failure → Other, never an error to the warden');
     ai.providers._stub = realStub; ai.providers.groqText = realGroq;
 
+    // ── 14.1 Voice repair: what Chrome heard vs what she said ───────────
+    const vseen = [];
+    ai.providers._stub = true;
+    ai.providers.groqText = async ({ system, user }) => {
+      vseen.push(system + '\n' + user);
+      if (/category/i.test(system) && !/Transcripts/.test(user)) return JSON.stringify({ category: 'Other' });
+      if (/union/i.test(user)) return JSON.stringify({ phrase: 'onion 100', confidence: 'high' });
+      if (/janvi/i.test(user)) return JSON.stringify({ phrase: `Jhanavi ${alpha} 5000 upi`, confidence: 'high' });
+      if (/tab leaking/i.test(user)) return JSON.stringify({ phrase: `tap leaking room ${roomNo}`, confidence: 'high' });
+      return JSON.stringify({ phrase: user.split('\n')[1].replace(/^\d+\. /, ''), confidence: 'low' });
+    };
+    // Typed "union 100" is what she typed — NOT repaired, filed as typed.
+    vseen.length = 0;
+    i = await quick.intent('union 100', adminUser, {});
+    eq(i.args.description, 'union', 'TYPED text is never "corrected" by the model');
+    ok(!vseen.some(x => /Transcripts/.test(x)), '…and no repair call was made for typed text');
+    // Spoken, mis-heard, with Chrome's alternatives → repaired, then classified as usual.
+    vseen.length = 0;
+    i = await quick.intent('union hundred rupees', adminUser, {}, { voice: true, alternatives: ['union hundred rupees', 'onion hundred rupees'] });
+    eq(i.tool, 'prepare_expense', 'VOICE: "union hundred rupees" → an expense'); eq(i.args.description, 'onion', '…for onion'); eq(i.args.category, 'Groceries', '…in Groceries'); eq(i.args.amount, 100, '…₹100');
+    eq(i.heard, 'union hundred rupees', 'it records what was heard'); eq(i.understood, 'onion 100', '…and what it understood');
+    eq(vseen.filter(x => /Transcripts/.test(x)).length, 1, 'exactly one repair call');
+    ok(/onion hundred rupees/.test(vseen[0]), 'the repair saw Chrome\'s alternatives');
+    ok(new RegExp(`Jhanavi ${alpha}`).test(vseen[0]), 'the repair saw the resident names (allowed)');
+    ok(!/\b\d{10}\b/.test(vseen[0]), 'PRIVACY: the repair never sees a phone number');
+    ok(!/aadhaar|id_proof|address/i.test(vseen[0]), 'PRIVACY: nor an ID or address');
+    // A mis-heard name resolves to the resident.
+    i = await quick.intent('janvi five thousand upi', adminUser, {}, { voice: true, alternatives: ['janvi five thousand upi', 'janavi 5000 upi'] });
+    eq(i.tool, 'prepare_payment', 'VOICE: "janvi five thousand upi" → a collection'); eq(i.args.resident_id, jh.id, '…for Jhanavi'); eq(i.args.amount, 5000, '…₹5,000'); eq(i.args.mode, 'UPI', '…UPI');
+    i = await quick.intent('tab leaking room ' + roomNo, adminUser, {}, { voice: true, alternatives: [] });
+    eq(i.tool, 'prepare_complaint', 'VOICE: "tab leaking" → a request'); eq(i.args.room, roomNo, '…for the room');
+    // Spoken clearly → the deterministic pass is confident; the model is not called at all.
+    vseen.length = 0;
+    i = await quick.intent('onion 100', adminUser, {}, { voice: true, alternatives: ['onion 100'] });
+    eq(i.args.category, 'Groceries', 'a clearly-heard phrase classifies at once'); ok(!i.heard, '…with no repair'); eq(vseen.length, 0, '…and no model call: fast path');
+    // Through the API, the answer shows the correction.
+    r = await api('POST', '/copilot/ask', { text: 'union hundred rupees', voice: true, alternatives: ['union hundred rupees', 'onion hundred rupees'] }, adminTok);
+    eq(r.data.tool, 'prepare_expense', 'API: voice repair reaches the preview'); ok(/Heard “union hundred rupees” — understood as “onion 100”/.test(r.data.answer), 'API: the answer says what was heard and what was understood');
+    eq(r.data.proposal.preview.description, 'onion', 'API: the preview is for onion'); eq(r.data.proposal.preview.source, 'quick', 'API: still source=quick');
+    // Model down or keyless → behaves exactly as before, never an error.
+    ai.providers.groqText = async () => { throw new Error('down'); };
+    i = await quick.intent('union hundred rupees', adminUser, {}, { voice: true, alternatives: [] });
+    eq(i.tool, 'prepare_expense', 'model down: still an expense'); eq(i.args.description, 'union', '…as heard'); ok(!i.heard, '…no false repair');
+    ai.providers._stub = realStub; ai.providers.groqText = realGroq;
+    i = await quick.intent('union hundred rupees', adminUser, {}, { voice: true, alternatives: [] });
+    eq(i.args.category, 'Other', 'KEYLESS: voice still files, as Other');
+    // A forged request cannot smuggle a phrase past the bounds.
+    const many = await api('POST', '/copilot/ask', { text: 'onion 100', voice: true, alternatives: Array(20).fill('x'.repeat(300)) }, adminTok);
+    eq(many.status, 200, 'twenty alternatives are trimmed to five, not fatal');
+    const huge = await api('POST', '/copilot/ask', { text: 'onion 100', voice: true, alternatives: Array(50).fill('x'.repeat(500)) }, adminTok);
+    eq(huge.status, 413, 'a 25 kB body is refused by the global limit before it reaches the parser');
+    console.log('✓ voice repair');
+
     // ── Audit ────────────────────────────────────────────────────────────
     const au = await pool.query(`SELECT COUNT(*)::int AS n FROM ai_actions WHERE interpretation::text LIKE '%"via":"quick"%' OR interpretation::text LIKE '%quick%'`);
     ok(au.rows[0].n >= 2, 'quick entries are in the Copilot log');

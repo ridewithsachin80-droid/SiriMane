@@ -133,7 +133,7 @@ async function enrichRawArgs(toolName, args, context) {
 }
 
 // ── 2. Ask ────────────────────────────────────────────────────────────────
-async function ask({ user, text, context, tap, authorization, port }) {
+async function ask({ user, text, context, tap, voice, alternatives, authorization, port }) {
   const t0 = Date.now();
   const q = String(text || '').trim().slice(0, 500);
   const audit = { user_id: user.id, request_text: q, context: context || null, interpretation: null, tools_read: [], proposal_id: null, result_text: null, error: null };
@@ -155,7 +155,7 @@ async function ask({ user, text, context, tap, authorization, port }) {
   if (!intent) intent = localIntent(q, user, context);
   // Sprint 14: a bare phrase — "onion 100rs", "jhanavi 500", "tap leaking
   // room 106" — needs no verb. Deterministic, keyless, before the model.
-  if (!intent) intent = await quick.intent(q, user, context);
+  if (!intent) intent = await quick.intent(q, user, context, { voice: !!voice, alternatives: Array.isArray(alternatives) ? alternatives : [] });
   if (!intent) intent = await modelIntent(q, user, context);
   if (intent && intent.error) audit.error = intent.error;
   if (!intent || (!intent.tool && !intent.clarify)) {
@@ -185,6 +185,8 @@ async function ask({ user, text, context, tap, authorization, port }) {
     result.preview.source = 'quick';
     if (result.execute && result.execute.args) result.execute.args.source = 'quick';
     if (intent.category_basis && result.text) result.text += ` Category: ${intent.category_basis}.`;
+    // 14.1: she sees the correction, so a wrong guess is caught at the preview.
+    if (intent.heard && result.text) result.text = `Heard “${intent.heard}” — understood as “${intent.understood}”. ` + result.text;
   }
   // Decision 1: a collection with no mode said asks, with the answers as taps.
   if (result && result.clarify && result.chips && result.chips.length) {

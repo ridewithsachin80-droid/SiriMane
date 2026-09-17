@@ -104,7 +104,61 @@ async function categorise(item, opts = {}) {
 }
 
 // ── The classifier ─────────────────────────────────────────────────────────
-async function intent(text, user, context) {
+// ── Voice repair (14.1) ────────────────────────────────────────────────────
+// Chrome hears "union hundred rupees" for "onion 100" and "Janvi" for
+// "Jhanavi". Typed text is what she meant and is never touched; a SPOKEN
+// phrase that the deterministic pass could not place is sent to the model
+// with Chrome's alternatives, the resident names and the category list —
+// the same "search through AI" step FitLife does for food — and comes back
+// as one clean phrase, which is then classified exactly like typed text.
+// The model sees names and rooms (allowed), never a phone or an ID.
+function modelReady() { return !!(process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY || ai.providers._stub); }
+async function repairVoice(raw, alternatives, residents) {
+  if (!modelReady()) return null;
+  const alts = [raw, ...(alternatives || [])].map(a => String(a || '').trim()).filter(Boolean).filter((a, i, arr) => arr.indexOf(a) === i).slice(0, 5);
+  const roster = residents.map(r => `${r.name}${r.room_number ? ' (room ' + r.room_number + ')' : ''}`).join('; ');
+  const system = `A paying-guest hostel warden in Karnataka spoke to her phone. Chrome's transcripts are listed best-first; they may contain mis-heard English, Kannada or Hindi words and spoken numbers. Decide what she most likely said and rewrite it as ONE short phrase in exactly one of these shapes:
+- "<item> <amount> [upi|cash|bank]"  for something bought (item in plain English, e.g. onion, phenyl, plumber, bescom, wifi)
+- "<resident name exactly as in the list> <amount> [upi|cash|bank] [deposit|advance]"  for money a resident paid
+- "<fault> room <number>"  for a complaint
+Residents: ${roster || '(none)'}
+Expense categories, for context only: ${CATEGORIES.join(', ')}
+Reply ONLY with JSON {"phrase": "<the phrase>", "confidence": "high"|"low"}. Never invent an amount that was not spoken.`;
+  const user = `Transcripts:\n${alts.map((a, i) => `${i + 1}. ${a}`).join('\n')}`;
+  try {
+    const reply = process.env.GROQ_API_KEY || ai.providers._stub ? await ai.providers.groqText({ system, user, json: true }) : await ai.providers.geminiText({ prompt: system + '\n\n' + user });
+    const parsed = typeof reply === 'string' ? JSON.parse(reply.replace(/```json|```/g, '').trim()) : reply;
+    const phrase = String(parsed && parsed.phrase || '').trim().slice(0, 200);
+    return phrase && phrase.toLowerCase() !== raw.toLowerCase() ? { phrase, confidence: parsed.confidence === 'high' ? 'high' : 'low' } : null;
+  } catch (e) { return null; }
+}
+function weak(i) {
+  if (!i) return true;
+  if (i.kind === 'expense' && i.tool && (!i.args.category || i.args.category === 'Other')) return true;   // item nobody recognised
+  if (i.kind === 'collection' && i.tool && !i.args.resident_id) return true;                                // name not resolved
+  if (!i.tool && i.clarify) return true;                                                                    // e.g. only a number was heard
+  return false;
+}
+
+// Typed: one deterministic pass, model only for an unknown category.
+// Spoken: deterministic pass with NO model; if it is weak, repair the
+// transcript once and classify the repaired phrase (model allowed there).
+// A clearly-heard "onion 100" therefore never touches the model at all.
+async function intent(text, user, context, opts = {}) {
+  if (!opts.voice) return classify(text, user, context, { allowModel: true });
+  const first = await classify(text, user, context, { allowModel: false });
+  if (!weak(first)) return first;
+  const { rows: residents } = await pool.query(`SELECT g.id, g.name, r.room_number FROM guests g LEFT JOIN rooms r ON r.id=g.room_id WHERE g.is_active=true`);
+  const fix = await repairVoice(String(text || '').trim(), opts.alternatives, residents);
+  if (fix) {
+    const second = await classify(fix.phrase, user, context, { allowModel: true });
+    if (second) return { ...second, heard: String(text || '').trim(), understood: fix.phrase, repair_confidence: fix.confidence };
+  }
+  // No repair possible: give the item one chance at a model category, as typed text gets.
+  return classify(text, user, context, { allowModel: true });
+}
+
+async function classify(text, user, context, copts = {}) {
   const raw = String(text || '').trim();
   if (!raw || raw.length > 200) return null;
   if (QUESTION.test(raw)) return null;
@@ -147,7 +201,7 @@ async function intent(text, user, context) {
       return { tool: null, clarify: `What was ₹${amount.toLocaleString('en-IN')} for? Say the item too — e.g. "onion ${amount}".`, retry_text: raw + ' ', via: 'quick', kind: 'expense' };
     }
     const vendor = await matchVendor(item);
-    const { category, basis, via } = await categorise(vendor ? item.replace(new RegExp(vendor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), ' ') : item);
+    const { category, basis, via } = await categorise(vendor ? item.replace(new RegExp(vendor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), ' ') : item, { allowModel: copts.allowModel !== false });
     return { tool: 'prepare_expense', args: { amount, category: category || 'Other', description: item, mode: mode || undefined, paid_to: vendor || undefined }, via: 'quick', kind: 'expense', category_basis: basis, category_via: via || (category ? 'local' : 'none') };
   }
   return null;
@@ -173,4 +227,4 @@ async function matchVendor(item) {
   return null;
 }
 
-module.exports = { intent, categorise, normaliseAmount, historyIndex, invalidateHistory, CATEGORIES, DICT, FAULT_WORDS, QUESTION };
+module.exports = { intent, classify, repairVoice, categorise, normaliseAmount, historyIndex, invalidateHistory, CATEGORIES, DICT, FAULT_WORDS, QUESTION };
