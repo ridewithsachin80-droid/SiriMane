@@ -578,7 +578,7 @@ async function loadPortalHome() {
     const dueDay = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + 1, 1));
     const daysToDue = Math.max(0, Math.round((dueDay - Date.now()) / 86400000));
     host.innerHTML = `
-      <div style="font-size:18px;font-weight:700;margin:2px 2px 10px">${h.greeting}, ${h.resident.name ? h.resident.name.split(' ')[0] : ''}</div>
+      <div style="font-size:18px;font-weight:700;margin:2px 2px 10px">${escH(h.greeting)}, ${escH(h.resident.name ? h.resident.name.split(' ')[0] : '')}</div>
 
       <div class="h-card h-due">
         <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--p-text-muted)">${due > 0 ? 'Amount due' : 'Rent'}</div>
@@ -594,9 +594,9 @@ async function loadPortalHome() {
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-weight:700">Today's meals</span><button class="btn btn-outline btn-sm" style="width:auto;margin:0" onclick="showTab('menu')">This week</button></div>
         ${h.menu.map(m => `
           <div class="meal-row">
-            <div class="m-name">${m.meal_type}</div>
-            <div style="font-size:14px;margin:2px 0 6px">${m.items || '—'}</div>
-            ${m.items ? `<div class="stars" data-meal="${m.meal_type}">${[1,2,3,4,5].map(n => `<button class="${m.my_rating >= n ? 'on' : ''}" onclick="rateMeal('${m.meal_type}', ${n})" aria-label="${n} star">★</button>`).join('')}
+            <div class="m-name">${escH(m.meal_type)}</div>
+            <div style="font-size:14px;margin:2px 0 6px">${escH(m.items || '—')}</div>
+            ${m.items ? `<div class="stars" data-meal="${escH(m.meal_type)}">${[1,2,3,4,5].map(n => `<button class="${m.my_rating >= n ? 'on' : ''}" onclick="rateMeal('${escH(m.meal_type)}', ${n})" aria-label="${n} star">★</button>`).join('')}
               <span style="font-size:12px;color:var(--p-text-muted);margin-left:6px">${m.my_rating ? 'Thanks!' : 'Rate it'}</span></div>` : ''}
           </div>`).join('')}
       </div>
@@ -620,7 +620,7 @@ async function loadPortalHome() {
         <button class="btn btn-amber" style="margin-top:10px" onclick="sendSatisfaction()">Send</button>
         <div id="sat-alert" class="alert alert-danger hidden" style="margin-top:8px"></div>
       </div>` : ''}`;
-  } catch (e) { host.innerHTML = `<p style="text-align:center;color:var(--p-red);padding:20px">${e.message}</p>`; }
+  } catch (e) { host.innerHTML = `<p style="text-align:center;color:var(--p-red);padding:20px">${escH(e.message)}</p>`; }
 }
 
 // Small fetch helper for the portal's own endpoints.
@@ -682,7 +682,7 @@ async function loadVisitors() {
     const list = await apiGuest('/guest-visitors');
     const label = { expected: 'Expected', in: 'At the PG now', out: 'Left', denied: 'Not allowed in' };
     host.innerHTML = list.length ? list.map(v => `
-      <div class="h-row"><span><strong>${v.visitor_name}</strong>${v.relation ? ' · ' + v.relation : ''}
+      <div class="h-row"><span><strong>${escH(v.visitor_name)}</strong>${escH(v.relation ? ' · ' + v.relation : '')}
         <div style="font-size:12px;color:var(--p-text-muted)">${v.expected_at ? fmtDate(v.expected_at) : ''}${v.checked_in_at ? ' · in ' + new Date(v.checked_in_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : ''}</div></span>
         <span class="badge ${v.status === 'in' ? 'badge-green' : v.status === 'denied' ? 'badge-red' : 'badge-blue'}">${label[v.status] || v.status}</span></div>`).join('')
       : '<p style="text-align:center;color:var(--p-text-muted);font-size:13px">No visitors registered yet</p>';
@@ -703,7 +703,7 @@ function loadEmergency() {
     { label: 'Women\'s helpline (domestic abuse)', num: '181' },
     { label: 'Fire', num: '101' }
   ].filter(Boolean);
-  host.innerHTML = rows.map(r => `<div class="emg-row"><span>${r.label}</span><a class="btn btn-amber" style="width:auto;margin:0;padding:8px 16px" href="tel:${r.num}">📞 ${r.num}</a></div>`).join('')
+  host.innerHTML = rows.map(r => `<div class="emg-row"><span>${escH(r.label)}</span><a class="btn btn-amber" style="width:auto;margin:0;padding:8px 16px" href="tel:${r.num}">📞 ${r.num}</a></div>`).join('')
     + '<p style="font-size:12px;color:var(--p-text-muted);margin-top:10px">In an emergency call first, then tell the warden.</p>';
 }
 
@@ -717,23 +717,23 @@ async function loadIdCard() {
     host.innerHTML = `
       <div class="idcard">
         <div class="idcard-top">
-          <div class="idc-name">${d.name}</div>
-          <div class="idc-sub">${d.pg_name}${d.room_number ? ' · Room ' + d.room_number : ''}${d.bed_number ? ' / Bed ' + d.bed_number : ''}</div>
+          <div class="idc-name">${escH(d.name)}</div>
+          <div class="idc-sub">${escH(d.pg_name)}${escH(d.room_number ? ' · Room ' + d.room_number : '')}${escH(d.bed_number ? ' / Bed ' + d.bed_number : '')}</div>
         </div>
         <div class="idcard-body">
           <div class="idcard-qr">${d.qr_svg}</div>
           <div class="idcard-kv">
-            <div><span>Resident no.</span><strong>${d.resident_no}</strong></div>
+            <div><span>Resident no.</span><strong>${escH(d.resident_no)}</strong></div>
             <div><span>Resident since</span><strong>${fmtDate(d.join_date)}</strong></div>
-            <div><span>PG contact</span><strong>${d.pg_phone || '—'}</strong></div>
-            ${d.emergency_contact ? `<div><span>Emergency</span><strong>${d.emergency_contact_name ? d.emergency_contact_name + ' · ' : ''}${d.emergency_contact}</strong></div>` : ''}
+            <div><span>PG contact</span><strong>${escH(d.pg_phone || '—')}</strong></div>
+            ${d.emergency_contact ? `<div><span>Emergency</span><strong>${d.emergency_contact_name ? d.emergency_contact_name + ' · ' : ''}${escH(d.emergency_contact)}</strong></div>` : ''}
           </div>
         </div>
       </div>
       <p style="font-size:12px;color:var(--p-text-muted);margin-top:10px;text-align:center">
         Show this at the gate. The code changes every ${d.expires_in_hours} hours, so a screenshot someone else keeps will not work.
       </p>`;
-  } catch (e) { host.innerHTML = `<p style="text-align:center;color:var(--p-red)">${e.message}</p>`; }
+  } catch (e) { host.innerHTML = `<p style="text-align:center;color:var(--p-red)">${escH(e.message)}</p>`; }
 }
 
 async function loadGuestData() {
@@ -922,7 +922,7 @@ function renderMenu(menu) {
   host.innerHTML = ordered.map(d => `
     <div class="menu-day ${d === today ? 'today' : ''}">
       <h4>${d}${d === today ? '<span style="color:var(--p-accent)">Today</span>' : ''}</h4>
-      ${meals.map(ml => `<div class="menu-meal"><b>${ml}</b><span>${(byDay[d] && byDay[d][ml]) ? byDay[d][ml] : '—'}</span></div>`).join('')}
+      ${meals.map(ml => `<div class="menu-meal"><b>${ml}</b><span>${escH((byDay[d] && byDay[d][ml]) ? byDay[d][ml] : '—')}</span></div>`).join('')}
     </div>`).join('');
 }
 
@@ -937,8 +937,8 @@ function renderNotices(notices) {
           <span class="badge ${a.priority==='urgent'?'badge-red':a.priority==='important'?'badge-amber':'badge-blue'}">${a.priority}</span>
           <span style="font-size:11px;color:var(--p-text-light)">${fmtDate(a.created_at)}</span>
         </div>
-        <strong style="font-size:14px">${a.title}</strong>
-        <p style="margin-top:6px;font-size:13px;color:var(--p-text-soft)">${a.message}</p>
+        <strong style="font-size:14px">${escH(a.title)}</strong>
+        <p style="margin-top:6px;font-size:13px;color:var(--p-text-soft)">${escH(a.message)}</p>
       </div>`).join('');
 }
 
@@ -977,10 +977,10 @@ async function loadComplaintHistory() {
     el.innerHTML = list.map(c => `
       <div style="padding:12px 0;border-bottom:1px solid var(--p-surface-2)">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-          <strong style="font-size:13px">${c.category}</strong>
+          <strong style="font-size:13px">${escH(c.category)}</strong>
           <span style="font-size:11px;color:var(--p-text-light)">${fmtDate(c.created_at)}</span>
         </div>
-        <div style="font-size:13px;color:var(--p-text-soft);margin:4px 0 10px">${c.description}</div>
+        <div style="font-size:13px;color:var(--p-text-soft);margin:4px 0 10px">${escH(c.description)}</div>
         ${complaintTimeline(c)}
       </div>`).join('');
   } catch(e) { /* silent */ }
@@ -998,9 +998,9 @@ function complaintTimeline(c) {
   ];
   return `<ul class="timeline">${steps.map((st, i) => `
     <li class="${i < at ? 'done' : i === at ? 'current' : ''}">
-      <div class="t-label">${st.label}</div>
-      <div class="t-sub">${st.sub}</div>
-      ${(i === 2 && c.resolution_notes) ? `<div style="font-size:12px;color:#16A34A;margin-top:3px">✔ ${c.resolution_notes}</div>` : ''}
+      <div class="t-label">${escH(st.label)}</div>
+      <div class="t-sub">${escH(st.sub)}</div>
+      ${(i === 2 && c.resolution_notes) ? `<div style="font-size:12px;color:#16A34A;margin-top:3px">✔ ${escH(c.resolution_notes)}</div>` : ''}
     </li>`).join('')}</ul>`;
 }
 

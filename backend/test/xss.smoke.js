@@ -48,6 +48,7 @@ const SH = (t) => `<b data-xss=${t}>`;
 
   // 1 · Anonymous door: no Authorization header at all
   const anon = await post('/guest-message', { guest_name: SH('inbox-name'), guest_phone: SH('ph'), room_number: SH('room'), subject: P('inbox-subject'), message: P('inbox-message') }, { 'Content-Type': 'application/json' });
+  await post('/guest-message', { guest_name: 'Plain Sender', message: "I can't pay today & will pay Friday" }, { 'Content-Type': 'application/json' });
   ok(anon.status === 200, `anonymous message accepted (${anon.status}) — this door is public by design`);
 
   // 2 · Resident doors
@@ -64,6 +65,12 @@ const SH = (t) => `<b data-xss=${t}>`;
   const room2 = await j(await post('/rooms', { room_number: 'X2', floor: 1, total_beds: 2, monthly_rent: 6000 }));
   const crafted = await j(await post('/guests', { name: `Q"'><img src=x data-xss=gname onerror=window.__xss=[\'gname\']>`, phone: '8' + String(Date.now()).slice(-9), room_id: room2.id, bed_number: 1, join_date: '2026-06-01', monthly_rent: 6000, deposit_amount: 1000 }));
   ok(crafted.id, 'crafted-name resident stored');
+  // S15.3-1 (R-1): staff-typed resident details, room type and an expense category
+  const room3 = await j(await post('/rooms', { room_number: 'X3', floor: 1, total_beds: 2, monthly_rent: 6000, room_type: SH('rtype') }));
+  const detailed = await j(await post('/guests', { name: 'Detail Resident', phone: '7' + String(Date.now()).slice(-9), room_id: room3.id, bed_number: 1, join_date: '2026-06-01', monthly_rent: 6000, deposit_amount: 1000,
+    address: P('address'), emergency_contact_name: SH('ecname'), emergency_contact: SH('ec'), id_proof_type: SH('idtype'), email: SH('email') }));
+  ok(detailed.id, 'staff-typed details stored');
+  ok((await post('/purchases', { amount: 50, category: SH('expcat'), description: P('exp-desc'), purchase_date: new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10), paid_to: SH('paidto'), payment_mode: 'cash' })).status < 300, 'staff-typed expense stored');
   ok((await post('/guest-visitor', { visitor_name: SH('visitor-name'), relation: SH('relation') }, GH)).status === 201, 'resident visitor stored');
   const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
   ok((await post('/guest-meal-rating', { meal_type: 'Lunch', stars: 2, comment: P('meal-comment'), date: today }, GH)).status < 300, 'resident meal comment stored');
@@ -88,6 +95,16 @@ const SH = (t) => `<b data-xss=${t}>`;
       const clean = r.ran.length === 0 && r.els.length === 0;
       if (clean) count++;
       else failures.push(`${where} (ran: ${[...new Set(r.ran)].join(',') || 'none'}; injected: ${[...new Set(r.els)].join(',') || 'none'})`);
+      // Escaped TWICE shows entities as text. No planted value contains these
+      // literally, so seeing one means a double escape (S15.3-6). Text boxes
+      // count too — their value is what the user edits.
+      const dbl = await page.evaluate(() => {
+        const sig = /&(amp|#39|lt|gt|#96);/;
+        const texts = [document.body.innerText, ...[...document.querySelectorAll('input[type=text],textarea')].map(e => e.value), ...[...document.querySelectorAll('[data-why]')].map(e => e.dataset.why)];
+        const hit = texts.find(t => sig.test(t || ''));
+        return hit ? hit.match(/.{0,30}&(amp|#39|lt|gt|#96);.{0,20}/)[0] : '';
+      });
+      if (dbl) failures.push(`${where}: text escaped twice, user sees "${dbl}"`); else count++;
       // Clear so the next screen is judged on its own
       await page.evaluate(() => { window.__xss = []; document.querySelectorAll('[data-xss]').forEach(e => e.remove()); });
     };
@@ -109,6 +126,12 @@ const SH = (t) => `<b data-xss=${t}>`;
     // Injected quotes can break the list markup itself, so a missing row is a finding too
     if (nInbox < 1) failures.push('inbox: the anonymous message row did not render (markup broken by its text)');
     else count++;
+    // S15.3-6 (R-5): search still finds apostrophes and & (no double escaping)
+    for (const q of ["can't", '& will']) {
+      const shown = await page.evaluate(t => { filterTable(t, 'inbox-list'); return [...document.querySelectorAll('.inbox-item')].filter(e => e.style.display !== 'none' && e.offsetParent !== null).length; }, q);
+      ok(shown === 1, `S15.3-6 inbox search for "${q}" finds the message (${shown})`);
+    }
+    await page.evaluate(() => filterTable('', 'inbox-list'));
     const msgs = await page.evaluate(() => apiFetch('/inbox'));
     ok(Array.isArray(msgs) && msgs.length >= 1, 'the anonymous message is in the inbox data');
     for (let i = 0; i < msgs.length; i++) {
@@ -133,6 +156,14 @@ const SH = (t) => `<b data-xss=${t}>`;
       await page.evaluate(id => { room360.tab = id; renderRoom360(); }, t);
       await check(`Room 360 tab "${t}"`);
     }
+    await page.evaluate(() => closeModal());
+    // S15.3-1: the staff-typed details on every screen that shows them
+    await page.evaluate(id => residentProfile(id), detailed.id); await settle();
+    for (const t of await page.evaluate(() => R360_TABS.map(x => x.id))) { await page.evaluate(id => { r360.tab = id; renderResident360(); }, t); await check(`Resident 360 (staff-typed) "${t}"`); }
+    await page.evaluate(() => closeModal());
+    await page.evaluate(id => viewGuest(id), detailed.id); await check('guest details sheet');
+    await page.evaluate(() => closeModal());
+    await page.evaluate(id => roomProfile(id), room3.id); await settle(); await check('Room 360 (staff-typed room type)');
     await page.evaluate(() => closeModal());
     // Universal search
     await page.evaluate(() => openSearch());
