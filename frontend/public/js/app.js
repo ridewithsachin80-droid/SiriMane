@@ -89,6 +89,14 @@ function navigate(page) {
 // Small bottom toast for errors that happen outside a screen's own try/catch
 // (background badge refreshes, unhandled promise rejections, etc.).
 let toastTimer = null;
+// ── Untrusted text → HTML (Sprint 15.2, S15.2-7) ─────────────────────────
+// Residents (complaints, visitors, meal comments) and ANYONE on the internet
+// (the public "message the PG" form) write text that staff screens render
+// with innerHTML. Every such value goes through esc() — otherwise a resident
+// could run code in the admin's browser and take over the admin login.
+function esc(v) {
+  return String(v == null ? '' : v).replace(/[&<>"'`]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;' }[ch]));
+}
 function toast(msg, type='error') {
   let el = document.getElementById('sm-toast');
   if (!el) { el = document.createElement('div'); el.id = 'sm-toast'; document.body.appendChild(el); }
@@ -303,7 +311,7 @@ function roomModal(r={}) {
           </div>
         </div>
         <div class="form-group"><label>Monthly Rent per Bed (₹)</label><input id="rm-rent" type="number" value="${r.monthly_rent||''}" placeholder="e.g. 5000"/></div>
-        <div class="form-group"><label>Description</label><textarea id="rm-desc" rows="2">${r.description||''}</textarea></div>
+        <div class="form-group"><label>Description</label><textarea id="rm-desc" rows="2">${esc(r.description||'')}</textarea></div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
@@ -1009,11 +1017,11 @@ async function pgComplaints(filter) {
             <thead><tr><th class="bulk-th" scope="col"><span class="sr-only">Select</span></th><th scope="col">DATE</th><th scope="col">CATEGORY</th><th scope="col">ISSUE</th><th scope="col">FROM</th><th scope="col">PRIORITY</th><th scope="col">STATUS</th><th scope="col">ACTIONS</th></tr></thead>
             <tbody id="complaints-tb">
               ${list.map(c => `
-                <tr data-search="${c.category.toLowerCase()} ${c.description.toLowerCase()} ${(c.guest_name||'').toLowerCase()} ${(c.room_number||'').toLowerCase()}">
+                <tr data-search="${esc(c.category.toLowerCase())} ${esc(c.description.toLowerCase())} ${(c.guest_name||'').toLowerCase()} ${(c.room_number||'').toLowerCase()}">
                   <td class="bulk-td">${bulkCb(c.id, c.category + (c.room_number ? ' Room ' + c.room_number : ''))}</td>
                   <td>${fmtDate(c.created_at)}</td>
-                  <td>${c.category}</td>
-                  <td style="max-width:260px">${c.description}${c.resolution_notes?`<br><span class="text-muted" style="font-size:12px">✔ ${c.resolution_notes}</span>`:''}</td>
+                  <td>${esc(c.category)}</td>
+                  <td style="max-width:260px">${esc(c.description)}${c.resolution_notes?`<br><span class="text-muted" style="font-size:12px">✔ ${esc(c.resolution_notes)}</span>`:''}</td>
                   <td>${c.guest_name || (c.raised_by==='guest'?'Guest':'Staff')}${c.room_number?' · Room '+c.room_number:''}</td>
                   <td>${priorityBadge(c.priority)}${c.priority_why ? whyBtn(c.priority_why, 'Why this priority?') : ''}</td>
                   <td><span class="badge ${c.status==='resolved'?'badge-green':c.status==='in_progress'?'badge-blue':'badge-red'}">${c.status.replace('_',' ')}</span></td>
@@ -1219,7 +1227,7 @@ async function pgAnnouncements() {
           ? '<div style="text-align:center;padding:48px;color:var(--text-muted)">📢<br><br>No messages posted yet. Click Post Message.</div>'
           : `<div id="ann-list">
             ${list.map(a=>`
-            <div data-search="${a.title.toLowerCase()} ${a.message.toLowerCase()}" style="padding:16px 20px;border-bottom:1px solid var(--border)">
+            <div data-search="${a.title.toLowerCase()} ${esc(a.message.toLowerCase())}" style="padding:16px 20px;border-bottom:1px solid var(--border)">
               <div class="flex justify-between items-center mb-4">
                 <div class="flex items-center gap-2">
                   <span class="badge ${a.priority==='urgent'?'badge-red':a.priority==='important'?'badge-amber':'badge-blue'}">${a.priority}</span>
@@ -1230,7 +1238,7 @@ async function pgAnnouncements() {
                   ${isAdmin()?`<button class="btn btn-danger btn-sm btn-icon" onclick="delAnnouncement(${a.id})">✕</button>`:''}
                 </div>
               </div>
-              <p style="font-size:13px;color:var(--text-muted)">${a.message}</p>
+              <p style="font-size:13px;color:var(--text-muted)">${esc(a.message)}</p>
             </div>`).join('')}
           </div>`}
       </div>`);
@@ -1304,17 +1312,17 @@ async function pgInbox() {
         ${msgs.length===0
           ? '<div style="text-align:center;padding:48px;color:var(--text-muted)">📭<br><br>No messages from guests yet.</div>'
           : msgs.map(m=>`
-          <div data-search="${(m.guest_name||'').toLowerCase()} ${(m.subject||'').toLowerCase()} ${(m.message||'').toLowerCase()} ${(m.room_number||'').toLowerCase()}" class="inbox-item ${!m.is_read?'unread':''}" onclick="viewInboxMsg(${JSON.stringify(m).replace(/"/g,'&quot;')})">
+          <div data-search="${esc(`${m.guest_name||''} ${m.subject||''} ${m.message||''} ${m.room_number||''}`.toLowerCase())}" class="inbox-item ${!m.is_read?'unread':''}" onclick="viewInboxMsg(${esc(JSON.stringify(m))})">
             <div class="flex justify-between items-center">
               <div>
-                <strong style="font-size:14px">${m.guest_name}</strong>
-                ${m.room_number?`<span class="text-muted"> · Room ${m.room_number}</span>`:''}
+                <strong style="font-size:14px">${esc(m.guest_name)}</strong>
+                ${m.room_number?`<span class="text-muted"> · Room ${esc(m.room_number)}</span>`:''}
                 ${!m.is_read?'<span class="unread-dot"></span>':''}
               </div>
               <span class="text-muted" style="font-size:12px">${fmtDate(m.created_at)}</span>
             </div>
-            <div style="font-size:13px;font-weight:500;margin:4px 0">${m.subject||'No subject'}</div>
-            <div class="text-muted" style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${m.message}</div>
+            <div style="font-size:13px;font-weight:500;margin:4px 0">${esc(m.subject||'No subject')}</div>
+            <div class="text-muted" style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(m.message)}</div>
             ${m.reply?`<div style="margin-top:6px;padding:6px 10px;background:var(--green-light);border-radius:6px;font-size:12px;color:#065F46">✅ Replied</div>`:''}
           </div>`).join('')}
         </div>
@@ -1326,12 +1334,12 @@ async function viewInboxMsg(m) {
   if(!m.is_read) { try { await API.markRead(m.id); } catch {} }
   openModal(`
     <div class="modal">
-      <div class="modal-header"><h3>💬 Message from ${m.guest_name}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+      <div class="modal-header"><h3>💬 Message from ${esc(m.guest_name)}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
       <div class="modal-body">
         <div style="background:var(--surface-2);padding:14px;border-radius:8px;margin-bottom:16px">
-          <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">${fmtDate(m.created_at)} · ${m.guest_phone||''} · ${m.room_number?'Room '+m.room_number:''}</div>
-          <strong style="font-size:14px">${m.subject||'No subject'}</strong>
-          <p style="margin-top:8px;font-size:14px">${m.message}</p>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">${fmtDate(m.created_at)} · ${esc(m.guest_phone||'')} · ${m.room_number?'Room '+esc(m.room_number):''}</div>
+          <strong style="font-size:14px">${esc(m.subject||'No subject')}</strong>
+          <p style="margin-top:8px;font-size:14px">${esc(m.message)}</p>
         </div>
         ${m.reply?`<div style="background:var(--green-light);padding:12px;border-radius:8px;margin-bottom:14px"><div style="font-size:11px;color:#065F46;font-weight:600;margin-bottom:4px">YOUR REPLY</div><p style="font-size:13px;color:#065F46">${m.reply}</p></div>`:''}
         <div id="ib-alert" class="alert alert-danger hidden"></div>
@@ -1518,10 +1526,10 @@ function renderPurchaseRows(list) {
       const pending = p.status === 'pending_approval';
       return `<tr ${pending?'style="background:#FFFBEB"':''}>
       <td>${fmtDate(p.purchase_date)}</td>
-      <td><span class="badge badge-amber">${p.category}</span> ${pending?'<span class="badge badge-amber">Pending</span>':''}</td>
-      <td>${p.description||'—'}</td>
+      <td><span class="badge badge-amber">${esc(p.category)}</span> ${pending?'<span class="badge badge-amber">Pending</span>':''}</td>
+      <td>${esc(p.description||'—')}</td>
       <td class="text-red fw-600">${fmt(p.amount)}</td>
-      <td>${p.paid_to||'—'}</td>
+      <td>${esc(p.paid_to||'—')}</td>
       <td>${p.payment_mode}</td>
       <td>${pending && isAdmin()
         ? `<div class="flex gap-2"><button class="btn btn-primary btn-sm" onclick="confirmPendingPurchase(${p.id})">Approve</button><button class="btn btn-danger btn-sm btn-icon" onclick="delPurchase(${p.id})">✕</button></div>`
@@ -1872,7 +1880,7 @@ function renderCollectionRows(list) {
       <td>${fmtDate(c.collection_date)}</td>
       <td><span class="badge badge-green" style="text-transform:capitalize">${c.collection_type}</span> ${pendingVerification?'<span class="badge badge-amber">Pending Verification</span>':pendingApproval?'<span class="badge badge-amber">Pending Approval</span>':''}</td>
       <td>${c.guest_name||'—'}</td>
-      <td>${c.description||c.collection_month||'—'}</td>
+      <td>${esc(c.description||c.collection_month||'—')}</td>
       <td class="text-green fw-600">${fmt(c.amount)}</td>
       <td>${c.payment_mode}</td>
       <td>
@@ -2554,10 +2562,10 @@ async function pgBalanceSheet(asOf) {
             <tbody id="assets-tb">
               ${assets.length===0
                 ? `<tr class="empty-row"><td colspan="6">${emptyState('bed', 'No assets recorded', 'Beds, geysers, furniture — anything the PG owns.', '<button class="btn btn-primary btn-sm" onclick="fixedAssetModal()">Add asset</button>')}</td></tr>`
-                : assets.map(a=>`<tr data-search="${a.name.toLowerCase()} ${a.category.toLowerCase()} ${(a.notes||'').toLowerCase()}">
+                : assets.map(a=>`<tr data-search="${a.name.toLowerCase()} ${esc(a.category.toLowerCase())} ${(a.notes||'').toLowerCase()}">
                   <td>${fmtDate(a.purchase_date)}</td>
                   <td><strong>${a.name}</strong></td>
-                  <td><span class="badge badge-blue">${a.category}</span></td>
+                  <td><span class="badge badge-blue">${esc(a.category)}</span></td>
                   <td class="fw-600">${fmt(a.value)}</td>
                   <td class="text-muted">${a.notes||'—'}</td>
                   <td><button class="btn btn-danger btn-sm btn-icon" onclick="delFixedAsset(${a.id})">✕</button></td>
@@ -2585,7 +2593,7 @@ async function pgBalanceSheet(asOf) {
                 : capital.map(c=>`<tr data-search="${(c.note||'').toLowerCase()} ${(c.username||'').toLowerCase()}">
                   <td>${fmtDate(c.transaction_date)}</td>
                   <td class="fw-600 ${parseFloat(c.amount)<0?'text-red':'text-green'}">${fmt(c.amount)}</td>
-                  <td class="text-muted">${c.note||'—'}</td>
+                  <td class="text-muted">${esc(c.note||'—')}</td>
                   <td>${c.username||'—'}</td>
                   <td><button class="btn btn-danger btn-sm btn-icon" onclick="delCapitalTransaction(${c.id})">✕</button></td>
                 </tr>`).join('')}
@@ -3483,7 +3491,7 @@ async function purchaseScanBill() {
       <div class="card" style="padding:12px;border:2px solid var(--primary);background:var(--accent-soft);margin-bottom:12px">
         <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted,var(--text-muted))">Read from the bill (${f.confidence} confidence) — please check</div>
         <div style="font-size:14px;margin:6px 0">
-          <strong>${f.amount ? fmt(f.amount) : 'amount not found'}</strong>${f.paid_to ? ' · ' + f.paid_to : ''}${f.purchase_date ? ' · ' + fmtDate(f.purchase_date) : ''}<br>
+          <strong>${f.amount ? fmt(f.amount) : 'amount not found'}</strong>${esc(f.paid_to ? ' · ' + f.paid_to : '')}${f.purchase_date ? ' · ' + fmtDate(f.purchase_date) : ''}<br>
           ${f.category || 'category?'}${f.description ? ' — ' + f.description : ''}${f.payment_mode ? ' · ' + f.payment_mode : ''}
         </div>
         <div class="flex gap-2">
@@ -3825,7 +3833,7 @@ function renderCopilotResult(r) {
     if (x.text && x.name) return `<div><strong>${x.name}</strong>${x.room ? ' · Room ' + x.room : ''} — ${fmt(x.amount_due)}</div>`;
     if (x.name && 'amount_due' in x) return `<div><strong>${x.name}</strong>${x.room || x.room_number ? ' · Room ' + (x.room || x.room_number) : ''} — ${fmt(x.amount_due)}${x.months ? ` · ${x.months} mo` : ''}</div>`;
     if (x.room_number && 'vacant' in x) return `<div><strong>Room ${x.room_number}</strong> — ${x.vacant} free of ${x.total_beds}${x.residents && x.residents.length ? ' · ' + x.residents.map(z => z.name).join(', ') : ''}</div>`;
-    if (x.category && x.description) return `<div><strong>${x.category}</strong> · ${x.priority || ''}${x.room_number ? ' · Room ' + x.room_number : ''} — ${x.description}${x.age_days != null ? ` (${x.age_days} d)` : ''}</div>`;
+    if (x.category && x.description) return `<div><strong>${esc(x.category)}</strong> · ${x.priority || ''}${x.room_number ? ' · Room ' + x.room_number : ''} — ${esc(x.description)}${x.age_days != null ? ` (${x.age_days} d)` : ''}</div>`;
     return `<div>${x.name || x.title || JSON.stringify(x)}</div>`;
   }).join('')}${(r.evidence || []).length > 8 ? `<div class="text-muted">…and ${r.evidence.length - 8} more</div>` : ''}</div>` : '';
   const preview = r.proposal ? `<div class="copilot-preview"><div class="copilot-preview-h">Siri prepared — check before confirming</div>${previewRows(r.proposal.preview)}</div>` : '';
@@ -4012,7 +4020,7 @@ async function runSearch() {
       () => { closeSearch(); navigate('rooms'); });
     add('Payments', r.payments, p => `${icon('receipt')}<span><span>${p.guest_name} — ${fmt(p.amount)}</span><div class="s-sub">${p.receipt_number || ''} · ${fmtDate(p.collection_date)}${p.status !== 'confirmed' ? ' · ' + p.status : ''}</div></span>`,
       () => { closeSearch(); navigate('payments'); });
-    add('Requests', r.requests, c => `${icon('wrench')}<span><span>${c.category}${c.room_number ? ' · Room ' + c.room_number : ''}</span><div class="s-sub">${c.description.slice(0, 60)} · ${c.status}</div></span>`,
+    add('Requests', r.requests, c => `${icon('wrench')}<span><span>${esc(c.category)}${c.room_number ? ' · Room ' + c.room_number : ''}</span><div class="s-sub">${esc(c.description.slice(0, 60))} · ${c.status}</div></span>`,
       () => { closeSearch(); navigate('complaints'); });
     // "Nothing matches" is about the SEARCH, so the Ask Siri row must not
     // stand in for a result — say it plainly, then still offer to ask Siri.
@@ -4220,16 +4228,16 @@ function renderResident360() {
       const pays = timeline.items.filter(i => i.kind === 'payment');
       return `${kv([['Outstanding', due ? fmt(due) : '—'], ['In credit', credit ? fmt(credit) : '—'], ['Monthly rent', fmt(g.monthly_rent)], ['Deposit held', fmt(g.deposit_amount)]])}
         <div class="r360-h">Payments</div>
-        ${pays.length ? pays.map(p => `<div class="r360-row"><span><strong>${p.title}</strong><div class="t-sub">${fmtDate(p.at)}${p.detail ? ' · ' + p.detail : ''}</div></span>
+        ${pays.length ? pays.map(p => `<div class="r360-row"><span><strong>${esc(p.title)}</strong><div class="t-sub">${fmtDate(p.at)}${p.detail ? ' · ' + esc(p.detail) : ''}</div></span>
           ${p.status === 'confirmed' ? `<button class="btn btn-outline btn-sm" onclick="downloadReceipt(${p.id})">${icon('receipt')}</button>` : `<span class="badge badge-amber">${p.status}</span>`}</div>`).join('')
           : emptyState('rupee', 'No payments yet', 'Collections will appear here.', `<button class="btn btn-primary btn-sm" onclick="closeModal();collectFrom(${g.id})">Collect rent</button>`)}`;
     },
     stay: () => `${kv([['Moved in', fmtDate(g.join_date)], ['Expected checkout', g.expected_checkout ? fmtDate(g.expected_checkout) : 'Not set'], ['Checked out', g.leave_date ? fmtDate(g.leave_date) : '—']])}
       <div class="r360-h">Timeline</div>
-      <ul class="r360-timeline">${timeline.items.map(i => `<li class="tl-${i.kind}"><div class="tl-date">${fmtDate(i.at)}</div><div><strong>${i.title}</strong>${i.detail ? `<div class="t-sub">${i.detail}</div>` : ''}</div></li>`).join('')}</ul>`,
+      <ul class="r360-timeline">${timeline.items.map(i => `<li class="tl-${i.kind}"><div class="tl-date">${fmtDate(i.at)}</div><div><strong>${esc(i.title)}</strong>${i.detail ? `<div class="t-sub">${esc(i.detail)}</div>` : ''}</div></li>`).join('')}</ul>`,
     requests: () => {
       const reqs = timeline.items.filter(i => i.kind === 'request');
-      return reqs.length ? reqs.map(r => `<div class="r360-row"><span><strong>${r.title}</strong><div class="t-sub">${fmtDate(r.at)} · ${r.detail}</div></span></div>`).join('')
+      return reqs.length ? reqs.map(r => `<div class="r360-row"><span><strong>${esc(r.title)}</strong><div class="t-sub">${fmtDate(r.at)} · ${esc(r.detail)}</div></span></div>`).join('')
         : emptyState('wrench', 'No requests', 'Anything she reports will be listed here.', '');
     },
     docs: () => `${kv([['ID proof', g.id_proof_type], ['ID number', g.id_proof_number ? g.id_proof_number.replace(/.(?=.{4})/g, '•') : null], ['Address on file', g.address]])}
@@ -4301,9 +4309,9 @@ function renderMoveIn() {
       <h4 style="margin:12px 0 10px">${st.t}</h4>
       ${st.html}
       <div class="flex gap-2" style="margin-top:16px">
-        ${moveIn.step > 1 ? `<button class="btn btn-outline" onclick="moveInStep(-1)">Back</button>` : ''}
+        ${moveIn.step > 1 && !moveIn.created ? `<button class="btn btn-outline" id="mi-back" onclick="moveInStep(-1)">Back</button>` : ''}
         ${moveIn.step < steps.length ? `<button class="btn btn-primary" style="flex:1" onclick="moveInStep(1)">Next</button>`
-          : `<button class="btn btn-success" style="flex:1" onclick="moveInSave()">✓ Confirm move-in</button>`}
+          : `<button class="btn btn-success" style="flex:1" id="mi-save" onclick="moveInSave()">${moveIn.created ? '↻ Retry saving the payment' : '✓ Confirm move-in'}</button>`}
       </div>
     </div></div>`);
   if (moveIn.step === 3) moveInReadiness();
@@ -4354,35 +4362,65 @@ async function moveInScanId() {
   } catch (e) { if (status) { status.textContent = e.message; status.classList.add('voice-error'); } }
 }
 async function moveInSave() {
+  // Sprint 15.2 (S15.2-1): one tap = one resident. The button is locked while
+  // saving, and once the resident exists a retry never creates her again — it
+  // only posts the payments that did not save (closed day, 4G drop).
+  if (!moveIn || moveIn.saving) return;
   moveInCollect();
   const d = moveIn.data;
   const al = document.getElementById('mi-alert');
+  const btn = document.getElementById('mi-save');
+  const back = document.getElementById('mi-back');
+  const unlock = (label) => { moveIn.saving = false; if (btn) { btn.disabled = false; btn.textContent = label; } };
+  moveIn.saving = true;
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  if (al) al.classList.add('hidden');
   try {
-    const g = await API.createGuest({
-      name: d.name, phone: d.phone, emergency_contact: d.emergency_contact || null, emergency_contact_name: d.emergency_contact_name || null,
-      room_id: d.room_id, bed_number: d.bed_number || null, join_date: d.join_date, expected_checkout: d.expected_checkout || null,
-      monthly_rent: d.monthly_rent, deposit_amount: d.deposit_amount, address: d.address || null,
-      id_proof_type: d.id_proof_type || null, id_proof_number: d.id_proof_number || null, notes: null,
-      deposit_recorded_by_client: true   // Sprint 15.1: the deposit below is the only deposit record
-    });
-    const pays = [];
-    if (+d.pay_deposit > 0) pays.push({ collection_type: 'deposit', amount: +d.pay_deposit });
-    if (+d.pay_rent > 0) pays.push({ collection_type: 'rent', amount: +d.pay_rent });
-    for (const p of pays) {
+    if (!moveIn.created) {
+      moveIn.created = await API.createGuest({
+        name: d.name, phone: d.phone, emergency_contact: d.emergency_contact || null, emergency_contact_name: d.emergency_contact_name || null,
+        room_id: d.room_id, bed_number: d.bed_number || null, join_date: d.join_date, expected_checkout: d.expected_checkout || null,
+        monthly_rent: d.monthly_rent, deposit_amount: d.deposit_amount, address: d.address || null,
+        id_proof_type: d.id_proof_type || null, id_proof_number: d.id_proof_number || null, notes: null,
+        deposit_recorded_by_client: true   // Sprint 15.1: the deposit below is the only deposit record
+      });
+      moveIn.paidDone = {};
+      if (back) back.remove();   // she exists now — going back to edit her would not change the saved record
+    }
+  } catch (e) {
+    unlock('✓ Confirm move-in');
+    if (al) showAlert(al, e.message); else toast(e.message);
+    return;
+  }
+  const g = moveIn.created;
+  const pays = [];
+  if (+d.pay_deposit > 0) pays.push({ collection_type: 'deposit', amount: +d.pay_deposit });
+  if (+d.pay_rent > 0) pays.push({ collection_type: 'rent', amount: +d.pay_rent });
+  const failed = [];
+  for (const p of pays) {
+    if (moveIn.paidDone[p.collection_type]) continue;   // already saved on an earlier tap
+    try {
       await API.createCollection({ guest_id: g.id, guest_name: g.name, amount: p.amount, collection_date: d.join_date,
         collection_type: p.collection_type, payment_mode: d.pay_mode || 'Cash', collection_month: new Date(d.join_date).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }), description: 'At move-in' });
-    }
-    closeModal();
-    const room = moveIn.rooms.find(r => String(r.id) === String(d.room_id));
-    // Say what money was recorded, so nobody records the same rent again on Collect.
-    const paidTotal = pays.reduce((t, p) => t + p.amount, 0);
-    const paidLine = paidTotal > 0
-      ? ` · ${fmt(paidTotal)} recorded — ${pays.map(p => `${p.collection_type} ${fmt(p.amount)}`).join(' + ')} (${d.pay_mode || 'Cash'})`
-      : ' · no payment recorded';
-    toast(`${g.name} is in${room ? ` Room ${room.room_number}` : ''}${d.bed_number ? ` bed ${d.bed_number}` : ''}${paidLine}`, 'ok');
-    moveIn = null;
-    navigate('guests');
-  } catch (e) { if (al) showAlert(al, e.message); else toast(e.message); }
+      moveIn.paidDone[p.collection_type] = p.amount;
+    } catch (e) { failed.push({ p, msg: e.message }); }
+  }
+  if (failed.length) {
+    unlock('↻ Retry saving the payment');
+    const msg = `${g.name} is added. NOT recorded yet: ${failed.map(f => `${f.p.collection_type} ${fmt(f.p.amount)} (${f.msg})`).join('; ')}. Tap Retry — she will not be added twice — or record it later in Collect.`;
+    if (al) showAlert(al, msg); else toast(msg);
+    return;
+  }
+  closeModal();
+  const room = moveIn.rooms.find(r => String(r.id) === String(d.room_id));
+  // Say what money was recorded, so nobody records the same rent again on Collect.
+  const paidTotal = pays.reduce((t, p) => t + p.amount, 0);
+  const paidLine = paidTotal > 0
+    ? ` · ${fmt(paidTotal)} recorded — ${pays.map(p => `${p.collection_type} ${fmt(p.amount)}`).join(' + ')} (${d.pay_mode || 'Cash'})`
+    : ' · no payment recorded';
+  toast(`${g.name} is in${room ? ` Room ${room.room_number}` : ''}${d.bed_number ? ` bed ${d.bed_number}` : ''}${paidLine}`, 'ok');
+  moveIn = null;
+  navigate('guests');
 }
 
 // ── Checkout wizard ─────────────────────────────────────────────
@@ -4390,27 +4428,33 @@ async function moveInSave() {
 // server's, shown here before it is committed.
 let checkoutW = null;
 async function checkoutWizard(id, prefill) {
-  const [g, ledger] = await Promise.all([API.getGuest(id), API.getGuestLedger(id).catch(() => null)]);
+  const [g, ledger, depStatus] = await Promise.all([API.getGuest(id), API.getGuestLedger(id).catch(() => null), apiFetch(`/guests/${id}/deposit-status`).catch(() => null)]);
   const due = ledger && ledger.currentBalance < 0 ? -ledger.currentBalance : 0;
-  checkoutW = { step: 1, g, due, data: { leave_date: (prefill && prefill.leave_date) || nowDate(), deductions: '', deduction_notes: '', refund_mode: 'cash' } };
+  checkoutW = { step: 1, g, due, depStatus, data: { leave_date: (prefill && prefill.leave_date) || nowDate(), deductions: '', deduction_notes: '', refund_mode: 'cash' } };
   renderCheckout();
 }
 function renderCheckout() {
-  const { g, due, data } = checkoutW;
+  const { g, due, data, depStatus } = checkoutW;
   const deposit = parseFloat(g.deposit_amount) || 0;
+  // S15.2-2: show what was actually collected next to what was agreed. The
+  // refund below is still worked out from the agreed deposit (unchanged).
+  const depShort = depStatus && depStatus.received < deposit;
+  const depNote = depStatus ? `<div class="copilot-kv" id="co-dep-received"><span>Deposit actually received</span><strong>${fmt(depStatus.received)} of ${fmt(deposit)}${depStatus.pending ? ` · ${fmt(depStatus.pending)} waiting for confirmation` : ''}</strong></div>` : '';
+  const depWarn = depShort ? `<div class="alert alert-warning" id="co-dep-warn" style="display:block;margin-top:10px">Only ${fmt(depStatus.received)} of the ${fmt(deposit)} deposit was recorded as received. The refund below is worked out from the agreed ${fmt(deposit)} — check before paying it out.</div>` : '';
   const ded = Math.max(0, parseFloat(data.deductions) || 0);
   const refund = deposit - ded;
   const steps = [
     { t: 'Leaving date and dues', html: `
       <div class="form-group"><label>Checkout date</label><input id="co-date" type="date" max="${nowDate()}" value="${data.leave_date}"/></div>
-      <div class="copilot-preview">${[['Outstanding rent', due ? fmt(due) : 'None'], ['Deposit held', fmt(deposit)]].map(([k, v]) => `<div class="copilot-kv"><span>${k}</span><strong>${v}</strong></div>`).join('')}</div>
+      <div class="copilot-preview">${[['Outstanding rent', due ? fmt(due) : 'None'], ['Deposit agreed', fmt(deposit)]].map(([k, v]) => `<div class="copilot-kv"><span>${k}</span><strong>${v}</strong></div>`).join('')}${depNote}</div>${depWarn}
       ${due > 0 ? `<div class="alert alert-warning" style="display:block;margin-top:10px">She still owes ${fmt(due)}. Collect it first, or deduct it from the deposit on the next step.</div>` : ''}` },
     { t: 'Room inspection and deductions', html: `
       <div class="form-group"><label>Deductions from deposit</label><input id="co-ded" type="number" inputmode="numeric" value="${data.deductions}" placeholder="0"/></div>
       <div class="form-group"><label>What for?</label><textarea id="co-notes" rows="2" placeholder="Damage, unpaid rent, cleaning…">${data.deduction_notes}</textarea></div>
       ${due > 0 ? `<button class="btn btn-outline btn-sm" onclick="document.getElementById('co-ded').value=${Math.min(due, deposit)};document.getElementById('co-notes').value='Unpaid rent at checkout'">Deduct the ${fmt(Math.min(due, deposit))} she owes</button>` : ''}` },
     { t: 'Refund', html: `
-      <div class="copilot-preview">${[['Deposit held', fmt(deposit)], ['Deductions', ded ? '− ' + fmt(ded) : '—'], ['Refund due', fmt(refund)]].map(([k, v]) => `<div class="copilot-kv"><span>${k}</span><strong>${v}</strong></div>`).join('')}</div>
+      <div class="copilot-preview">${[['Deposit agreed', fmt(deposit)], ['Deductions', ded ? '− ' + fmt(ded) : '—'], ['Refund due', fmt(refund)]].map(([k, v]) => `<div class="copilot-kv"><span>${k}</span><strong>${v}</strong></div>`).join('')}${depNote}</div>
+      ${depWarn}
       ${refund < 0 ? `<div class="alert alert-danger" style="display:block;margin-top:10px">Deductions exceed the deposit — she owes ${fmt(-refund)}. Reduce the deduction or collect the difference separately.</div>` : ''}
       <div class="form-group" style="margin-top:10px"><label>Refund paid by</label><select id="co-mode">${['cash', 'upi', 'bank'].map(m => `<option value="${m}" ${data.refund_mode === m ? 'selected' : ''}>${m.toUpperCase()}</option>`).join('')}</select></div>
       <div id="co-alert" class="alert alert-danger hidden"></div>` }
@@ -4559,18 +4603,18 @@ function slaLabel(r) {
 function renderRequestSheet(d, staff) {
   const r = d.request;
   openModal(`<div class="modal modal-lg">
-    <div class="modal-header"><h3>${r.category}${r.room_number ? ` · Room ${r.room_number}` : ''}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+    <div class="modal-header"><h3>${esc(r.category)}${r.room_number ? ` · Room ${r.room_number}` : ''}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
     <div class="modal-body">
       <div class="r360-status">${slaLabel(r)}<span class="badge badge-${r.priority === 'high' ? 'red' : r.priority === 'low' ? 'gray' : 'amber'}">${r.priority}</span>
         ${r.assigned_username ? `<span class="badge badge-blue">${r.assigned_username}</span>` : '<span class="badge badge-gray">unassigned</span>'}</div>
-      <p style="font-size:15px;margin-bottom:6px">${r.description}</p>
+      <p style="font-size:15px;margin-bottom:6px">${esc(r.description)}</p>
       ${r.likely_issue ? `<p class="text-muted" style="font-size:13px">Likely: ${r.likely_issue}</p>` : ''}
       <div class="form-row" style="margin-top:12px">
         <div class="form-group"><label>Status</label><select id="rq-status">${['open', 'assigned', 'in_progress', 'resolved', 'closed'].map(x => `<option value="${x}" ${r.status === x ? 'selected' : ''}>${x.replace('_', ' ')}</option>`).join('')}</select></div>
         <div class="form-group"><label>Priority</label><select id="rq-priority">${['low', 'medium', 'high'].map(x => `<option value="${x}" ${r.priority === x ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
       </div>
       ${staff.length ? `<div class="form-group"><label>Assigned to</label><select id="rq-assign"><option value="">— nobody —</option>${staff.map(u => `<option value="${u.id}" ${String(r.assigned_to) === String(u.id) ? 'selected' : ''}>${u.username}</option>`).join('')}</select></div>` : ''}
-      <div class="form-group"><label>Resolution note</label><textarea id="rq-note" rows="2" placeholder="What was done">${r.resolution_notes || ''}</textarea></div>
+      <div class="form-group"><label>Resolution note</label><textarea id="rq-note" rows="2" placeholder="What was done">${esc(r.resolution_notes || '')}</textarea></div>
       <button class="btn btn-primary" style="width:100%" onclick="saveRequest(${r.id})">Save</button>
 
       <div class="r360-h">Photos</div>
@@ -4581,7 +4625,7 @@ function renderRequestSheet(d, staff) {
       <div id="rq-photo-status" class="text-muted" style="font-size:12px"></div>
 
       <div class="r360-h">Comments</div>
-      ${d.comments.length ? d.comments.map(c => `<div class="rq-comment"><div class="t-sub">${c.username || c.guest_name || 'Someone'} · ${fmtDate(c.created_at)}</div>${c.body}</div>`).join('') : '<p class="text-muted" style="font-size:13px">No comments yet.</p>'}
+      ${d.comments.length ? d.comments.map(c => `<div class="rq-comment"><div class="t-sub">${esc(c.username || c.guest_name || 'Someone')} · ${fmtDate(c.created_at)}</div>${esc(c.body)}</div>`).join('') : '<p class="text-muted" style="font-size:13px">No comments yet.</p>'}
       <div class="flex gap-2" style="margin-top:8px">
         <input id="rq-comment" placeholder="Add a note…" style="flex:1;margin:0" onkeydown="if(event.key==='Enter')addRequestComment(${r.id})"/>
         <button class="btn btn-outline btn-sm" onclick="addRequestComment(${r.id})">Post</button>
@@ -4651,8 +4695,8 @@ async function loadMyTasks() {
       <div class="card-header"><h3>${icon('check-square')} My day</h3>
         <span class="text-muted" style="font-size:12px">${t.checklist.done}/${t.checklist.total} done${t.overdue ? ` · ${t.overdue} overdue` : ''}</span></div>
       <div style="padding:4px 16px">
-        ${t.requests.map(r => `<div class="today-row">${icon('wrench')}<span class="t-main"><strong>${r.category}</strong>${r.room_number ? ' · Room ' + r.room_number : ''}
-          <div class="t-sub">${r.description.slice(0, 60)}</div></span>${r.overdue ? `<span class="badge badge-red">${Math.round(-r.hours_left)}h over</span>` : `<span class="badge badge-gray">${Math.round(r.hours_left)}h</span>`}
+        ${t.requests.map(r => `<div class="today-row">${icon('wrench')}<span class="t-main"><strong>${esc(r.category)}</strong>${r.room_number ? ' · Room ' + r.room_number : ''}
+          <div class="t-sub">${esc(r.description.slice(0, 60))}</div></span>${r.overdue ? `<span class="badge badge-red">${Math.round(-r.hours_left)}h over</span>` : `<span class="badge badge-gray">${Math.round(r.hours_left)}h</span>`}
           <button class="btn btn-outline btn-sm" onclick="requestSheet(${r.id})">Open</button></div>`).join('')}
         ${pending.slice(0, 6).map(i => `<div class="today-row">${icon('calendar')}<span class="t-main">${i.task}<div class="t-sub">${i.due_time || i.time_label || ''}${i.assigned_to ? ' · yours' : ''}</div></span></div>`).join('')}
         ${pending.length > 6 ? `<div class="t-sub" style="padding:8px 0">…and ${pending.length - 6} more</div>` : ''}
@@ -4713,13 +4757,13 @@ async function pgFinanceOverview() {
 
     ${(e.duplicates.length || e.spikes.length || e.changes.length) ? `<div class="home-section-h">Worth a look</div>
     <div class="card"><div style="padding:4px 16px">
-      ${e.duplicates.map(x => `<div class="today-row">${icon('copy')}<span class="t-main"><strong>Possible duplicate</strong><div class="t-sub">${x.note} · ${fmtDate(x.purchase_date)}</div></span><button class="btn btn-outline btn-sm" onclick="navigate('purchases')">Check</button></div>`).join('')}
-      ${e.spikes.map(x => `<div class="today-row">${icon('chart')}<span class="t-main"><strong>Unusual ${x.category}</strong><div class="t-sub">${x.note}${x.paid_to ? ' · ' + x.paid_to : ''}</div></span><button class="btn btn-outline btn-sm" onclick="navigate('purchases')">Check</button></div>`).join('')}
-      ${e.changes.slice(0, 4).map(x => `<div class="today-row">${icon(x.change_pct > 0 ? 'chart' : 'chart')}<span class="t-main"><strong>${x.category} ${x.change_pct > 0 ? 'up' : 'down'} ${Math.abs(x.change_pct)}%</strong><div class="t-sub">${fmt(x.this_month)} this month vs a usual ${fmt(x.avg_month)}</div></span></div>`).join('')}
+      ${e.duplicates.map(x => `<div class="today-row">${icon('copy')}<span class="t-main"><strong>Possible duplicate</strong><div class="t-sub">${esc(x.note)} · ${fmtDate(x.purchase_date)}</div></span><button class="btn btn-outline btn-sm" onclick="navigate('purchases')">Check</button></div>`).join('')}
+      ${e.spikes.map(x => `<div class="today-row">${icon('chart')}<span class="t-main"><strong>Unusual ${esc(x.category)}</strong><div class="t-sub">${esc(x.note)}${esc(x.paid_to ? ' · ' + x.paid_to : '')}</div></span><button class="btn btn-outline btn-sm" onclick="navigate('purchases')">Check</button></div>`).join('')}
+      ${e.changes.slice(0, 4).map(x => `<div class="today-row">${icon(x.change_pct > 0 ? 'chart' : 'chart')}<span class="t-main"><strong>${esc(x.category)} ${x.change_pct > 0 ? 'up' : 'down'} ${Math.abs(x.change_pct)}%</strong><div class="t-sub">${fmt(x.this_month)} this month vs a usual ${fmt(x.avg_month)}</div></span></div>`).join('')}
     </div></div>` : ''}
 
     ${e.recurring.length ? `<div class="home-section-h">Regular bills</div>
-    <div class="card"><div style="padding:4px 16px">${e.recurring.slice(0, 6).map(x => `<div class="today-row">${icon('calendar')}<span class="t-main">${x.note}</span><span class="t-sub">${x.months} months</span></div>`).join('')}</div></div>` : ''}
+    <div class="card"><div style="padding:4px 16px">${e.recurring.slice(0, 6).map(x => `<div class="today-row">${icon('calendar')}<span class="t-main">${esc(x.note)}</span><span class="t-sub">${x.months} months</span></div>`).join('')}</div></div>` : ''}
 
     <div class="home-section-h">Today's cash-up</div>
     <div class="card" id="closing-card"><div style="padding:14px 16px">${renderClosing(t)}</div></div>
@@ -4799,7 +4843,7 @@ async function pgVisitors() {
     ${list.length ? `<div class="card"><div class="table-wrap"><table>
       <thead><tr><th>VISITOR</th><th>FOR</th><th>EXPECTED</th><th>STATUS</th><th>ACTIONS</th></tr></thead>
       <tbody>${list.map(v => `<tr>
-        <td><strong>${v.visitor_name}</strong>${v.relation ? `<div class="t-sub">${v.relation}</div>` : ''}</td>
+        <td><strong>${esc(v.visitor_name)}</strong>${v.relation ? `<div class="t-sub">${esc(v.relation)}</div>` : ''}</td>
         <td>${v.resident_name}${v.room_number ? `<div class="t-sub">Room ${v.room_number}</div>` : ''}</td>
         <td>${v.expected_at ? fmtDate(v.expected_at) : '—'}${v.checked_in_at ? `<div class="t-sub">in ${new Date(v.checked_in_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</div>` : ''}</td>
         <td><span class="badge ${badge[v.status]}">${label[v.status] || v.status}</span></td>
@@ -4833,7 +4877,7 @@ async function pgFeedback() {
       <p style="font-size:14px">${food.headline}</p>
       ${food.favourites.length ? `<div class="r360-h">Best liked</div>${food.favourites.map(d => `<div class="r360-row"><span>${d.dish}<div class="t-sub">${d.meal_type} · ${d.votes} votes</div></span><strong>${stars(d.avg_stars)} ${d.avg_stars}</strong></div>`).join('')}` : ''}
       ${food.needs_work.length ? `<div class="r360-h">Least liked</div>${food.needs_work.map(d => `<div class="r360-row"><span>${d.dish}<div class="t-sub">${d.meal_type} · ${d.votes} votes</div></span><strong class="text-amber">${stars(d.avg_stars)} ${d.avg_stars}</strong></div>`).join('')}` : ''}
-      ${food.comments.length ? `<div class="r360-h">In their words</div>${food.comments.map(c => `<div class="rq-comment">“${c.comment}” <span class="t-sub">· ${c.meal_type}, ${fmtDate(c.rating_date)}</span></div>`).join('')}` : ''}
+      ${food.comments.length ? `<div class="r360-h">In their words</div>${food.comments.map(c => `<div class="rq-comment">“${esc(c.comment)}” <span class="t-sub">· ${c.meal_type}, ${fmtDate(c.rating_date)}</span></div>`).join('')}` : ''}
     </div></div>
 
     ${sat && sat.months.length ? `<div class="home-section-h">Monthly satisfaction</div>
@@ -4846,7 +4890,7 @@ async function pgFeedback() {
 
     ${exp && exp.rooms.length ? `<div class="home-section-h">Rooms worth looking at</div>
     <div class="card"><div style="padding:4px 16px">
-      ${exp.rooms.map(r => `<div class="today-row">${icon('wrench')}<span class="t-main">${r.note}</span>
+      ${exp.rooms.map(r => `<div class="today-row">${icon('wrench')}<span class="t-main">${esc(r.note)}</span>
         <button class="btn btn-outline btn-sm" onclick="navigate('rooms')">Open</button></div>`).join('')}
       <p class="t-sub" style="padding:8px 0">${exp.note}</p>
     </div></div>` : ''}
@@ -4925,7 +4969,7 @@ async function pgOutbox() {
       ${drafts.map(m => `<div class="outbox-row">
         <div class="outbox-pick">${bulkCb(m.id, m.guest_name + ' — ' + (kindLabel[m.kind] || m.kind))}</div>
         <div><strong>${m.guest_name}</strong> <span class="badge badge-gray">${kindLabel[m.kind] || m.kind}</span>
-          <div class="outbox-body">${m.body}</div></div>
+          <div class="outbox-body">${esc(m.body)}</div></div>
         <div class="flex gap-2">
           <a class="btn btn-success btn-sm" target="_blank" rel="noopener" href="${m.wa_link}" onclick="markSent(${m.id})">${icon('whatsapp')} Send</a>
           <button class="btn btn-outline btn-sm" onclick="skipMessage(${m.id})">Skip</button>
@@ -5032,7 +5076,7 @@ async function renderAdminAiTab() {
           <div class="r360-h">Where entries came from</div>
           ${Object.entries(m.entries_by_source).map(([kind, srcs]) => `<div class="r360-row"><span style="text-transform:capitalize">${kind}s</span>
             <strong>${Object.entries(srcs).map(([k, v]) => `${k} ${v}`).join(' · ')}</strong></div>`).join('') || '<p class="text-muted">No entries yet.</p>'}
-          <p class="t-sub" style="margin-top:10px">${m.note}</p>
+          <p class="t-sub" style="margin-top:10px">${esc(m.note)}</p>
         </div></div>`;
   } catch (e) { const h = host(); if (h) h.innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
 }
@@ -5050,7 +5094,7 @@ async function complaintScanFault() {
     box.innerHTML = `
       <div class="card" style="padding:12px;border:2px solid var(--primary);background:var(--accent-soft);margin-bottom:12px">
         <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted)">Read from the photo (${f.confidence} confidence) — please check</div>
-        <div style="font-size:14px;margin:6px 0"><strong>${f.category}</strong> · ${f.priority} priority<br>${f.description || ''}
+        <div style="font-size:14px;margin:6px 0"><strong>${esc(f.category)}</strong> · ${f.priority} priority<br>${esc(f.description || '')}
           ${f.likely_issue ? `<div class="t-sub">Likely: ${f.likely_issue}</div>` : ''}</div>
         <div class="flex gap-2">
           <button class="btn btn-primary btn-sm" onclick='complaintUseFault(${JSON.stringify(f).replace(/'/g, "&#39;")})'>✓ Use this</button>
@@ -5332,13 +5376,13 @@ function renderRoom360() {
         <button class="btn btn-outline btn-sm" onclick="closeModal();residentProfile(${g.id})">Open</button></div>`);
       return rows.join('');
     },
-    maintenance: () => `${d.repeats.length ? `<div class="alert alert-warning" style="display:block;margin-bottom:10px">Repeated in 90 days: ${d.repeats.map(x => `${x.category} ×${x.n}`).join(', ')} — the same thing again usually means the cause is still there.</div>` : ''}
-      ${d.maintenance.items.length ? d.maintenance.items.map(c => `<div class="r360-row"><span><strong>${c.category}</strong> ${priorityBadge(c.priority)}<div class="t-sub">${fmtDate(c.created_at)} · ${c.description.slice(0, 80)}</div><div class="t-sub">Outcome: ${c.outcome}</div></span><button class="btn btn-outline btn-sm" onclick="requestSheet(${c.id})">Open</button></div>`).join('')
+    maintenance: () => `${d.repeats.length ? `<div class="alert alert-warning" style="display:block;margin-bottom:10px">Repeated in 90 days: ${d.repeats.map(x => `${esc(x.category)} ×${x.n}`).join(', ')} — the same thing again usually means the cause is still there.</div>` : ''}
+      ${d.maintenance.items.length ? d.maintenance.items.map(c => `<div class="r360-row"><span><strong>${esc(c.category)}</strong> ${priorityBadge(c.priority)}<div class="t-sub">${fmtDate(c.created_at)} · ${esc(c.description.slice(0, 80))}</div><div class="t-sub">Outcome: ${esc(c.outcome)}</div></span><button class="btn btn-outline btn-sm" onclick="requestSheet(${c.id})">Open</button></div>`).join('')
         : emptyState('wrench', 'No requests ever', 'Nothing has been raised for this room.', '')}`,
     history: () => {
       const rows = [
         ...d.history.lived.map(x => ({ at: x.from, html: `<strong>${x.name}</strong> ${x.kind === 'living' ? 'lives here' : 'lived here'}<div class="t-sub">${fmtDate(x.from)} → ${x.to ? fmtDate(x.to) : 'now'}</div>` })),
-        ...d.history.moves.map(x => ({ at: x.on, html: `<strong>${x.name}</strong> ${x.kind === 'moved_in' ? `moved in${x.from_room ? ' from Room ' + x.from_room : ''}` : `moved out to Room ${x.to_room}`}${x.bed ? ' · bed ' + x.bed : ''}<div class="t-sub">${fmtDate(x.on)}${x.note ? ' · ' + x.note : ''}</div>` }))
+        ...d.history.moves.map(x => ({ at: x.on, html: `<strong>${x.name}</strong> ${x.kind === 'moved_in' ? `moved in${x.from_room ? ' from Room ' + x.from_room : ''}` : `moved out to Room ${x.to_room}`}${x.bed ? ' · bed ' + x.bed : ''}<div class="t-sub">${fmtDate(x.on)}${esc(x.note ? ' · ' + x.note : '')}</div>` }))
       ].sort((a, b) => new Date(b.at) - new Date(a.at));
       return rows.length ? `<ul class="r360-timeline">${rows.map(x => `<li><div class="tl-date">${fmtDate(x.at)}</div><div>${x.html}</div></li>`).join('')}</ul>` : emptyState('bed', 'No history yet', 'Moves and stays will appear here.', '');
     }

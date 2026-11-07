@@ -181,6 +181,18 @@ async function main() {
       eq((await s151Count(s151.data.id)).length, 0, 'S15.1-1 MONEY: with deposit_recorded_by_client the server records NO deposit itself');
       s151 = await A('POST', '/guests', { name: 'S151 Truthy', phone: '7' + String(Date.now()).slice(-9), join_date: today, room_id: s151Room && s151Room.id, monthly_rent: 5000, deposit_amount: 9000, deposit_recorded_by_client: 'yes' });
       eq((await s151Count(s151.data.id)).length, 1, 'S15.1-1 only a real true skips the record (a string does not)');
+      // S15.2-2 deposit-status: confirmed only counts as received
+      const s152Old = (await A('GET', '/guests')).data.find(x => x.name === 'S151 Old Form');
+      let s152Dep = await A('GET', `/guests/${s152Old.id}/deposit-status`);
+      eq(s152Dep.status, 200, 'S15.2-2 deposit-status answers');
+      eq(s152Dep.data.agreed, 9000, 'S15.2-2 agreed deposit'); eq(s152Dep.data.received, 9000, 'S15.2-2 received = the confirmed deposit row');
+      const s152Wiz = (await A('GET', '/guests')).data.find(x => x.name === 'S151 Wizard');
+      await S('POST', '/collections', { guest_id: s152Wiz.id, guest_name: 'S151 Wizard', amount: 3000, collection_type: 'deposit', payment_mode: 'cash', collection_date: today });
+      s152Dep = await A('GET', `/guests/${s152Wiz.id}/deposit-status`);
+      eq(s152Dep.data.received, 0, 'S15.2-2 MONEY: a staff (pending_approval) deposit is NOT counted as received');
+      eq(s152Dep.data.pending, 3000, 'S15.2-2 it is shown as pending instead');
+      eq((await A('GET', '/guests/abc/deposit-status')).status, 400, 'S15.2-2 bad id → 400');
+      eq((await G('GET', `/guests/${s152Wiz.id}/deposit-status`)).status, 401, 'S15.2-2 SECURITY: a resident token cannot read it');
       for (const n of ['S151 Old Form', 'S151 Wizard', 'S151 Truthy']) { const g = (await A('GET', '/guests')).data.find(x => x.name === n); if (g) await A('DELETE', `/guests/${g.id}`); }
     }
     console.log('✓ resident complaints');
