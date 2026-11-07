@@ -726,7 +726,7 @@ async function loadIdCard() {
             <div><span>Resident no.</span><strong>${escH(d.resident_no)}</strong></div>
             <div><span>Resident since</span><strong>${fmtDate(d.join_date)}</strong></div>
             <div><span>PG contact</span><strong>${escH(d.pg_phone || '—')}</strong></div>
-            ${d.emergency_contact ? `<div><span>Emergency</span><strong>${d.emergency_contact_name ? d.emergency_contact_name + ' · ' : ''}${escH(d.emergency_contact)}</strong></div>` : ''}
+            ${d.emergency_contact ? `<div><span>Emergency</span><strong>${d.emergency_contact_name ? escH(d.emergency_contact_name) + ' · ' : ''}${escH(d.emergency_contact)}</strong></div>` : ''}
           </div>
         </div>
       </div>

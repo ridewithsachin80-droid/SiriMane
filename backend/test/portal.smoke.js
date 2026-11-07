@@ -248,6 +248,9 @@ async function runAtWidth(browser, BASE, width, fixtures) {
   ok(await page.$eval('#tab-emergency', e => !e.classList.contains('hidden')), `${tag} S15-1 SOS in the header opens Emergency`);
   await page.evaluate(() => showTab('idcard'));
   await page.waitForSelector('.idcard-qr svg', { timeout: 10000 });
+  await new Promise(r => setTimeout(r, 300));
+  ok(await page.evaluate(() => !document.querySelector('[data-xss]') && !window.__xss), `${tag} S15.4-2 (T-2) SECURITY: the emergency contact name on her ID card stays text`);
+  ok(await page.$eval('#tab-idcard', e => /Amma"'><img/.test(e.textContent)), `${tag} S15.4-2 …and is shown exactly as typed`);
   eq(await page.$eval('.p-bottomnav button.active', e => e.dataset.nav), 'me', `${tag} the ID card lights the Me tab`);
   // Review fixes F-06/F-07/F-08/F-12/F-17
   const navBox = await page.$$eval('.p-bottomnav button', els => els.map(e => e.getBoundingClientRect().right));
@@ -358,7 +361,8 @@ async function runAtWidth(browser, BASE, width, fixtures) {
   const post = (p, b) => fetch(BASE + '/api' + p, { method: 'POST', headers: H, body: JSON.stringify(b) }).then(r => r.json());
   const put = (p, b) => fetch(BASE + '/api' + p, { method: 'PUT', headers: H, body: JSON.stringify(b) }).then(r => r.json());
   const room = await post('/rooms', { room_number: 'P1', floor: 1, total_beds: 2, monthly_rent: 6000 });
-  const guest = await post('/guests', { name: 'Portal Resident', phone: PHONE, room_id: room.id, bed_number: 1, join_date: '2026-06-01', monthly_rent: 6000, deposit_amount: 12000 });
+  const guest = await post('/guests', { name: 'Portal Resident', phone: PHONE, room_id: room.id, bed_number: 1, join_date: '2026-06-01', monthly_rent: 6000, deposit_amount: 12000,
+    emergency_contact: '9000000099', emergency_contact_name: `Amma"'><img src=x data-xss=ecn onerror="window.__xss=1">` });   // T-2: staff-typed, shown on her ID card
   const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
   await post('/collections', { guest_id: guest.id, guest_name: guest.name, amount: 6000, collection_date: today, collection_month: 'August 2026', collection_type: 'rent', payment_mode: 'cash' });
   await post('/announcements', { title: 'Water tank cleaning', message: 'Supply off 10am-12pm on Sunday.', priority: 'important' });

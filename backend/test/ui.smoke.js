@@ -894,7 +894,8 @@ async function runAtWidth(browser, BASE, width) {
     await page.evaluate(() => moveInWizard());
     await page.waitForSelector('#mi-name', { timeout: 8000 });
     await page.type('#mi-name', `Lost Guest ${width}`);
-    await page.type('#mi-phone', '5' + String(Date.now()).slice(-9));
+    const s154Digits = '5' + String(Date.now()).slice(-9);
+    await page.type('#mi-phone', s154Digits.slice(0, 5) + ' ' + s154Digits.slice(5));   // T-1: typed with a space, as wardens do
     await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-ec-name', { timeout: 5000 });
     await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-room', { timeout: 5000 });
     const s153Opts = await page.$$eval('#mi-room option', els => els.map(e => e.value).filter(Boolean));
@@ -912,13 +913,39 @@ async function runAtWidth(browser, BASE, width) {
     });
     await page.evaluate(() => moveInSave());
     await page.waitForFunction(() => { const a = document.getElementById('mi-alert'); return a && !a.classList.contains('hidden'); }, { timeout: 10000 });
+    ok(!(await page.$('#mi-back')), `${tag} S15.4-3 (T-3) outcome unknown → Back is locked (an edited name/phone could duplicate her)`);
+    ok(/may or may not/.test(await page.$eval('#mi-alert', e => e.textContent)), `${tag} S15.4-3 the warden is told the outcome is unknown`);
     await page.evaluate(() => moveInSave());   // retry after the lost reply
     await page.waitForFunction(() => !document.querySelector('#mi-save'), { timeout: 10000 });
     const s153Made = (await page.evaluate(() => API.getGuests())).filter(g => g.name === `Lost Guest ${width}`);
-    eq(s153Made.length, 1, `${tag} S15.3-5 DATA: a lost reply on the resident save does not create her twice`);
+    eq(s153Made.length, 1, `${tag} S15.3-5 / S15.4-1 DATA: a lost reply on the resident save does not create her twice — phone typed with a space`);
+    eq(s153Made[0].phone, s154Digits, `${tag} S15.4-1 the phone is stored as digits only`);
     const s153Rows = (await page.evaluate(() => apiFetch('/collections'))).filter(c => c.guest_id === s153Made[0].id);
     eq(s153Rows.filter(c => c.collection_type === 'deposit').length, 1, `${tag} S15.3-5 MONEY: her deposit is recorded once, against the adopted resident`);
     await page.evaluate(() => { API.createGuest = window.__s153Orig; delete window.__s153Lost; });
+  }
+  // S15.4-3 (T-3): the server REFUSED the save (4xx) → nothing was created, Back stays so she can fix it
+  {
+    await page.evaluate(() => moveInWizard());
+    await page.waitForSelector('#mi-name', { timeout: 8000 });
+    await page.type('#mi-name', `Refused ${width}`);
+    await page.type('#mi-phone', '4' + String(Date.now()).slice(-9));
+    for (let k = 0; k < 2; k++) { await page.evaluate(() => moveInStep(1)); await new Promise(r => setTimeout(r, 150)); }
+    await page.waitForSelector('#mi-room', { timeout: 5000 });
+    const s154Opts = await page.$$eval('#mi-room option', els => els.map(e => e.value).filter(Boolean));
+    await page.select('#mi-room', s154Opts[0]);
+    await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-rent', { timeout: 5000 });
+    await page.evaluate(() => { document.getElementById('mi-rent').value = 3000; document.getElementById('mi-dep').value = 3000; });
+    await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-idtype', { timeout: 5000 });
+    await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-pay-dep', { timeout: 5000 });
+    await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-save', { timeout: 5000 });
+    const s154Before = (await page.evaluate(() => API.getGuests())).length;
+    await page.evaluate(() => { window.__s154Orig = API.createGuest; API.createGuest = async () => { const e = new Error('Bed 1 in this room is taken'); e.status = 400; throw e; }; });
+    await page.evaluate(() => moveInSave());
+    await page.waitForFunction(() => { const a = document.getElementById('mi-alert'); return a && !a.classList.contains('hidden'); }, { timeout: 10000 });
+    ok(await page.$('#mi-back'), `${tag} S15.4-3 a refusal keeps Back available so the warden can fix the form`);
+    eq((await page.evaluate(() => API.getGuests())).length, s154Before, `${tag} S15.4-3 DATA: a refused save created nobody`);
+    await page.evaluate(() => { API.createGuest = window.__s154Orig; closeModal(); });
   }
 
   // Checkout wizard: refund = deposit − deductions, and it is the server's number

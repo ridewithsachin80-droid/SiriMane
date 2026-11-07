@@ -94,3 +94,15 @@ Scope chosen by the team from open review findings and the defect ledger. Nothin
 | S15.3-5 (R-6) | Lost reply on the resident save: retry adopts the resident the server already created (same phone, created in the last 15 min) instead of creating a second | DATA |
 | S15.3-6 (R-5) | Inbox search matches text with apostrophes and `&` again | QA |
 | S15.3-7 | 12 gates green twice on fresh DBs; independent review before merge to ai/test | QA |
+
+## Sprint 15.4 — T-1..T-3 from the 15.3 review
+**Process deviation (recorded honestly):** these criteria were written AFTER the build, not before as §G1 requires. They restate the reviewer's findings verbatim, so scope did not drift, but the order was wrong.
+
+| ID | Acceptance criterion | Review |
+|---|---|---|
+| S15.4-1 (T-1) | Phones stored as 10 digits (spaces, dashes, +91, leading 0 removed) on POST and PUT /guests; the wizard sends digits; a lost reply with a spaced phone never creates a second resident; residents log in with the plain 10 digits | DATA REQUIRED |
+| S15.4-2 (T-2) | Resident ID card shows the staff-typed emergency contact name as text | SEC |
+| S15.4-3 (T-3) | Move-in save refused by the server (4xx) → nothing created, Back stays; outcome unknown (no connection / 5xx) → Back locked and the warden is told the outcome is unknown | DATA |
+| S15.4-4 | 12 gates green twice on fresh DBs; independent review before merge to ai/test | QA |
+
+Data note: existing residents whose phone was saved WITH spaces cannot log in to the resident app today (login compares exact text). This sprint does not change existing rows — a backfill is a data UPDATE and needs the owner's approval.
