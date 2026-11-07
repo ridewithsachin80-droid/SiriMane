@@ -9,7 +9,7 @@ Updated: 7 November 2026 · Framework 2.0 · Execution mode: SINGLE-AGENT SEQUEN
 - **This phase (F0) changed no application code.** It added `docs/ai-team/` and nothing else.
 - **Gate evidence for the baseline:** see TEST_REPORT.md (run against this exact SHA, local scratch Postgres, headless Chromium 360/390).
 
-## Two owner actions needed before any AI session can safely push
+## Owner actions (both completed 7 Nov 2026 — kept for history)
 
 These are the G0 findings. Neither can be done from an AI session — both are deliberately yours.
 
@@ -32,5 +32,8 @@ The standing rule "never push without Sachin's explicit permission" still applie
 | D-13-1 | Low | "Select all shown" scrolls out of the bulk bar when three buttons are present | DEV, next layout sprint |
 | D-13-2 | Low | `outline-width` computes to 0 on `.nav-item` despite `:focus-visible` matching; worked around with a box-shadow ring; root cause unknown | ARCH |
 | D-DATA-1 | Low | Four residents have wrong/duplicated bed numbers (106 ×2, 206, 207); map flags them ⚑ — data fix in the app, not code | Owner/warden |
-| G0-1 | **High** | No server-side protection on `main` | **Owner** |
-| G0-2 | Medium | No separate test deployment; G5 is N/A for every sprint until one exists | Owner (cost decision) |
+| G0-1 | ~~High~~ | ~~No server-side protection on `main`~~ — CLOSED 7 Nov: ruleset requires a PR, blocks force-push/deletion | Owner |
+| G0-2 | ~~Medium~~ | ~~No separate test deployment~~ — CLOSED 7 Nov: https://sirimane-test.up.railway.app on its own Postgres | Owner |
+
+## Owner's new deploy workflow (since the ruleset)
+GitHub upload → choose **Create a new branch and start a pull request** → **Merge pull request** → Railway deploys `main`. AI sessions push to `ai/test` only; Railway deploys it to the Test environment for checking first.

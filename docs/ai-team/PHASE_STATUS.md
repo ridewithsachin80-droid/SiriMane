@@ -28,11 +28,11 @@ All of the above is on `main` at `48deac23` and deployed to production by the ow
 | F0.5 Add project records under docs/ai-team/ | PM | COMPLETED | this commit |
 | F0.6 Re-run the eleven gates on the baseline to confirm the clone matches delivered state | QA | COMPLETED — 11/11 PASS, 2,196 assertions (TZ=UTC); first run under an invalid TZ failed and is kept as evidence | TEST_REPORT.md runs B-1, B-2 |
 | F0.7 Push `ai/test` to GitHub | DEV | COMPLETED — `ai/test` → `d1641eb`; `main` verified unchanged at `48deac23` | `git ls-remote` after push |
-| F0.8 Owner installs branch protection on `main` | Owner | OPEN — owner action | HANDOFF.md |
+| F0.8 Owner installs branch protection on `main` | Owner | COMPLETED — ruleset 26756000, verified via `GET /rules/branches/main` | PROJECT_CONTEXT.md §Safety facts |
 | F0.9 Test environment on Railway | Owner + OPS | COMPLETED — https://sirimane-test.up.railway.app | TEST_REPORT.md §G5 |
 | F0.10 Change the test admin password from the seeded default | Owner | OPEN | public URL + default password in seed.js |
 
-Gate status for F0: G0 PARTIAL (facts verified; isolation controls MISSING), G1–G3 N/A (no application code changed), G4 PASS for a docs-only branch creation, G5 **PASS** — first verified test deployment, Railway `Test` env on `ai/test` (TEST_REPORT.md §G5).
+Gate status for F0: G0 **PASS** (direct push to `main` blocked server-side; separate test env + DB), G1–G3 N/A (no application code changed), G4 PASS for a docs-only branch creation, G5 **PASS** — first verified test deployment, Railway `Test` env on `ai/test` (TEST_REPORT.md §G5).
 
 ## Next phase: Sprint 15 — not yet scoped
 
