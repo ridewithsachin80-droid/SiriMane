@@ -52,7 +52,7 @@ let currentPage = null;
 function navigate(page) {
   currentPage = page;
   document.querySelectorAll('.nav-item[data-page]').forEach(b => b.classList.toggle('active', b.dataset.page===page));
-  const titles = { dashboard:'Home', rooms:'Rooms', guests:'Residents', 'daily-menu':'Daily Menu', 'daily-checklist':'Daily Checklist', complaints:'Maintenance & Requests', payments:'Payments', 'guest-messages':'Announcements', inbox:'Inbox', purchases:'Purchases', collections:'Collections', 'rent-due':'Rent Due', reports:'Reports', 'balance-sheet':'Owner & Assets', admin:'Admin', collect:'Collect Rent', reminders:'Rent Reminders', finance:'Finance', operations:'Operations', 'finance-overview':'Finance', visitors:'Visitors', feedback:'Feedback', outbox:'Outbox', maintenance:'Recurring maintenance' };
+  const titles = { dashboard:'Home', rooms:'Rooms', guests:'Residents', 'daily-menu':'Daily Menu', 'daily-checklist':'Daily Checklist', complaints:'Requests', payments:'Payments', 'guest-messages':'Announcements', inbox:'Inbox', purchases:'Purchases', collections:'Collections', 'rent-due':'Rent Due', reports:'Reports', 'balance-sheet':'Balance sheet', admin:'Admin', collect:'Collect Rent', reminders:'Rent Reminders', finance:'Finance', operations:'Operations', 'finance-overview':'Finance', visitors:'Visitors', feedback:'Feedback', outbox:'Outbox', maintenance:'Recurring maintenance' };
   document.getElementById('page-title').textContent = titles[page]||page;
   document.getElementById('topbar-actions').innerHTML = '';
   document.getElementById('sidebar').classList.remove('open');
@@ -129,6 +129,10 @@ async function loadComplaintsCount() {
 function setContent(html) {
   const el = document.getElementById('page-content');
   el.innerHTML = html;
+  // Sprint 15: a grouped screen re-rendered by an in-page action (ticking a
+  // checklist box, changing a month) used to lose its sub-tab strip, because
+  // only navigate() injected it. Every render now restores it.
+  if (typeof injectSubtabs === 'function' && typeof currentPage !== 'undefined') { try { injectSubtabs(currentPage); } catch (e) {} }
   // Card up any table in the same tick, so a wide table never flashes on a
   // phone before the observer catches up.
   if (typeof mobilizeTables === 'function') { try { mobilizeTables(el); } catch (e) { console.error(e); } }
@@ -203,139 +207,11 @@ function onReportsMonthChange(value) {
 }
 
 // ── DASHBOARD ─────────────────────────────────────
-async function pgDashboard() {
-  loading();
-  try {
-    const d = await API.dashboard();
-    setContent(`
-      <div class="page-header"><h1>Dashboard</h1><p>Welcome to Siri Mane PG Management</p></div>
-      <div class="card mb-6" id="brief-card">
-        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-          <h3 id="brief-greeting">☀️ Siri's Brief</h3>
-          <div class="flex items-center gap-2">
-            <span id="health-pill" class="health-pill hidden" title="Property health"></span>
-            <button class="btn btn-outline btn-sm" onclick="loadBrief(true)" title="Recompute">↻</button>
-          </div>
-        </div>
-        <div style="padding:14px 16px">
-          <div id="brief-body"><div class="sm-skel"><div class="sm-skel-line" style="width:60%"></div><div class="sm-skel-line"></div><div class="sm-skel-line" style="width:80%"></div></div></div>
-          <div class="flex gap-2" style="flex-wrap:wrap;margin-top:12px">
-            <button class="btn btn-success btn-sm" id="brief-wa" onclick="shareBrief()">💬 WhatsApp</button>
-            <button class="btn btn-outline btn-sm" onclick="copyBrief()">📋 Copy</button>
-            <button class="btn btn-outline btn-sm" onclick="showEvening()">🌙 Evening summary</button>
-          </div>
-          <div id="brief-meta" class="text-muted" style="font-size:11px;margin-top:8px"></div>
-        </div>
-      </div>
-      ${isAdmin() ? `<div class="card mb-6 hidden" id="attention-card">
-        <div class="card-header"><h3>🚩 Needs attention</h3></div>
-        <div id="attention-list" style="padding:6px 16px 10px"></div>
-      </div>` : ''}
-      <div class="stat-grid mb-6">
-        <div class="stat-card">
-          <div class="s-label">Total Guests</div>
-          <div class="s-value">${d.totalGuests}</div>
-          <div class="s-sub" style="color:var(--green)">Active residents</div>
-        </div>
-        <div class="stat-card">
-          <div class="s-label">Rooms</div>
-          <div class="s-value">${d.totalRooms}</div>
-          <div class="s-sub" style="color:var(--blue)">${d.occupancyPercent}% occupancy</div>
-        </div>
-        <div class="stat-card">
-          <div class="s-label">Monthly Revenue</div>
-          <div class="s-value">${fmt(d.monthlyIncome)}</div>
-          <div class="s-sub" style="color:var(--green)">From active guests</div>
-        </div>
-        <div class="stat-card">
-          <div class="s-label">Available Beds</div>
-          <div class="s-value">${d.availableBeds}</div>
-          <div class="s-sub" style="color:var(--blue)">Beds free</div>
-        </div>
-      </div>
-      <div class="stat-grid mb-6">
-        <div class="stat-card green">
-          <div class="s-label">This Month Income</div>
-          <div class="s-value">${fmt(d.monthlyIncome)}</div>
-          <div class="s-sub">Collections</div>
-        </div>
-        <div class="stat-card red">
-          <div class="s-label">This Month Expense</div>
-          <div class="s-value">${fmt(d.monthlyExpenses)}</div>
-          <div class="s-sub">Purchases</div>
-        </div>
-        <div class="stat-card ${d.netProfit>=0?'green':'red'}">
-          <div class="s-label">Net Profit</div>
-          <div class="s-value">${fmt(d.netProfit)}</div>
-          <div class="s-sub">This month</div>
-        </div>
-      </div>
-      ${d.pendingVariance.length>0 ? `
-      <div class="card mb-6">
-        <div class="card-header">
-          <h3>⏳ Rent Approvals Pending</h3>
-          <span class="badge badge-amber">${d.pendingVariance.length}</span>
-        </div>
-        <div style="padding:4px 20px 16px">
-          ${d.pendingVariance.map(g => `
-            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--surface-2)">
-              <span style="font-size:13px"><strong>${g.name}</strong>${g.room_number?' · Room '+g.room_number:''} — charging ${fmt(g.monthly_rent)}/mo (room rate ${fmt(g.room_rent)}/mo)</span>
-              <button class="btn btn-success btn-sm" onclick="approveRentVariance(${g.id}, pgDashboard)">Approve</button>
-            </div>`).join('')}
-        </div>
-      </div>` : ''}
-      <div class="card mb-6" style="cursor:pointer" onclick="navigate('daily-checklist')">
-        <div class="card-header">
-          <h3>✅ Today's Warden Checklist</h3>
-          <span class="text-muted" style="font-size:13px">${d.todayChecklist.checked} / ${d.todayChecklist.total} done</span>
-        </div>
-        <div style="padding:0 20px 16px">
-          <div style="background:var(--border,var(--border));border-radius:8px;height:10px;overflow:hidden">
-            <div style="background:${d.todayChecklist.percent>=100?'var(--green,#16A34A)':'var(--blue,#4F46E5)'};height:100%;width:${d.todayChecklist.percent}%;transition:width .3s"></div>
-          </div>
-          <div style="margin-top:6px;font-size:13px;color:var(--text-muted)">${d.todayChecklist.percent}% complete for today — tap to open</div>
-        </div>
-      </div>
-      <div class="card mb-6" style="cursor:pointer" onclick="navigate('complaints')">
-        <div class="card-header">
-          <h3>🛠️ Complaint / Maintenance Register</h3>
-          <span class="badge ${d.openComplaints>0?'badge-red':'badge-green'}">${d.openComplaints} open</span>
-        </div>
-        <div style="padding:0 20px 16px;font-size:13px;color:var(--text-muted)">${d.openComplaints>0?`${d.openComplaints} issue(s) still open — tap to review and update status`:'No open issues right now — tap to view history'}</div>
-      </div>
-      <div class="card">
-        <div class="card-header">
-          <h3>Recent Guests</h3>
-          <button class="btn btn-primary btn-sm" onclick="navigate('guests')">View All</button>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>NAME</th><th>ROOM</th><th>CHECK-IN</th><th>STATUS</th></tr></thead>
-            <tbody>
-              ${d.recentGuests.length===0
-                ? `<tr class="empty-row"><td colspan="4">No guests yet</td></tr>`
-                : d.recentGuests.map(g=>`
-                <tr>
-                  <td><strong>${g.name}</strong><br><span class="text-muted">${g.phone||''}</span></td>
-                  <td>${g.room_number?'Room '+g.room_number:'—'}</td>
-                  <td>${fmtDate(g.join_date)}</td>
-                  <td><span class="badge badge-green">Active</span></td>
-                </tr>`).join('')}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    `);
-      loadBrief(false);
-  } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
-}
-
-// ── ROOMS ─────────────────────────────────────────
 let roomsListCache = [];
 
 async function pgRooms() {
   loading();
-  document.getElementById('topbar-actions').innerHTML = `<button class="btn btn-primary btn-sm" onclick="roomModal()">+ Add Room</button>`;
+  document.getElementById('topbar-actions').innerHTML = '';   // Sprint 15: the button lives on the page itself
   try {
     const list = await API.getRooms();
     roomsListCache = list;
@@ -457,7 +333,7 @@ async function pgGuests(filter) {
   loading();
   const f = filter || guestsCurrentFilter;
   guestsCurrentFilter = f;
-  document.getElementById('topbar-actions').innerHTML = `<button class="btn btn-primary btn-sm" onclick="moveInWizard()">+ Add resident</button>`;
+  document.getElementById('topbar-actions').innerHTML = '';   // Sprint 15: the button lives on the page itself
   try {
     const list = await API.getGuests('?active=all');
     guestsListCache = list;
@@ -834,40 +710,6 @@ async function saveRoomShift(guestId) {
   catch(e) { showAlert(al, e.message); }
 }
 
-async function checkoutModal(id) {
-  let g;
-  try { g = await API.getGuest(id); } catch(e) { alert(e.message); return; }
-  const deposit = parseFloat(g.deposit_amount) || 0;
-  const minDate = g.join_date ? new Date(g.join_date).toISOString().split('T')[0] : '';
-  openModal(`
-    <div class="modal">
-      <div class="modal-header"><h3>🚪 Checkout ${g.name}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
-      <div class="modal-body">
-        <div id="co-alert" class="alert alert-danger hidden"></div>
-        <div style="background:var(--surface-2);padding:10px 12px;border-radius:8px;border:1px solid var(--border);margin-bottom:14px">
-          <div style="font-size:11px;color:var(--text-muted);font-weight:600">DEPOSIT PAID</div>
-          <div style="font-size:18px;font-weight:600">${fmt(deposit)}</div>
-        </div>
-        <div class="form-group"><label>Checkout Date</label><input id="co-date" type="date" value="${nowDate()}" max="${nowDate()}" ${minDate?`min="${minDate}"`:''}/>
-          <p style="font-size:11px;color:var(--text-muted);margin-top:4px">Backdate this if the guest actually moved out earlier and it wasn't logged then.</p>
-        </div>
-        <div class="form-group"><label>Deductions (₹)</label><input id="co-deduct" type="number" placeholder="0" value="0" oninput="updateRefundPreview(${deposit})"/></div>
-        <div class="form-group"><label>Deduction Reason</label><textarea id="co-notes" rows="2" placeholder="e.g. room damage, unpaid dues, cleaning charges"></textarea></div>
-        <div class="form-group"><label>Refund Mode</label>
-          <select id="co-mode">${['Cash','UPI','Bank Transfer','Cheque'].map(m=>`<option>${m}</option>`).join('')}</select>
-        </div>
-        <div style="background:var(--primary-light);padding:10px 12px;border-radius:8px">
-          <div style="font-size:11px;color:var(--text-muted);font-weight:600">REFUND TO PAY</div>
-          <div id="co-refund-preview" style="font-size:18px;font-weight:600;color:var(--primary-dark)">${fmt(deposit)}</div>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
-        <button class="btn btn-danger" onclick="submitCheckout(${id})">Confirm Checkout</button>
-      </div>
-    </div>`);
-}
-
 function updateRefundPreview(deposit) {
   const deduct = parseFloat(document.getElementById('co-deduct').value) || 0;
   const refund = deposit - deduct;
@@ -1140,13 +982,13 @@ async function pgComplaints(filter) {
   loading();
   const f = filter || complaintsCurrentFilter;
   complaintsCurrentFilter = f;
-  document.getElementById('topbar-actions').innerHTML = `<button class="btn btn-primary btn-sm" onclick="complaintModal()">+ Log Issue</button>`;
+  document.getElementById('topbar-actions').innerHTML = '';   // Sprint 15: the button lives on the page itself
   try {
     const list = await API.getComplaints(f);
     const tabs = [['all','All'],['open','Open'],['in_progress','In Progress'],['resolved','Resolved']];
     setContent(`
       <div class="page-header flex justify-between items-center mb-5">
-        <div><h1>Complaint / Maintenance Register</h1><p>Issues raised by guests or logged on rounds — kept in sync between warden and admin</p></div>
+        <div><h1>Requests</h1><p>Issues raised by residents or logged on rounds — kept in sync between warden and admin</p></div>
         <button class="btn btn-primary btn-sm" onclick="complaintModal()">+ Log Issue</button>
       </div>
       <div class="flex gap-2 mb-4" style="flex-wrap:wrap;justify-content:space-between">
@@ -1224,28 +1066,6 @@ async function saveComplaint() {
   } catch(e) { showAlert(al, e.message); }
 }
 
-function complaintStatusModal(id, currentStatus) {
-  openModal(`
-    <div class="modal">
-      <div class="modal-header"><h3>Update Status</h3><button class="modal-close" onclick="closeModal()">×</button></div>
-      <div class="modal-body">
-        <div id="cps-alert" class="alert alert-danger hidden"></div>
-        <div class="form-group"><label>Status</label>
-          <select id="cps-status">
-            <option value="open" ${currentStatus==='open'?'selected':''}>Open</option>
-            <option value="in_progress" ${currentStatus==='in_progress'?'selected':''}>In Progress</option>
-            <option value="resolved" ${currentStatus==='resolved'?'selected':''}>Resolved</option>
-          </select>
-        </div>
-        <div class="form-group"><label>Resolution Notes (optional)</label><textarea id="cps-notes" rows="2" placeholder="What was done?"></textarea></div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="saveComplaintStatus(${id})">Save</button>
-      </div>
-    </div>`);
-}
-
 async function saveComplaintStatus(id) {
   const al = document.getElementById('cps-alert');
   try {
@@ -1267,7 +1087,7 @@ let paymentsListCache = [];
 
 async function pgPayments(month, year) {
   loading();
-  document.getElementById('topbar-actions').innerHTML = `<button class="btn btn-primary btn-sm" onclick="collectionModal()">+ Record Payment</button>`;
+  document.getElementById('topbar-actions').innerHTML = '';   // Sprint 15: the button lives on the page itself
   try {
     const now = new Date();
     const m = month || (now.getMonth()+1);
@@ -1276,7 +1096,16 @@ async function pgPayments(month, year) {
     paymentsCurrentYear = y;
     const list = await API.getCollections(`?month=${m}&year=${y}`);
     paymentsListCache = list;
-    const total = list.reduce((s,c)=>s+parseFloat(c.amount),0);
+    // Sprint 15 (owner-approved money display): the header used to add up
+    // EVERY row, so an unconfirmed resident UPI claim showed as money
+    // received. It now uses the same rule as Collections — confirmed (or
+    // legacy rows with no status) — and shows what is waiting separately.
+    // Example: ₹6,000 confirmed + ₹100 claim → was "₹6,100 total",
+    // now "₹6,000 received" and "₹100 waiting for confirmation".
+    const received = list.filter(c => c.status === 'confirmed' || !c.status);
+    const waiting = list.filter(c => c.status === 'pending_verification' || c.status === 'pending_approval');
+    const total = received.reduce((s,c)=>s+parseFloat(c.amount),0);
+    const waitingTotal = waiting.reduce((s,c)=>s+parseFloat(c.amount),0);
     setContent(`
       <div class="page-header flex justify-between items-center">
         <div><h1>Payments</h1><p>Track rent payments</p></div>
@@ -1287,7 +1116,7 @@ async function pgPayments(month, year) {
       </div>
       <div class="card">
         <div class="card-header">
-          <h3>Payment Records — ${fmt(total)} total</h3>
+          <div><h3 id="pay-received">Payment Records — ${fmt(total)} received</h3>${waiting.length ? `<div class="pay-waiting" id="pay-waiting">${fmt(waitingTotal)} waiting for confirmation (${waiting.length})</div>` : ''}</div>
           <div class="flex gap-2" style="flex-wrap:wrap">
             <select id="pay-mode-filter" style="margin:0" onchange="filterPayments()">
               <option value="">All Modes</option>
@@ -1355,7 +1184,7 @@ async function delCollectionFromPayments(id) {
 // ── GUEST MESSAGES (Announcements) ───────────────
 async function pgAnnouncements() {
   loading();
-  document.getElementById('topbar-actions').innerHTML = isAdmin() ? `<button class="btn btn-primary btn-sm" onclick="announcementModal()">${icon('megaphone')} Post Message</button>` : '';
+  document.getElementById('topbar-actions').innerHTML = '';   // Sprint 15: the button lives on the page itself
   try {
     const list = await API.getAnnouncements();
     setContent(`
@@ -1925,7 +1754,7 @@ let collectionsToDate = null;
 
 async function pgCollections(month, year, from, to) {
   loading();
-  document.getElementById('topbar-actions').innerHTML = `<button class="btn btn-primary btn-sm" onclick="collectionModal()">+ Add Collection</button>`;
+  document.getElementById('topbar-actions').innerHTML = '';   // Sprint 15: the button lives on the page itself
   try {
     const useRange = !!(from && to);
     let m = null, y = null;
@@ -3951,7 +3780,6 @@ function initCopilotBar() {
   const content = document.getElementById('page-content');
   content.parentNode.insertBefore(bar, content);
   renderCopilotChips();
-  document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); document.getElementById('copilot-q').focus(); } });
 }
 function copilotVoice() { smVoice('copilot-mic', 'copilot-voice-status', (t, alts) => copilotAsk(t, { voice: true, alternatives: alts }), 'ask or tell me what to record'); }
 
@@ -4076,7 +3904,7 @@ const NAV_GROUPS = {
     { page: 'finance-overview', label: 'Overview', admin: true },
     { page: 'collect', label: 'Collect' }, { page: 'rent-due', label: 'Rent Due' }, { page: 'payments', label: 'Payments' },
     { page: 'reminders', label: 'Reminders' }, { page: 'purchases', label: 'Expenses' }, { page: 'collections', label: 'Collections' },
-    { page: 'reports', label: 'Reports' }, { page: 'balance-sheet', label: 'Owner & Assets', admin: true } ] },
+    { page: 'reports', label: 'Reports' }, { page: 'balance-sheet', label: 'Balance sheet', admin: true } ] },
   operations: { label: 'Operations', tabs: [
     { page: 'daily-checklist', label: 'Checklist' }, { page: 'complaints', label: 'Requests' },
     { page: 'daily-menu', label: 'Menu' }, { page: 'guest-messages', label: 'Announcements' },
@@ -4367,7 +4195,7 @@ function renderResident360() {
       <div class="flex gap-2" style="flex-wrap:wrap;margin-top:14px">
         <button class="btn btn-primary btn-sm" onclick="closeModal();collectFrom(${g.id})">${icon('rupee')} Collect</button>
         ${g.phone ? `<a class="btn btn-outline btn-sm" target="_blank" rel="noopener" href="${buildWhatsappUrl(g.phone, 'Hello ' + g.name + ',') || '#'}">${icon('whatsapp')} WhatsApp</a>` : ''}
-        <button class="btn btn-outline btn-sm" onclick="guestModal(${g.id})">Edit</button>
+        <button class="btn btn-outline btn-sm" onclick="guestModal(null, ${g.id})">Edit</button>
         ${g.is_active && isAdmin() ? `<button class="btn btn-outline btn-sm" onclick="checkoutWizard(${g.id})">Checkout</button>` : ''}
       </div>`,
     money: () => {
@@ -4389,7 +4217,7 @@ function renderResident360() {
     docs: () => `${kv([['ID proof', g.id_proof_type], ['ID number', g.id_proof_number ? g.id_proof_number.replace(/.(?=.{4})/g, '•') : null], ['Address on file', g.address]])}
       <div class="r360-h">Paperwork</div><div id="r360-docs"><div class="sm-skel"><div class="sm-skel-line"></div></div></div>
       <p class="text-muted" style="font-size:12px;margin-top:10px">ID photos are never stored — only the fields read from them.</p>
-      ${!g.id_proof_type ? `<button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="guestModal(${g.id})">Add ID proof</button>` : ''}`
+      ${!g.id_proof_type ? `<button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="guestModal(null, ${g.id})">Add ID proof</button>` : ''}`
   };
   openModal(`<div class="modal modal-lg">
     <div class="modal-header"><h3>${g.name}${g.room_number ? ` · Room ${g.room_number}` : ''}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
@@ -4430,7 +4258,7 @@ function renderMoveIn() {
     { t: 'ID proof', html: `
       <div class="voice-row"><button type="button" id="mi-scan" class="mic-btn" style="background:var(--amber)" onclick="moveInScanId()">${icon('camera')}</button>
         <span id="mi-scan-status" class="voice-status">Photograph her Aadhaar / ID to fill these in. The photo is never stored.</span></div>
-      <div class="form-row"><div class="form-group"><label>Type</label><select id="mi-idtype">${['', 'Aadhaar', 'PAN Card', 'Passport', 'Driving License', 'Voter ID'].map(t => `<option ${d.id_proof_type === t ? 'selected' : ''}>${t || '— select —'}</option>`).join('')}</select></div>
+      <div class="form-row"><div class="form-group"><label>Type</label><select id="mi-idtype">${['', 'Aadhaar', 'PAN Card', 'Passport', 'Driving License', 'Voter ID'].map(t => `<option value="${t}" ${d.id_proof_type === t ? 'selected' : ''}>${t || '— select —'}</option>`).join('')}</select></div>
       <div class="form-group"><label>Number</label><input id="mi-idnum" value="${d.id_proof_number || ''}"/></div></div>
       <div class="form-group"><label>Address</label><textarea id="mi-address" rows="2">${d.address || ''}</textarea></div>` },
     { t: 'First payment (optional)', html: `
@@ -4659,7 +4487,7 @@ function roomSheet(id) {
       <div class="r360-kv"><span>Last inspected</span><strong>${r.last_inspected ? fmtDate(r.last_inspected) : 'Never'}</strong></div>
       <div class="r360-h">Beds</div>
       ${(r.bed_fixes || []).map(o => `<div class="r360-row"><span class="text-amber">Bed number needs fixing${o.bed_number ? ` · recorded as “${o.bed_number}”` : ' · none recorded'}</span>
-        <button class="btn btn-outline btn-sm" onclick="closeModal();guestModal(${o.id})">${o.name}</button></div>`).join('')}
+        <button class="btn btn-outline btn-sm" onclick="closeModal();guestModal(null, ${o.id})">${o.name}</button></div>`).join('')}
       ${(r.over || []).map(o => `<div class="r360-row"><span class="text-red">Over capacity${o.bed_number ? ' · bed ' + o.bed_number : ' · no bed'}</span>
         <button class="btn btn-outline btn-sm" onclick="closeModal();residentProfile(${o.id})">${o.name}</button></div>`).join('')}
       ${r.beds.map(b => `<div class="r360-row"><span>Bed ${b.bed}</span>${b.resident
@@ -5402,7 +5230,7 @@ const COMMANDS = [
   { id: 'announce', icon: 'megaphone', label: 'Post announcement', admin: true, run: () => { navigate('guest-messages'); setTimeout(() => announcementModal(), 350); } },
   { id: 'reminders', icon: 'whatsapp', label: 'Draft reminders', run: () => { navigate('rent-due'); setTimeout(() => toast('Tick the residents, then tap Draft reminders', 'ok'), 400); } },
   { id: 'tasks', icon: 'check-square', label: "Today's tasks", run: () => navigate('daily-checklist') },
-  { id: 'owner-report', icon: 'receipt', label: 'Generate owner report', admin: true, run: () => { navigate('balance-sheet'); setTimeout(() => { if (typeof loadOwnerReport === 'function') loadOwnerReport(true); }, 400); } },
+  { id: 'owner-report', icon: 'receipt', label: 'Generate owner report', admin: true, run: () => { navigate('reports'); setTimeout(() => { if (typeof loadOwnerReport === 'function') loadOwnerReport(true); }, 600); } },
   { id: 'close-day', icon: 'moon', label: 'Close the day', admin: true, run: () => navigate('finance-overview') },
   { id: 'theme', icon: 'moon', label: 'Switch theme', run: () => toggleTheme() }
 ];

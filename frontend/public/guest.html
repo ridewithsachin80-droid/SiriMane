@@ -66,16 +66,23 @@
     .h-card { background: var(--p-card); border:1px solid var(--p-border); border-radius:14px; padding:14px 16px; margin-bottom:12px; }
     .h-row { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid var(--p-border); font-size:14px; }
     .h-row:last-child { border-bottom:none; }
-    .h-due { text-align:center; padding:6px 0 2px; }
+    .h-due { text-align:center; }
     .h-due .amt { font-size:32px; font-weight:800; }
     .stars { display:inline-flex; gap:2px; }
-    .stars button { background:none; border:none; font-size:20px; cursor:pointer; padding:0 1px; line-height:1; color:var(--p-text-light); }
+    .stars button { background:none; border:none; font-size:22px; cursor:pointer; padding:0; line-height:1; color:var(--p-text-light); min-width:44px; min-height:44px; }
     .stars button.on { color: var(--p-accent); }
     .meal-row { padding:10px 0; border-bottom:1px solid var(--p-border); }
     .meal-row:last-child { border-bottom:none; }
     .meal-row .m-name { font-size:11px; letter-spacing:.05em; text-transform:uppercase; color:var(--p-text-muted); font-weight:700; }
     .emg-row { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:12px 0; border-bottom:1px solid var(--p-border); }
     .emg-row a { text-decoration:none; }
+    /* Sprint 15 */
+    .ub-logo { height:36px; width:auto; border-radius:6px; flex:0 0 auto; }
+    .sos-btn { flex:0 0 auto; min-width:52px; min-height:44px; border:none; border-radius:10px; background:#DC2626; color:#fff; font-weight:800; font-size:13px; letter-spacing:.06em; cursor:pointer; font-family:inherit; }
+    body.p-in .header { display:none; }
+    .p-bottomnav button small { font-size:9.5px; font-weight:500; opacity:.75; }
+    select { width:100%; padding:11px 14px; border:1.5px solid var(--p-border); border-radius:10px; font-family:inherit; background:var(--p-card); color:var(--p-text); min-height:44px; }
+    .form-row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
     #p-theme { background:none; border:none; cursor:pointer; font-size:18px; padding:6px 8px; border-radius:8px; line-height:1; }
 
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
@@ -142,7 +149,7 @@
     .menu-table tr:last-child td { border-bottom: none; }
 
     /* User info bar */
-    .user-bar { background: var(--p-card); border-radius: 12px; padding: 12px 16px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    .user-bar { background: var(--p-card); border-radius: 12px; padding: 8px 12px; margin-bottom: 12px; display: flex; gap: 10px; justify-content: space-between; align-items: center; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
     .user-bar .name { font-weight: 600; font-size: 14px; }
     .user-bar .room { font-size: 12px; color: var(--p-text-muted); }
 
@@ -236,12 +243,12 @@
 
     <!-- User bar -->
     <div class="user-bar">
-      <div>
+      <img src="/images/logo.png" alt="" class="ub-logo"/>
+      <div style="flex:1;min-width:0">
         <div class="name" id="p-name"></div>
         <div class="room" id="p-room"></div>
       </div>
-      <button id="p-theme" type="button" title="Light / dark" onclick="togglePortalTheme()">🌙</button>
-      <button class="btn btn-outline btn-sm" onclick="guestLogout()">Logout</button>
+      <button class="sos-btn" id="sos-btn" type="button" onclick="showTab('emergency')" aria-label="Emergency contacts">SOS</button>
     </div>
 
     <!-- Add to home screen -->
@@ -251,20 +258,6 @@
       <button class="btn btn-outline btn-sm" style="width:auto;margin:0" onclick="dismissInstall()">Not now</button>
     </div>
 
-    <!-- Tab bar -->
-    <div class="tab-bar">
-      <button class="tab active" data-tab="home" onclick="showTab('home')">Home</button>
-      <button class="tab" data-tab="pay" onclick="showTab('pay')">Pay Rent</button>
-      <button class="tab" data-tab="details" onclick="showTab('details')">My Details</button>
-      <button class="tab" data-tab="idcard" onclick="showTab('idcard')">My ID</button>
-      <button class="tab" data-tab="menu" onclick="showTab('menu')">Daily Menu</button>
-      <button class="tab" data-tab="notices" onclick="showTab('notices')">Notices</button>
-      <button class="tab" data-tab="complaint" onclick="showTab('complaint')">Report Issue</button>
-      <button class="tab" data-tab="visitors" onclick="showTab('visitors')">Visitors</button>
-      <button class="tab" data-tab="emergency" onclick="showTab('emergency')">Emergency</button>
-      <button class="tab" data-tab="message" onclick="showTab('message')">Message Us</button>
-      <button class="tab" data-tab="settings" onclick="showTab('settings')">Settings</button>
-    </div>
 
     <!-- PAY RENT TAB -->
     <div id="tab-home">
@@ -363,7 +356,7 @@
             <div class="form-group"><label>Relation</label><input id="vis-rel" placeholder="Mother, friend…"/></div>
             <div class="form-group"><label>Phone</label><input id="vis-phone" inputmode="numeric" placeholder="Optional"/></div>
           </div>
-          <div class="form-group"><label>Expected</label><input id="vis-when" type="datetime-local"/></div>
+          <div class="form-group"><label for="vis-when">Expected date &amp; time</label><input id="vis-when" type="datetime-local"/></div>
           <button class="btn btn-amber" onclick="registerVisitor()">Register visitor</button>
           <div id="vis-alert" class="alert alert-danger hidden" style="margin-top:10px"></div>
         </div>
@@ -397,6 +390,14 @@
 
     <!-- SETTINGS TAB -->
     <div id="tab-settings" class="hidden">
+      <div class="card">
+        <div class="card-h">⚙️ App</div>
+        <div class="card-b">
+          <div class="info-row"><span class="lbl">Light / dark</span><button id="p-theme" type="button" onclick="togglePortalTheme()" aria-label="Switch light or dark">🌙</button></div>
+          <div class="info-row"><span class="lbl">Emergency numbers</span><button class="btn btn-outline btn-sm" style="width:auto;margin:0" onclick="showTab('emergency')">Open</button></div>
+          <button class="btn btn-outline" style="margin-top:12px" onclick="guestLogout()">Log out</button>
+        </div>
+      </div>
       <div class="card">
         <div class="card-h">⚙️ Change Password</div>
         <div class="card-b">
@@ -542,6 +543,7 @@ function guestLogout() {
   guestToken = null; guestData = null;
   document.getElementById('portal-section').classList.add('hidden');
   document.getElementById('login-section').classList.remove('hidden');
+  document.body.classList.remove('p-in');
   document.getElementById('login-mobile').value = '';
   document.getElementById('login-password').value = '';
 }
@@ -551,6 +553,7 @@ function showPortal() {
   document.querySelector('.header')?.classList.add('compact');
   document.getElementById('login-section').classList.add('hidden');
   document.getElementById('portal-section').classList.remove('hidden');
+  document.body.classList.add('p-in');
   document.getElementById('p-name').textContent = '👤 ' + (guestData.name || '');
   document.getElementById('p-room').textContent = guestData.room_number ? 'Room ' + guestData.room_number : 'Room not assigned';
 }
@@ -572,10 +575,7 @@ async function loadPortalHome() {
     const dueDay = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + 1, 1));
     const daysToDue = Math.max(0, Math.round((dueDay - Date.now()) / 86400000));
     host.innerHTML = `
-      <div class="h-card">
-        <div style="font-size:18px;font-weight:700">${h.greeting}, ${h.resident.name ? h.resident.name.split(' ')[0] : ''}</div>
-        <div style="font-size:13px;color:var(--p-text-muted)">${h.resident.room_number ? 'Room ' + h.resident.room_number : ''}${h.resident.bed_number ? ' · Bed ' + h.resident.bed_number : ''}</div>
-      </div>
+      <div style="font-size:18px;font-weight:700;margin:2px 2px 10px">${h.greeting}, ${h.resident.name ? h.resident.name.split(' ')[0] : ''}</div>
 
       <div class="h-card h-due">
         <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--p-text-muted)">${due > 0 ? 'Amount due' : 'Rent'}</div>
@@ -583,12 +583,12 @@ async function loadPortalHome() {
         <div style="font-size:12px;color:var(--p-text-muted)">${due > 0 ? `Next rent due in ${daysToDue} day${daysToDue === 1 ? '' : 's'}` : 'Nothing pending'}</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px">
           <button class="btn btn-amber" style="margin:0" onclick="showTab('pay')">💳 Pay rent</button>
-          <button class="btn btn-outline" style="margin:0" onclick="showTab('complaint')">🛠️ Report an issue</button>
+          <button class="btn btn-outline" style="margin:0" onclick="showTab('help')">🛠️ Report an issue</button>
         </div>
       </div>
 
       <div class="h-card">
-        <div style="font-weight:700;margin-bottom:6px">Today's meals</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-weight:700">Today's meals</span><button class="btn btn-outline btn-sm" style="width:auto;margin:0" onclick="showTab('menu')">This week</button></div>
         ${h.menu.map(m => `
           <div class="meal-row">
             <div class="m-name">${m.meal_type}</div>
@@ -604,13 +604,13 @@ async function loadPortalHome() {
         <div class="h-row"><span>Visitors expected</span><strong>${h.visitors.length || 'None'}</strong></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
           <button class="btn btn-outline" style="margin:0" onclick="showTab('notices')">Read notices</button>
-          <button class="btn btn-outline" style="margin:0" onclick="showTab('visitors')">Register a visitor</button>
+          <button class="btn btn-outline" style="margin:0" onclick="showTab('help')">Register a visitor</button>
         </div>
       </div>
 
       ${h.satisfaction_due ? `<div class="h-card" id="sat-card">
         <div style="font-weight:700;margin-bottom:4px">How is this month going?</div>
-        <p style="font-size:12px;color:var(--p-text-muted);margin-bottom:8px">Five taps. Answers are anonymous — the warden sees the averages, never who said what.</p>
+        <p style="font-size:12px;color:var(--p-text-muted);margin-bottom:8px">One rating per line. Answers are anonymous — the warden sees the averages, never who said what.</p>
         ${['cleanliness','food','safety','staff','wifi'].map(k => `
           <div class="h-row"><span style="text-transform:capitalize">${k === 'wifi' ? 'WiFi' : k}</span>
             <span class="stars" data-sat="${k}">${[1,2,3,4,5].map(n => `<button onclick="setSat('${k}',${n})" aria-label="${n}">★</button>`).join('')}</span></div>`).join('')}
@@ -800,7 +800,7 @@ function renderPayTab(g) {
     ? `<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--p-surface-2)">
          <div class="receipt-line">
            <span>
-             <strong style="font-size:13px">${fmt(lastConfirmed.amount)}</strong>
+             <strong style="font-size:13px">${fmt(lastConfirmed.amount)}</strong> <span style="font-size:12px;text-transform:capitalize">${lastConfirmed.collection_type || 'payment'}</span>
              <span style="font-size:11px;color:var(--p-text-light)"> · ${fmtDate(lastConfirmed.collection_date)}${lastConfirmed.collection_month ? ' · ' + lastConfirmed.collection_month : ''}</span>
            </span>
            <button class="btn btn-outline btn-sm" style="width:auto;margin:0" onclick="downloadGuestReceipt(${lastConfirmed.id})">🧾 Receipt</button>
@@ -1061,18 +1061,27 @@ async function changePassword() {
 }
 
 // ── TABS ──────────────────────────────────────────
+// Sprint 15: four tabs. Help and Me are stacked pages made of the existing
+// sections, unchanged; every old section name still works (Home's buttons,
+// SOS, deep links) and lights the tab it now lives under.
+const PORTAL_PAGES = { help: ['complaint', 'message', 'visitors'], me: ['idcard', 'details', 'settings'] };
+const PORTAL_NAV = { home: 'home', menu: 'home', notices: 'home', pay: 'pay',
+  help: 'help', complaint: 'help', message: 'help', visitors: 'help',
+  me: 'me', idcard: 'me', details: 'me', settings: 'me', emergency: 'me' };
 function showTab(tab) {
   ['home','pay','details','idcard','menu','notices','complaint','visitors','emergency','message','settings'].forEach(t => {
     document.getElementById('tab-'+t).classList.add('hidden');
   });
-  document.getElementById('tab-'+tab).classList.remove('hidden');
-  if (tab === 'home') loadPortalHome();
-  if (tab === 'idcard') loadIdCard();
-  if (tab === 'visitors') loadVisitors();
-  if (tab === 'emergency') loadEmergency();
-  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
-  document.querySelectorAll('.p-bottomnav button').forEach(b => b.classList.toggle('active', b.dataset.nav === tab));
-  if (tab === 'complaint') loadComplaintHistory();
+  const show = PORTAL_PAGES[tab] || [tab];
+  show.forEach(t => document.getElementById('tab-'+t).classList.remove('hidden'));
+  if (show.includes('home')) loadPortalHome();
+  if (show.includes('idcard')) loadIdCard();
+  if (show.includes('visitors')) loadVisitors();
+  if (show.includes('emergency')) loadEmergency();
+  if (show.includes('complaint')) loadComplaintHistory();
+  const nav = PORTAL_NAV[tab] || tab;
+  document.querySelectorAll('.p-bottomnav button').forEach(b => b.classList.toggle('active', b.dataset.nav === nav));
+  window.scrollTo(0, 0);
 }
 
 // ── HELPERS ───────────────────────────────────────
@@ -1087,11 +1096,10 @@ function fmtDate(d) { if(!d) return '—'; return new Date(d).toLocaleDateString
 </script>
 
 <nav class="p-bottomnav" id="p-bottomnav">
-  <button data-nav="home" onclick="showTab('home')"><span>🏠</span>Home</button>
-  <button data-nav="pay" onclick="showTab('pay')"><span>💳</span>Pay</button>
-  <button data-nav="menu" onclick="showTab('menu')"><span>🍽️</span>Menu</button>
-  <button data-nav="complaint" onclick="showTab('complaint')"><span>🛠️</span>Requests</button>
-  <button data-nav="__more" onclick="document.querySelector('.tab-bar').scrollIntoView({behavior:'smooth'})"><span>⋯</span>More</button>
+  <button data-nav="home" onclick="showTab('home')"><span>🏠</span>Home<small>ಮನೆ</small></button>
+  <button data-nav="pay" onclick="showTab('pay')"><span>💳</span>Pay<small>ಪಾವತಿ</small></button>
+  <button data-nav="help" onclick="showTab('help')"><span>🙋</span>Help<small>ಸಹಾಯ</small></button>
+  <button data-nav="me" onclick="showTab('me')"><span>👤</span>Me<small>ನಾನು</small></button>
 </nav>
 </body>
 </html>

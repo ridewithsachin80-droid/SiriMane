@@ -136,6 +136,19 @@ async function main() {
     r = await api('POST', '/guest-complaint', { category: 'Wifi/Internet', description: 'Smoke: wifi down' }); eq(r.status, 401, 'guest-complaint needs guest token');
     r = await S('POST', '/guest-complaint', { category: 'Wifi/Internet', description: 'x' }); eq(r.status, 401, 'staff token is not a guest token');
     r = await G('POST', '/guest-complaint', { category: 'Wifi/Internet', description: '' }); eq(r.status, 400, 'blank guest complaint');
+    // S15-7: a token names the environment that issued it; another environment's token is refused.
+    {
+      const jwt = require('jsonwebtoken');
+      const payload = JSON.parse(Buffer.from(guestTok.split('.')[1], 'base64url').toString());
+      ok(payload.env, 'S15-7 tokens carry the issuing environment');
+      const foreign = jwt.sign({ guestId: payload.guestId, type: 'guest', env: 'some-other-environment' }, process.env.JWT_SECRET, { expiresIn: '1h' });
+      r = await api('GET', '/guest-portal', null, foreign); eq(r.status, 401, 'S15-7 SECURITY: a token from another environment is refused');
+      const legacy = jwt.sign({ guestId: payload.guestId, type: 'guest' }, process.env.JWT_SECRET, { expiresIn: '1h' });
+      r = await api('GET', '/guest-portal', null, legacy); eq(r.status, 200, 'S15-7 a pre-release token (no env) still works until it expires');
+      const adminPayload = JSON.parse(Buffer.from(adminTok.split('.')[1], 'base64url').toString());
+      const foreignAdmin = jwt.sign({ userId: adminPayload.userId, env: 'some-other-environment' }, process.env.JWT_SECRET, { expiresIn: '1h' });
+      r = await api('GET', '/rooms', null, foreignAdmin); eq(r.status, 401, 'S15-7 SECURITY: another environment\'s ADMIN token is refused');
+    }
     r = await G('POST', '/guest-complaint', { category: 'Wifi/Internet', description: 'Smoke: wifi down' }); eq(r.status, 201, 'guest raises issue'); eq(r.data.status, 'open', 'open');
     r = await G('GET', '/guest-complaints'); eq(r.status, 200, 'guest lists own'); eq(r.data.length, 1, 'sees exactly own issue'); eq(r.data[0].category, 'Wifi/Internet', 'category');
     r = await S('GET', '/complaints'); const gc = r.data.find(x => x.raised_by === 'guest'); ok(gc, 'staff sees guest issue'); eq(gc.guest_id, guest.id, 'linked'); eq(gc.room_number, 'S1', 'room set');
