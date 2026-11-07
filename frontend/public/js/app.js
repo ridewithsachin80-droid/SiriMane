@@ -110,6 +110,11 @@ let toastTimer = null;
 function esc(v) {
   return String(v == null ? '' : v).replace(/[&<>"'`]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;' }[ch]));
 }
+// Data passed as an argument to an inline handler: JSON makes it a valid JS
+// literal, esc() makes it safe inside a double-quoted HTML attribute (the
+// browser decodes the entities back before the JS runs). Never use it inside
+// a single-quoted attribute. (S15.3-2)
+function jsAttr(v) { return esc(JSON.stringify(v === undefined ? null : v)); }
 function toast(msg, type='error') {
   let el = document.getElementById('sm-toast');
   if (!el) { el = document.createElement('div'); el.id = 'sm-toast'; document.body.appendChild(el); }
@@ -211,7 +216,7 @@ function monthPicker(month, year, onChangeFn) {
   const m = month || (n.getMonth()+1);
   const y = year || n.getFullYear();
   const val = `${y}-${String(m).padStart(2,'0')}`;
-  return `<input type="month" id="month-picker" value="${val}" onchange="${onChangeFn}(this.value)" style="padding:7px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;cursor:pointer">`;
+  return `<input type="month" id="month-picker" value="${esc(val)}" onchange="${onChangeFn}(this.value)" style="padding:7px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;cursor:pointer">`;
 }
 
 function onPurchasesMonthChange(value) {
@@ -245,7 +250,7 @@ async function pgRooms() {
           <div class="flex gap-2" style="flex-wrap:wrap">
             <select id="room-floor-filter" style="margin:0" onchange="filterRooms()">
               <option value="">All Floors</option>
-              ${floors.map(f=>`<option value="${f}">Floor ${f}</option>`).join('')}
+              ${floors.map(f=>`<option value="${esc(f)}">Floor ${f}</option>`).join('')}
             </select>
             <select id="room-status-filter" style="margin:0" onchange="filterRooms()">
               <option value="">All Status</option>
@@ -265,7 +270,7 @@ async function pgRooms() {
         </div>
       </div>
     `);
-  } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+  } catch(e) { setContent(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
 }
 
 function renderRoomRows(list) {
@@ -283,8 +288,8 @@ function renderRoomRows(list) {
       <td><span class="badge ${full?'badge-red':occ>0?'badge-amber':'badge-green'}">${full?'Full':occ>0?'Partial':'Available'}</span></td>
       <td>
         <div class="flex gap-2">
-          <button class="btn btn-outline btn-sm" onclick="roomModal(${JSON.stringify(r).replace(/"/g,'&quot;')})">Edit</button>
-          ${isAdmin()?`<button class="btn btn-danger btn-sm" onclick="delRoom(${r.id},${esc(JSON.stringify(r.room_number))})">Delete</button>`:''}
+          <button class="btn btn-outline btn-sm" onclick="roomModal(${jsAttr(r)})">Edit</button>
+          ${isAdmin()?`<button class="btn btn-danger btn-sm" onclick="delRoom(${r.id},${jsAttr((r.room_number))})">Delete</button>`:''}
         </div>
       </td>
     </tr>`;
@@ -315,15 +320,15 @@ function roomModal(r={}) {
         <div id="rm-alert" class="alert alert-danger hidden"></div>
         <div class="form-row">
           <div class="form-group"><label>Room Number *</label><input id="rm-num" value="${esc(r.room_number||'')}" placeholder="e.g. 101"/></div>
-          <div class="form-group"><label>Floor</label><input id="rm-floor" type="number" value="${r.floor||1}" min="0"/></div>
+          <div class="form-group"><label>Floor</label><input id="rm-floor" type="number" value="${esc(r.floor||1)}" min="0"/></div>
         </div>
         <div class="form-row">
-          <div class="form-group"><label>Total Beds *</label><input id="rm-beds" type="number" value="${r.total_beds||1}" min="1"/></div>
+          <div class="form-group"><label>Total Beds *</label><input id="rm-beds" type="number" value="${esc(r.total_beds||1)}" min="1"/></div>
           <div class="form-group"><label>Room Type</label>
-            <select id="rm-type">${['shared','single','double','bunk','dormitory'].map(t=>`<option value="${t}" ${r.room_type===t?'selected':''}>${t.charAt(0).toUpperCase()+t.slice(1)}</option>`).join('')}</select>
+            <select id="rm-type">${['shared','single','double','bunk','dormitory'].map(t=>`<option value="${esc(t)}" ${r.room_type===t?'selected':''}>${t.charAt(0).toUpperCase()+t.slice(1)}</option>`).join('')}</select>
           </div>
         </div>
-        <div class="form-group"><label>Monthly Rent per Bed (₹)</label><input id="rm-rent" type="number" value="${r.monthly_rent||''}" placeholder="e.g. 5000"/></div>
+        <div class="form-group"><label>Monthly Rent per Bed (₹)</label><input id="rm-rent" type="number" value="${esc(r.monthly_rent||'')}" placeholder="e.g. 5000"/></div>
         <div class="form-group"><label>Description</label><textarea id="rm-desc" rows="2">${esc(r.description||'')}</textarea></div>
       </div>
       <div class="modal-footer">
@@ -379,7 +384,7 @@ async function pgGuests(filter) {
           <div class="flex gap-2" style="flex-wrap:wrap">
             <select id="guest-room-filter" style="margin:0" onchange="filterGuests()">
               <option value="">All Rooms</option>
-              ${rooms.map(r=>`<option value="${r}">Room ${r}</option>`).join('')}
+              ${rooms.map(r=>`<option value="${esc(r)}">Room ${r}</option>`).join('')}
             </select>
             <select id="guest-docs-filter" style="margin:0" onchange="filterGuests()">
               <option value="">All Docs</option>
@@ -401,7 +406,7 @@ async function pgGuests(filter) {
       { action: 'announcement', label: 'Post notice', icon: 'megaphone' },
       { action: 'documents', label: 'Mark documents', icon: 'receipt' }
     ]);
-  } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+  } catch(e) { setContent(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
 }
 
 function renderGuestRows(filtered, f) {
@@ -413,7 +418,7 @@ function renderGuestRows(filtered, f) {
     return `
     <tr data-search="${esc(g.name.toLowerCase())} ${esc(g.phone||'')}" style="${!g.is_active?'opacity:0.55':''}">
       <td class="bulk-td">${bulkCb(g.id, g.name)}</td>
-      <td><strong style="${!g.is_active?'text-decoration:line-through':''}">${esc(g.name)}</strong><br><span class="text-muted">${g.email||''}</span></td>
+      <td><strong style="${!g.is_active?'text-decoration:line-through':''}">${esc(g.name)}</strong><br><span class="text-muted">${esc(g.email||'')}</span></td>
       <td style="${!g.is_active?'text-decoration:line-through':''}">${esc(g.phone||'—')}</td>
       <td style="${!g.is_active?'text-decoration:line-through':''}">${g.room_number?'Room '+g.room_number+(g.bed_number?' / Bed '+g.bed_number:''):'-'}</td>
       <td>${fmtDate(g.join_date)}${!g.is_active && g.leave_date ? `<br><span class="text-muted" style="font-size:11px">→ ${fmtDate(g.leave_date)}</span>` : ''}</td>
@@ -426,7 +431,7 @@ function renderGuestRows(filtered, f) {
           <button class="btn btn-outline btn-sm" onclick="residentProfile(${g.id})">View</button>
           <button class="btn btn-primary btn-sm" onclick="guestModal(null,${g.id})">Edit</button>
           ${needsApproval && isAdmin()?`<button class="btn btn-success btn-sm" onclick="approveRentVariance(${g.id})">Approve Rent</button>`:''}
-          ${g.is_active && isAdmin()?`<button class="btn btn-outline btn-sm" onclick="roomShiftModal(${g.id},${esc(JSON.stringify(g.name))})">Shift Room</button>`:''}
+          ${g.is_active && isAdmin()?`<button class="btn btn-outline btn-sm" onclick="roomShiftModal(${g.id},${jsAttr((g.name))})">Shift Room</button>`:''}
           ${g.is_active && isAdmin()?`<button class="btn btn-danger btn-sm" onclick="checkoutWizard(${g.id})">Checkout</button>`:''}
         </div>
       </td>
@@ -488,7 +493,7 @@ async function guestModal(gData=null, id=null) {
           <div class="form-group"><label>Phone</label><input id="gf-phone" value="${esc(g.phone||'')}" placeholder="Mobile"/></div>
         </div>
         <div class="form-row">
-          <div class="form-group"><label>Email</label><input id="gf-email" type="email" value="${g.email||''}" placeholder="Email"/></div>
+          <div class="form-group"><label>Email</label><input id="gf-email" type="email" value="${esc(g.email||'')}" placeholder="Email"/></div>
           <div class="form-group"><label>Emergency Contact</label><input id="gf-emg" value="${esc(g.emergency_contact||'')}" placeholder="Emergency phone"/></div>
         </div>
         <div class="form-group"><label>Home / Permanent Address</label><textarea id="gf-address" rows="2" placeholder="e.g. House no, street, city, state, pincode">${esc(g.address||'')}</textarea></div>
@@ -502,22 +507,22 @@ async function guestModal(gData=null, id=null) {
           <div class="form-group"><label>Bed / Berth Number</label><input id="gf-bed" type="number" value="${esc(g.bed_number||'')}" placeholder="1, 2..."/></div>
         </div>
         <div class="form-row">
-          <div class="form-group"><label>Check-in Date *</label><input id="gf-join" type="date" value="${g.join_date?g.join_date.split('T')[0]:nowDate()}"/></div>
-          <div class="form-group"><label>Monthly Rent (₹)</label><input id="gf-rent" type="number" value="${g.monthly_rent||''}" data-original="${g.monthly_rent||0}" placeholder="e.g. 5000" oninput="toggleRentEffectiveField();checkRentVariance()"/></div>
+          <div class="form-group"><label>Check-in Date *</label><input id="gf-join" type="date" value="${esc(g.join_date?g.join_date.split('T')[0]:nowDate())}"/></div>
+          <div class="form-group"><label>Monthly Rent (₹)</label><input id="gf-rent" type="number" value="${esc(g.monthly_rent||'')}" data-original="${esc(g.monthly_rent||0)}" placeholder="e.g. 5000" oninput="toggleRentEffectiveField();checkRentVariance()"/></div>
         </div>
         <div id="gf-rent-variance-warning" class="hidden" style="background:#FFFBEB;border:1px solid var(--amber);color:#92400E;padding:8px 12px;border-radius:8px;font-size:12px;margin-bottom:12px"></div>
         ${g.id ? `<div class="form-group" id="gf-rent-effective-wrap" style="display:none">
           <label>New rate effective from</label>
-          <input id="gf-rent-effective" type="date" value="${nowDate()}"/>
+          <input id="gf-rent-effective" type="date" value="${esc(nowDate())}"/>
           <p class="text-muted" style="font-size:11px;margin-top:4px">Only matters since you changed the rent above. Past months in their ledger keep using the old rate; only this date onward uses the new one.</p>
         </div>` : ''}
         <div class="form-row">
-          <div class="form-group"><label>Deposit (₹)</label><input id="gf-dep" type="number" value="${g.deposit_amount||''}" placeholder="e.g. 5000"/></div>
+          <div class="form-group"><label>Deposit (₹)</label><input id="gf-dep" type="number" value="${esc(g.deposit_amount||'')}" placeholder="e.g. 5000"/></div>
           <div class="form-group"><label>ID Proof</label>
-            <select id="gf-idtype">${['','Aadhaar','PAN Card','Passport','Driving License','Voter ID'].map(t=>`<option value="${t}" ${g.id_proof_type===t?'selected':''}>${t||'— Select —'}</option>`).join('')}</select>
+            <select id="gf-idtype">${['','Aadhaar','PAN Card','Passport','Driving License','Voter ID'].map(t=>`<option value="${esc(t)}" ${g.id_proof_type===t?'selected':''}>${t||'— Select —'}</option>`).join('')}</select>
           </div>
         </div>
-        <div class="form-group"><label>ID Proof Number</label><input id="gf-idnum" value="${g.id_proof_number||''}" placeholder="As printed on the document" autocomplete="off"/></div>
+        <div class="form-group"><label>ID Proof Number</label><input id="gf-idnum" value="${esc(g.id_proof_number||'')}" placeholder="As printed on the document" autocomplete="off"/></div>
         <div class="form-group"><label>Notes</label><textarea id="gf-notes" rows="2">${esc(g.notes||'')}</textarea></div>
       </div>
       <div class="modal-footer">
@@ -599,7 +604,7 @@ async function viewGuest(id) {
             ${[['Phone',g.phone],['Email',g.email],['Room',g.room_number?'Room '+g.room_number:'—'],['Bed',g.bed_number||'—'],['Check-in',fmtDate(g.join_date)],['Rent',fmt(g.monthly_rent)+'/mo'],['Deposit',fmt(g.deposit_amount)],['Emergency',g.emergency_contact||'—'],['Address',g.address||'—']].map(([l,v])=>`
             <div style="background:var(--surface-2);padding:10px 12px;border-radius:8px;border:1px solid var(--border)">
               <div style="font-size:11px;color:var(--text-muted);font-weight:600">${l}</div>
-              <div style="font-size:14px;font-weight:500;margin-top:2px">${v||'—'}</div>
+              <div style="font-size:14px;font-weight:500;margin-top:2px">${esc(v||'—')}</div>
             </div>`).join('')}
           </div>
 
@@ -623,7 +628,7 @@ async function viewGuest(id) {
 
           <div class="flex justify-between items-center mb-4">
             <h4 style="font-size:14px;margin:0">Rent Rate History</h4>
-            ${isAdmin()?`<button class="btn btn-outline btn-sm" onclick="rentHistoryModal(${g.id},'${g.name.replace(/'/g,"\\'")}')">+ Backfill a past change</button>`:''}
+            ${isAdmin()?`<button class="btn btn-outline btn-sm" onclick="rentHistoryModal(${g.id},${jsAttr(g.name)})">+ Backfill a past change</button>`:''}
           </div>
           ${history.length===0
             ? '<p class="text-muted mb-5">No rate history recorded.</p>'
@@ -633,7 +638,7 @@ async function viewGuest(id) {
 
           <div class="flex justify-between items-center mb-4">
             <h4 style="font-size:14px;margin:0">Room Shift History</h4>
-            ${isAdmin()?`<button class="btn btn-outline btn-sm" onclick="roomShiftModal(${g.id},${esc(JSON.stringify(g.name))})">+ Shift Room</button>`:''}
+            ${isAdmin()?`<button class="btn btn-outline btn-sm" onclick="roomShiftModal(${g.id},${jsAttr((g.name))})">+ Shift Room</button>`:''}
           </div>
           ${roomHistory.length===0
             ? '<p class="text-muted mb-5">No internal room shifts recorded.</p>'
@@ -651,7 +656,7 @@ async function viewGuest(id) {
         <div class="modal-footer">
           <button class="btn btn-outline" onclick="closeModal()">Close</button>
           <button class="btn btn-primary" onclick="closeModal();guestModal(null,${g.id})">Edit</button>
-          <button class="btn btn-success" onclick="closeModal();collectionModal(${g.id},${esc(JSON.stringify(g.name))})">Add Payment</button>
+          <button class="btn btn-success" onclick="closeModal();collectionModal(${g.id},${jsAttr((g.name))})">Add Payment</button>
         </div>
       </div>`);
   } catch(e) { alert(e.message); }
@@ -710,7 +715,7 @@ async function roomShiftModal(guestId, guestName) {
           </div>
           <div class="form-group"><label>New Bed / Berth</label><input id="rs-bed" type="number" placeholder="1, 2..."/></div>
         </div>
-        <div class="form-group"><label>Effective From *</label><input id="rs-date" type="date" value="${nowDate()}" max="${nowDate()}" ${g.join_date?`min="${g.join_date.split('T')[0]}"`:''}/>
+        <div class="form-group"><label>Effective From *</label><input id="rs-date" type="date" value="${esc(nowDate())}" max="${nowDate()}" ${g.join_date?`min="${g.join_date.split('T')[0]}"`:''}/>
           <p style="font-size:11px;color:var(--text-muted);margin-top:4px">Backdate this if the shift already happened and just wasn't logged then.</p>
         </div>
         <div class="form-group"><label>Note</label><input id="rs-note" placeholder="e.g. requested a window bed"/></div>
@@ -801,7 +806,7 @@ async function pgMenu() {
             </table>
           </div>`}
       </div>`);
-  } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+  } catch(e) { setContent(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
 }
 
 function menuModal(preDay='') {
@@ -814,10 +819,10 @@ function menuModal(preDay='') {
         <div id="mn-alert" class="alert alert-danger hidden"></div>
         <div class="form-row">
           <div class="form-group"><label>Day *</label>
-            <select id="mn-day">${days.map(d=>`<option value="${d}" ${d===preDay?'selected':''}>${d}</option>`).join('')}</select>
+            <select id="mn-day">${days.map(d=>`<option value="${esc(d)}" ${d===preDay?'selected':''}>${d}</option>`).join('')}</select>
           </div>
           <div class="form-group"><label>Meal Type *</label>
-            <select id="mn-meal">${meals.map(m=>`<option value="${m}">${m}</option>`).join('')}</select>
+            <select id="mn-meal">${meals.map(m=>`<option value="${esc(m)}">${m}</option>`).join('')}</select>
           </div>
         </div>
         <div class="form-group"><label>Menu Items *</label><textarea id="mn-items" rows="3" placeholder="e.g. Idli, Sambar, Chutney, Coffee"></textarea></div>
@@ -855,7 +860,7 @@ async function pgChecklist(date) {
       </div>
       <div class="card mb-6">
         <div class="card-header flex justify-between items-center">
-          <input type="date" id="cl-date" value="${d}" max="${nowDate()}" onchange="pgChecklist(this.value)" style="max-width:180px"/>
+          <input type="date" id="cl-date" value="${esc(d)}" max="${nowDate()}" onchange="pgChecklist(this.value)" style="max-width:180px"/>
           <span style="font-weight:600">${data.summary.checked} / ${data.summary.total} done (${data.summary.percent}%)</span>
         </div>
         <div style="padding:0 20px 16px">
@@ -882,7 +887,7 @@ async function pgChecklist(date) {
         </div>
       `).join('')}
     `);
-  } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+  } catch(e) { setContent(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
 }
 
 async function toggleChecklistItem(itemId, checked) {
@@ -923,7 +928,7 @@ async function renderChecklistHistory(ym) {
         <table>
           <thead><tr><th>DATE</th><th>DONE</th><th>%</th></tr></thead>
           <tbody>
-            ${rows.map(r => `<tr onclick="closeModal();pgChecklist(${esc(JSON.stringify(r.date))})" style="cursor:pointer">
+            ${rows.map(r => `<tr onclick="closeModal();pgChecklist(${jsAttr((r.date))})" style="cursor:pointer">
               <td>${fmtDate(r.date)}</td>
               <td>${r.checked} / ${r.total}</td>
               <td><span class="badge ${r.percent>=100?'badge-green':r.percent>=50?'badge-blue':'badge-red'}">${r.percent}%</span></td>
@@ -932,7 +937,7 @@ async function renderChecklistHistory(ym) {
         </table>
       </div>`}
     `;
-  } catch(e) { body.innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
+  } catch(e) { body.innerHTML = `<div class="alert alert-danger">${esc(e.message)}</div>`; }
 }
 
 async function checklistManageModal() {
@@ -953,7 +958,7 @@ async function renderChecklistManage(editItem) {
           <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--surface-2);gap:8px">
             <span style="font-size:13px"><strong>${esc(i.section)}</strong>${i.time_label && i.time_label!=='—' ? ' · '+i.time_label:''} — ${esc(i.task)}</span>
             <span style="flex-shrink:0;display:flex;gap:6px">
-              <button class="btn btn-outline btn-sm" onclick='renderChecklistManage(${JSON.stringify(i).replace(/'/g,"&#39;")})'>Edit</button>
+              <button class="btn btn-outline btn-sm" onclick="renderChecklistManage(${jsAttr(i)})">Edit</button>
               <button class="btn btn-outline btn-sm" onclick="removeChecklistItem(${i.id})">Remove</button>
             </span>
           </div>`).join('')}
@@ -961,17 +966,17 @@ async function renderChecklistManage(editItem) {
       <h4 style="margin-bottom:8px;font-size:13px;color:var(--text-muted)">${isEditing ? 'Edit Task' : 'Add New Task'}</h4>
       <div class="form-row">
         <div class="form-group"><label>Section</label>
-          <select id="cl-new-section">${sections.map(s=>`<option value="${s}" ${isEditing&&editItem.section===s?'selected':''}>${s}</option>`).join('')}</select>
+          <select id="cl-new-section">${sections.map(s=>`<option value="${esc(s)}" ${isEditing&&editItem.section===s?'selected':''}>${s}</option>`).join('')}</select>
         </div>
-        <div class="form-group"><label>Time (optional)</label><input type="text" id="cl-new-time" placeholder="e.g. 7:00 AM" value="${isEditing && editItem.time_label!=='—' ? editItem.time_label : ''}"/></div>
+        <div class="form-group"><label>Time (optional)</label><input type="text" id="cl-new-time" placeholder="e.g. 7:00 AM" value="${esc(isEditing && editItem.time_label!=='—' ? editItem.time_label : '')}"/></div>
       </div>
-      <div class="form-group"><label>Task</label><input type="text" id="cl-new-task" placeholder="e.g. Check water tank level" value="${isEditing ? editItem.task.replace(/"/g,'&quot;') : ''}"/></div>
+      <div class="form-group"><label>Task</label><input type="text" id="cl-new-task" placeholder="e.g. Check water tank level" value="${esc(isEditing ? editItem.task : '')}"/></div>
       <div class="flex gap-2">
         <button class="btn btn-primary" onclick="${isEditing ? `saveEditedChecklistItem(${editItem.id})` : 'addChecklistItem()'}">${isEditing ? 'Save Changes' : '+ Add Task'}</button>
         ${isEditing ? `<button class="btn btn-outline" onclick="renderChecklistManage()">Cancel</button>` : ''}
       </div>
     `;
-  } catch(e) { body.innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
+  } catch(e) { body.innerHTML = `<div class="alert alert-danger">${esc(e.message)}</div>`; }
 }
 
 async function saveEditedChecklistItem(id) {
@@ -1049,7 +1054,7 @@ async function pgComplaints(filter) {
       </div>
     `);
     bulkSetup('complaints', [{ action: 'assign', label: 'Assign to staff', icon: 'users' }]);
-  } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+  } catch(e) { setContent(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
 }
 
 function complaintModal() {
@@ -1067,7 +1072,7 @@ function complaintModal() {
         <div id="cp-preview" class="hidden"></div>
         <div class="form-row">
           <div class="form-group"><label>Category</label>
-            <select id="cp-category">${COMPLAINT_CATEGORIES.map(c=>`<option value="${c}">${c}</option>`).join('')}</select>
+            <select id="cp-category">${COMPLAINT_CATEGORIES.map(c=>`<option value="${esc(c)}">${c}</option>`).join('')}</select>
           </div>
           <div class="form-group"><label>Room / Guest (optional)</label><input id="cp-room" placeholder="e.g. Room 12 or guest name"/></div>
         </div>
@@ -1165,7 +1170,7 @@ async function pgPayments(month, year) {
           </table>
         </div>
       </div>`);
-  } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+  } catch(e) { setContent(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
 }
 
 // Sprint 15.1: one way to show type, month and mode on payment cards — the
@@ -1256,7 +1261,7 @@ async function pgAnnouncements() {
             </div>`).join('')}
           </div>`}
       </div>`);
-  } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+  } catch(e) { setContent(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
 }
 
 function announcementModal() {
@@ -1326,7 +1331,7 @@ async function pgInbox() {
         ${msgs.length===0
           ? '<div style="text-align:center;padding:48px;color:var(--text-muted)">📭<br><br>No messages from guests yet.</div>'
           : msgs.map(m=>`
-          <div data-search="${esc(`${esc(m.guest_name||'')} ${esc(m.subject||'')} ${esc(m.message||'')} ${esc(m.room_number||'')}`.toLowerCase())}" class="inbox-item ${!m.is_read?'unread':''}" onclick="viewInboxMsg(${esc(JSON.stringify(m))})">
+          <div data-search="${esc(`${m.guest_name||''} ${m.subject||''} ${m.message||''} ${m.room_number||''}`.toLowerCase())}" class="inbox-item ${!m.is_read?'unread':''}" onclick="viewInboxMsg(${jsAttr((m))})">
             <div class="flex justify-between items-center">
               <div>
                 <strong style="font-size:14px">${esc(m.guest_name)}</strong>
@@ -1341,7 +1346,7 @@ async function pgInbox() {
           </div>`).join('')}
         </div>
       </div>`);
-  } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+  } catch(e) { setContent(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
 }
 
 async function viewInboxMsg(m) {
@@ -1458,9 +1463,9 @@ async function pgPurchases(month, year, from, to) {
           <div class="flex gap-2 items-center" style="flex-wrap:wrap">
             ${monthPicker(m, y, 'onPurchasesMonthChange')}
             <span style="color:var(--text-muted,#888);font-size:13px">or</span>
-            <input type="date" id="pu-from" value="${from||''}" onchange="onPurchasesRangeChange()" style="margin:0" title="From date" />
+            <input type="date" id="pu-from" value="${esc(from||'')}" onchange="onPurchasesRangeChange()" style="margin:0" title="From date" />
             <span style="color:var(--text-muted,#888);font-size:13px">to</span>
-            <input type="date" id="pu-to" value="${to||''}" onchange="onPurchasesRangeChange()" style="margin:0" title="To date" />
+            <input type="date" id="pu-to" value="${esc(to||'')}" onchange="onPurchasesRangeChange()" style="margin:0" title="To date" />
             ${useRange?`<button class="btn btn-outline btn-sm" onclick="pgPurchases()">✕ Clear range</button>`:''}
             <select id="cat-filter" style="margin:0" onchange="filterPurchases()">
               <option value="">All Categories</option>
@@ -1481,7 +1486,7 @@ async function pgPurchases(month, year, from, to) {
           </table>
         </div>
       </div>`);
-  } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+  } catch(e) { setContent(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
 }
 
 function onPurchasesRangeChange() {
@@ -1505,7 +1510,7 @@ function purchaseModal() {
         <div id="pu-preview" class="hidden"></div>
         <div class="form-row">
           <div class="form-group"><label>Amount (₹) *</label><input id="pu-amt" type="number" placeholder="e.g. 500"/></div>
-          <div class="form-group"><label>Date</label><input id="pu-date" type="date" value="${nowDate()}"/></div>
+          <div class="form-group"><label>Date</label><input id="pu-date" type="date" value="${esc(nowDate())}"/></div>
         </div>
         <div class="form-group"><label>Category *</label>
           <select id="pu-cat">
@@ -1844,9 +1849,9 @@ async function pgCollections(month, year, from, to) {
           <div class="flex gap-2 items-center" style="flex-wrap:wrap">
             ${monthPicker(m, y, 'onCollectionsMonthChange')}
             <span style="color:var(--text-muted,#888);font-size:13px">or</span>
-            <input type="date" id="coll-from" value="${from||''}" onchange="onCollectionsRangeChange()" style="margin:0" title="From date" />
+            <input type="date" id="coll-from" value="${esc(from||'')}" onchange="onCollectionsRangeChange()" style="margin:0" title="From date" />
             <span style="color:var(--text-muted,#888);font-size:13px">to</span>
-            <input type="date" id="coll-to" value="${to||''}" onchange="onCollectionsRangeChange()" style="margin:0" title="To date" />
+            <input type="date" id="coll-to" value="${esc(to||'')}" onchange="onCollectionsRangeChange()" style="margin:0" title="To date" />
             ${useRange?`<button class="btn btn-outline btn-sm" onclick="clearCollectionsRange()">✕ Clear range</button>`:''}
             <select id="coll-type-filter" style="margin:0" onchange="filterCollections()">
               <option value="">All Types</option>
@@ -1867,7 +1872,7 @@ async function pgCollections(month, year, from, to) {
           </table>
         </div>
       </div>`);
-  } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+  } catch(e) { setContent(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
 }
 
 // Triggered when either the From or To date input changes. Only applies the
@@ -1978,7 +1983,7 @@ async function collectionModal(guestId=null, guestName='') {
         </div>
         <div class="form-row">
           <div class="form-group"><label>Amount (₹) *</label><input id="cl-amt" type="number" placeholder="e.g. 5000"/></div>
-          <div class="form-group"><label>Date</label><input id="cl-date" type="date" value="${nowDate()}"/></div>
+          <div class="form-group"><label>Date</label><input id="cl-date" type="date" value="${esc(nowDate())}"/></div>
         </div>
         <div class="form-row">
           <div class="form-group"><label>Type</label>
@@ -2094,7 +2099,7 @@ async function pgRentDue() {
       </div>`);
     loadReliability();
     bulkSetup('rent-due', [{ action: 'reminders', label: 'Draft reminders', icon: 'whatsapp' }]);
-  } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+  } catch(e) { setContent(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
 }
 
 let rentDueSort = { key: null, dir: 'asc' };
@@ -2307,7 +2312,7 @@ async function pgReports(month, year) {
     setContent(renderReportsPage(r, controls));
     loadTrendChart();
     if (isAdmin()) loadOwnerReport();
-  } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+  } catch(e) { setContent(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
 }
 
 async function pgReportsRange(from, to) {
@@ -2318,14 +2323,14 @@ async function pgReportsRange(from, to) {
   try {
     const r = await API.getReportsRange(from, to);
     const controls = `
-      <input type="date" id="rep-from" value="${from}" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit"/>
+      <input type="date" id="rep-from" value="${esc(from)}" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit"/>
       <span style="font-size:13px;color:var(--text-muted)">to</span>
-      <input type="date" id="rep-to" value="${to}" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit"/>
+      <input type="date" id="rep-to" value="${esc(to)}" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit"/>
       <button class="btn btn-primary btn-sm" onclick="applyReportsRange()">Apply</button>
       <button class="btn btn-outline btn-sm" onclick="switchReportsToMonth()">By Month</button>`;
     setContent(renderReportsPage(r, controls));
     loadTrendChart();
-  } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+  } catch(e) { setContent(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
 }
 
 function switchReportsToRange() {
@@ -2357,7 +2362,7 @@ function renderReportsPage(r, controlsHtml) {
         <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
           <h3>📈 Owner report</h3>
           <div class="flex items-center gap-2" style="flex-wrap:wrap">
-            <input type="month" id="owner-month" value="${new Date().toISOString().slice(0,7)}" max="${new Date().toISOString().slice(0,7)}" style="margin:0;min-height:40px" onchange="loadOwnerReport()"/>
+            <input type="month" id="owner-month" value="${esc(new Date().toISOString().slice(0,7))}" max="${new Date().toISOString().slice(0,7)}" style="margin:0;min-height:40px" onchange="loadOwnerReport()"/>
             <button class="btn btn-outline btn-sm" onclick="loadOwnerReport(true)" title="Recompute">↻</button>
           </div>
         </div>
@@ -2373,8 +2378,8 @@ function renderReportsPage(r, controlsHtml) {
         </div>
       </div>
       <div class="flex gap-2 mb-5">
-        <button class="btn btn-outline btn-sm" onclick="exportReport('csv',${esc(JSON.stringify(r.dateFrom))},${esc(JSON.stringify(r.dateTo))})">⬇ Export CSV</button>
-        <button class="btn btn-outline btn-sm" onclick="exportReport('pdf',${esc(JSON.stringify(r.dateFrom))},${esc(JSON.stringify(r.dateTo))})">⬇ Export PDF</button>
+        <button class="btn btn-outline btn-sm" onclick="exportReport('csv',${jsAttr((r.dateFrom))},${jsAttr((r.dateTo))})">⬇ Export CSV</button>
+        <button class="btn btn-outline btn-sm" onclick="exportReport('pdf',${jsAttr((r.dateFrom))},${jsAttr((r.dateTo))})">⬇ Export PDF</button>
       </div>`:''}
       <div class="stat-grid mb-6">
         <div class="stat-card" style="border-left:4px solid var(--green)">
@@ -2413,7 +2418,7 @@ function renderReportsPage(r, controlsHtml) {
               ? '<div style="text-align:center;padding:32px;color:var(--text-muted)">🛒<br><br>No purchases in this period</div>'
               : r.expenseBreakdown.map(e=>`
               <div class="flex justify-between items-center" style="padding:10px 0;border-bottom:1px solid var(--border)">
-                <span style="font-size:14px">${e.category}</span>
+                <span style="font-size:14px">${esc(e.category)}</span>
                 <strong class="text-red">${fmt(e.total)}</strong>
               </div>`).join('')}
           </div>
@@ -2448,7 +2453,7 @@ async function loadTrendChart(months) {
     const trend = await API.getReportsTrend(months);
     wrap.innerHTML = renderTrendChart(trend);
   } catch(e) {
-    wrap.innerHTML = `<div class="alert alert-danger">${e.message}</div>`;
+    wrap.innerHTML = `<div class="alert alert-danger">${esc(e.message)}</div>`;
   }
 }
 
@@ -2511,7 +2516,7 @@ async function pgBalanceSheet(asOf) {
         <div><h1>Balance Sheet</h1><p>What the business owns vs. owes, as of a point in time</p></div>
         <div class="flex items-center gap-2">
           <span style="font-size:13px;color:var(--text-muted)">As of</span>
-          <input type="date" value="${date}" onchange="pgBalanceSheet(this.value)" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit"/>
+          <input type="date" value="${esc(date)}" onchange="pgBalanceSheet(this.value)" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit"/>
         </div>
       </div>
 
@@ -2615,7 +2620,7 @@ async function pgBalanceSheet(asOf) {
           </table>
         </div>
       </div>`);
-  } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
+  } catch(e) { setContent(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
 }
 
 async function exportBalanceSheetPdf() {
@@ -2647,7 +2652,7 @@ function fixedAssetModal() {
         <div class="form-group"><label>Asset Name *</label><input id="fa-name" placeholder="e.g. Refrigerator"/></div>
         <div class="form-row">
           <div class="form-group"><label>Value (₹) *</label><input id="fa-value" type="number" placeholder="e.g. 15000"/></div>
-          <div class="form-group"><label>Purchase Date *</label><input id="fa-date" type="date" value="${nowDate()}"/></div>
+          <div class="form-group"><label>Purchase Date *</label><input id="fa-date" type="date" value="${esc(nowDate())}"/></div>
         </div>
         <div class="form-group"><label>Category</label>
           <select id="fa-cat"><option>Furniture</option><option>Appliances</option><option>Electronics</option><option>Vehicle</option><option>Other</option></select>
@@ -2687,7 +2692,7 @@ function capitalModal() {
       <div class="modal-body">
         <div id="cap-alert" class="alert alert-danger hidden"></div>
         <div class="form-group"><label>Amount (₹) *</label><input id="cap-amt" type="number" placeholder="Positive = put in, negative = took out"/></div>
-        <div class="form-group"><label>Date *</label><input id="cap-date" type="date" value="${nowDate()}"/></div>
+        <div class="form-group"><label>Date *</label><input id="cap-date" type="date" value="${esc(nowDate())}"/></div>
         <div class="form-group"><label>Note</label><input id="cap-note" placeholder="e.g. Initial investment"/></div>
       </div>
       <div class="modal-footer">
@@ -2774,13 +2779,13 @@ async function renderAdminSettingsTab() {
         <div class="card-header"><h3>PG Details (used on printed receipts)</h3></div>
         <div style="padding:20px;max-width:480px">
           <div id="pg-settings-alert" class="alert alert-danger hidden"></div>
-          <div class="form-group"><label>PG Name</label><input id="set-pg-name" placeholder="e.g. Siri Mane" value="${settings.pg_name||''}"/></div>
+          <div class="form-group"><label>PG Name</label><input id="set-pg-name" placeholder="e.g. Siri Mane" value="${esc(settings.pg_name||'')}"/></div>
           <div class="form-group"><label>Address</label><textarea id="set-pg-address" rows="2" placeholder="e.g. 5th cross, Gangothri Road,&#10;SIT Ext, Tumakuru.">${settings.pg_address||''}</textarea></div>
-          <div class="form-group"><label>Phone</label><input id="set-pg-phone" placeholder="e.g. 9880217627" value="${settings.pg_phone||''}"/></div>
+          <div class="form-group"><label>Phone</label><input id="set-pg-phone" placeholder="e.g. 9880217627" value="${esc(settings.pg_phone||'')}"/></div>
           <div class="form-row">
-            <div class="form-group"><label>Morning brief time (IST)</label><input id="set-brief-time" type="time" value="${settings.brief_time||'07:00'}"/></div>
-            <div class="form-group"><label>Evening summary time (IST)</label><input id="set-evening-time" type="time" value="${settings.evening_time||'20:00'}"/></div>
-            <div class="form-group"><label>Send brief to (WhatsApp)</label><input id="set-owner-phone" placeholder="Owner's number" value="${settings.owner_phone||''}"/></div>
+            <div class="form-group"><label>Morning brief time (IST)</label><input id="set-brief-time" type="time" value="${esc(settings.brief_time||'07:00')}"/></div>
+            <div class="form-group"><label>Evening summary time (IST)</label><input id="set-evening-time" type="time" value="${esc(settings.evening_time||'20:00')}"/></div>
+            <div class="form-group"><label>Send brief to (WhatsApp)</label><input id="set-owner-phone" placeholder="Owner's number" value="${esc(settings.owner_phone||'')}"/></div>
           </div>
           <div class="form-group"><label>Reminder language</label>
             <select id="set-reminder-lang"><option value="en" ${(settings.reminder_lang||'en')==='en'?'selected':''}>English</option><option value="kn" ${settings.reminder_lang==='kn'?'selected':''}>ಕನ್ನಡ</option></select>
@@ -2793,12 +2798,12 @@ async function renderAdminSettingsTab() {
         <div style="padding:20px;max-width:480px">
           <div id="settings-alert" class="alert alert-danger hidden"></div>
           <p class="text-muted" style="font-size:12px;margin-bottom:16px">This is the UPI ID residents will pay rent to from their portal. It can be your existing personal or business UPI ID — no separate gateway or sign-up needed, and there's no fee since payments go directly to your bank.</p>
-          <div class="form-group"><label>UPI ID (VPA)</label><input id="set-upi-vpa" placeholder="e.g. yourname@upi" value="${settings.upi_vpa||''}"/></div>
-          <div class="form-group"><label>Display Name</label><input id="set-upi-name" placeholder="e.g. Siri Mane PG" value="${settings.upi_name||''}"/></div>
+          <div class="form-group"><label>UPI ID (VPA)</label><input id="set-upi-vpa" placeholder="e.g. yourname@upi" value="${esc(settings.upi_vpa||'')}"/></div>
+          <div class="form-group"><label>Display Name</label><input id="set-upi-name" placeholder="e.g. Siri Mane PG" value="${esc(settings.upi_name||'')}"/></div>
           <button class="btn btn-primary" onclick="saveAdminSettings()">Save Settings</button>
         </div>
       </div>`;
-  } catch(e) { (adminHost(__seq) || {}).innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
+  } catch(e) { (adminHost(__seq) || {}).innerHTML = `<div class="alert alert-danger">${esc(e.message)}</div>`; }
 }
 
 async function savePgSettings() {
@@ -2847,13 +2852,13 @@ async function renderAdminStaffTab() {
                 <td><strong>${esc(u.username)}</strong></td>
                 <td><span class="badge ${u.role==='admin'?'badge-purple':'badge-blue'}">${u.role}</span></td>
                 <td>${fmtDate(u.created_at)}</td>
-                <td>${u.username!==JSON.parse(localStorage.getItem('sm_user')||'{}').username?`<button class="btn btn-danger btn-sm btn-icon" onclick="delStaffUser(${u.id},${esc(JSON.stringify(u.username))})">✕</button>`:'<span class="text-muted">You</span>'}</td>
+                <td>${u.username!==JSON.parse(localStorage.getItem('sm_user')||'{}').username?`<button class="btn btn-danger btn-sm btn-icon" onclick="delStaffUser(${u.id},${jsAttr((u.username))})">✕</button>`:'<span class="text-muted">You</span>'}</td>
               </tr>`).join('')}
             </tbody>
           </table>
         </div>
       </div>`;
-  } catch(e) { (adminHost(__seq) || {}).innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
+  } catch(e) { (adminHost(__seq) || {}).innerHTML = `<div class="alert alert-danger">${esc(e.message)}</div>`; }
 }
 
 function staffModal() {
@@ -2918,7 +2923,7 @@ async function renderAdminAuditTab() {
           </table>
         </div>
       </div>`;
-  } catch(e) { (adminHost(__seq) || {}).innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
+  } catch(e) { (adminHost(__seq) || {}).innerHTML = `<div class="alert alert-danger">${esc(e.message)}</div>`; }
 }
 
 async function renderAdminRefundsTab() {
@@ -2953,7 +2958,7 @@ async function renderAdminRefundsTab() {
           </table>
         </div>
       </div>`;
-  } catch(e) { (adminHost(__seq) || {}).innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
+  } catch(e) { (adminHost(__seq) || {}).innerHTML = `<div class="alert alert-danger">${esc(e.message)}</div>`; }
 }
 
 async function delDepositRefund(id) {
@@ -3105,7 +3110,7 @@ function initTabBar() {
   bar.id = 'sm-tabbar';
   bar.className = 'sm-tabbar';
   bar.innerHTML = SM_TABS.map(t => `
-    <button class="sm-tab" data-tab="${t.page}" type="button">
+    <button class="sm-tab" data-tab="${esc(t.page)}" type="button">
       <span class="sm-tab-icon">${icon(t.ic, 'ic ic-lg')}</span>${esc(t.label)}
     </button>`).join('');
   document.getElementById('app').appendChild(bar);
@@ -3212,7 +3217,7 @@ function selectCollectGuest(id) {
   rest.innerHTML = `
     <div class="sm-collect-step" style="margin-top:20px">
       <h4>2 · How much? <span class="sm-kn">ಎಷ್ಟು</span></h4>
-      <input type="number" inputmode="numeric" id="collect-amount" class="sm-amount-input" value="${prefill || ''}"/>
+      <input type="number" inputmode="numeric" id="collect-amount" class="sm-amount-input" value="${esc(prefill || '')}"/>
       <div style="font-size:12px;color:var(--text-muted,var(--text-muted));margin-top:6px">
         ${due > 0 ? `Rent pending <span class="sm-kn">ಬಾಕಿ</span>: <strong class="text-red">${fmt(due)}</strong>` : 'No rent pending'}
         ${dep > 0 ? ` · Deposit <span class="sm-kn">ಠೇವಣಿ</span>: <strong class="text-red">${fmt(dep)}</strong>` : ''}
@@ -3226,13 +3231,13 @@ function selectCollectGuest(id) {
     <div class="sm-collect-step">
       <h4>3 · Paid how? <span class="sm-kn">ಹೇಗೆ</span></h4>
       <div class="sm-chip-row" id="collect-modes">
-        ${SM_MODES.map(m => `<button type="button" class="sm-chip ${m === collectState.mode ? 'selected' : ''}" data-mode="${m}" onclick="setCollectMode('${m}')">${m}</button>`).join('')}
+        ${SM_MODES.map(m => `<button type="button" class="sm-chip ${m === collectState.mode ? 'selected' : ''}" data-mode="${esc(m)}" onclick="setCollectMode('${m}')">${m}</button>`).join('')}
       </div>
     </div>
     <div class="sm-collect-step">
       <div class="form-row">
-        <div class="form-group"><label>Date</label><input type="date" id="collect-date" value="${nowDate()}"/></div>
-        <div class="form-group"><label>For month</label><input type="text" id="collect-month" value="${monthLabelForCollect(new Date())}"/></div>
+        <div class="form-group"><label>Date</label><input type="date" id="collect-date" value="${esc(nowDate())}"/></div>
+        <div class="form-group"><label>For month</label><input type="text" id="collect-month" value="${esc(monthLabelForCollect(new Date()))}"/></div>
       </div>
     </div>
     <div id="collect-alert" class="alert alert-danger hidden"></div>
@@ -3478,7 +3483,7 @@ async function complaintApplyVoice(text) {
       <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted,var(--text-muted))">AI heard — please check</div>
       <div style="font-size:14px;margin:6px 0"><strong>${category}</strong>${p.room ? ' · Room ' + p.room : ''}<br>${description}</div>
       <div class="flex gap-2">
-        <button class="btn btn-primary btn-sm" onclick="complaintUseVoice(${JSON.stringify({ category, description, room: p.room }).replace(/"/g, '&quot;')})">✓ Use this</button>
+        <button class="btn btn-primary btn-sm" onclick="complaintUseVoice(${jsAttr({ category, description, room: p.room })})">✓ Use this</button>
         <button class="btn btn-outline btn-sm" onclick="document.getElementById('cp-preview').classList.add('hidden')">✗ Ignore</button>
       </div>
     </div>`;
@@ -3509,7 +3514,7 @@ async function purchaseScanBill() {
           ${f.category || 'category?'}${f.description ? ' — ' + f.description : ''}${f.payment_mode ? ' · ' + f.payment_mode : ''}
         </div>
         <div class="flex gap-2">
-          <button class="btn btn-primary btn-sm" onclick='purchaseUseScan(${JSON.stringify(f).replace(/'/g, "&#39;")})'>✓ Use this</button>
+          <button class="btn btn-primary btn-sm" onclick="purchaseUseScan(${jsAttr(f)})">✓ Use this</button>
           <button class="btn btn-outline btn-sm" onclick="document.getElementById('pu-preview').classList.add('hidden')">✗ Ignore</button>
         </div>
       </div>`;
@@ -3547,7 +3552,7 @@ async function guestScanId() {
           <span style="font-size:13px;color:var(--text-muted,var(--text-muted))">${esc(f.address || 'address not found')}</span>
         </div>
         <div class="flex gap-2">
-          <button class="btn btn-primary btn-sm" onclick='guestUseScan(${JSON.stringify(f).replace(/'/g, "&#39;")})'>✓ Use this</button>
+          <button class="btn btn-primary btn-sm" onclick="guestUseScan(${jsAttr(f)})">✓ Use this</button>
           <button class="btn btn-outline btn-sm" onclick="document.getElementById('gf-preview').classList.add('hidden')">✗ Ignore</button>
         </div>
       </div>`;
@@ -3631,7 +3636,7 @@ async function loadBrief(force) {
       </div>
       <div class="brief-section"><div class="brief-h">Siri recommends</div>
         ${b.recommendations.map((r, i) => `<div class="brief-rec"><span>${i + 1}. ${esc(r.text)}</span>
-          <button class="btn btn-primary btn-sm" onclick='${r.action.navigate ? `navigate("${r.action.navigate}")` : `copilotAsk(${JSON.stringify(r.action.ask)})`}'>${esc(r.action.label)}</button></div>`).join('')}
+          <button class="btn btn-primary btn-sm" onclick="${r.action.navigate ? `navigate(${jsAttr(r.action.navigate)})` : `copilotAsk(${jsAttr(r.action.ask)})`}">${esc(r.action.label)}</button></div>`).join('')}
       </div>`;
     const when = new Date(b.computed_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
     document.getElementById('brief-meta').textContent = `Computed ${when}${b.cached ? ' · tap ↻ for fresh numbers' : ''}`;
@@ -3650,7 +3655,7 @@ async function showEvening() {
   try {
     const e = await apiFetch('/copilot/evening');
     openModal(`<div class="modal"><div class="modal-header"><h3>🌙 Evening summary</h3><button class="modal-close" onclick="closeModal()">×</button></div>
-      <div class="modal-body"><pre style="white-space:pre-wrap;font-family:inherit;font-size:14px;line-height:1.55">${e.text}</pre>
+      <div class="modal-body"><pre style="white-space:pre-wrap;font-family:inherit;font-size:14px;line-height:1.55">${esc(e.text)}</pre>
       <div class="flex gap-2" style="margin-top:12px"><a class="btn btn-success btn-sm" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(e.text)}">💬 WhatsApp</a><button class="btn btn-outline btn-sm" onclick="navigator.clipboard.writeText(${JSON.stringify('')} + document.querySelector('.modal-body pre').textContent).then(()=>toast('Copied','ok'))">📋 Copy</button></div></div></div>`);
   } catch (err) { toast(err.message); }
 }
@@ -3799,7 +3804,7 @@ function renderCopilotChips() {
   let chips = COPILOT_CHIPS[smContext.page] || COPILOT_CHIPS.dashboard;
   if (smContext.resident_name) chips = [`Summarise ${smContext.resident_name.split(' ')[0]}`, 'Why is she overdue?', ...chips.slice(0, 1)];
   else if (smContext.room_number) chips = [`What's wrong here?`, `Who is in room ${smContext.room_number}?`, ...chips.slice(0, 1)];
-  host.innerHTML = chips.map(c => `<button type="button" class="copilot-chip" onclick="copilotAsk(${JSON.stringify(c)})">${c}</button>`).join('');
+  host.innerHTML = chips.map(c => `<button type="button" class="copilot-chip" onclick="copilotAsk(${jsAttr(c)})">${esc(c)}</button>`).join('');
 }
 
 function initCopilotBar() {
@@ -3836,7 +3841,7 @@ async function copilotAsk(text, opts) {
   try {
     const r = await apiFetch('/copilot/ask', { method: 'POST', body: { text: q, voice: !!(opts && opts.voice), alternatives: (opts && opts.alternatives) || [], context: { page: smContext.page, resident_id: smContext.resident_id, resident_name: smContext.resident_name, room_number: smContext.room_number } } });
     renderCopilotResult(r);
-  } catch (e) { out.innerHTML = `<div class="copilot-answer copilot-err">${e.message}</div>`; }
+  } catch (e) { out.innerHTML = `<div class="copilot-answer copilot-err">${esc(e.message)}</div>`; }
   finally { copilotBusy = false; input.select(); }
 }
 
@@ -3851,14 +3856,14 @@ function renderCopilotResult(r) {
     return `<div>${x.name || x.title || JSON.stringify(x)}</div>`;
   }).join('')}${(r.evidence || []).length > 8 ? `<div class="text-muted">…and ${r.evidence.length - 8} more</div>` : ''}</div>` : '';
   const preview = r.proposal ? `<div class="copilot-preview"><div class="copilot-preview-h">Siri prepared — check before confirming</div>${previewRows(r.proposal.preview)}</div>` : '';
-  const wizardBtn = r.openWizard ? `<button class="btn btn-success" onclick='openWizardFromCopilot(${JSON.stringify(r.openWizard).replace(/'/g, "&#39;")});copilotDismiss()'>${r.openWizard.kind === 'checkout' ? 'Open checkout' : 'Open move-in form'}</button>` : '';
+  const wizardBtn = r.openWizard ? `<button class="btn btn-success" onclick="openWizardFromCopilot(${jsAttr(r.openWizard)});copilotDismiss()">${r.openWizard.kind === 'checkout' ? 'Open checkout' : 'Open move-in form'}</button>` : '';
   const catChips = (r.actions || []).filter(a => a.chip === 'category');
-  const catRow = catChips.length ? `<div class="copilot-cats"><span class="copilot-cats-l">${r.proposal && r.proposal.preview && r.proposal.preview.category === 'Other' ? 'Category?' : 'Not ' + (r.proposal && r.proposal.preview ? r.proposal.preview.category : 'this') + '?'}</span>${catChips.map(a => `<button class="chip-cat" onclick='copilotRetool(${JSON.stringify(a).replace(/'/g, "&#39;")})'>${esc(a.label)}</button>`).join('')}</div>` : '';
+  const catRow = catChips.length ? `<div class="copilot-cats"><span class="copilot-cats-l">${r.proposal && r.proposal.preview && r.proposal.preview.category === 'Other' ? 'Category?' : 'Not ' + esc(r.proposal && r.proposal.preview ? r.proposal.preview.category : 'this') + '?'}</span>${catChips.map(a => `<button class="chip-cat" onclick="copilotRetool(${jsAttr(a)})">${esc(a.label)}</button>`).join('')}</div>` : '';
   const buttons = wizardBtn + (r.actions || []).filter(a => a.chip !== 'category').map(a => {
-    if (a.confirm) return `<button class="btn btn-success" onclick="copilotConfirm(${esc(JSON.stringify(a.confirm))}, this)">✓ ${esc(a.label)}</button>`;
-    if (a.navigate) return `<button class="btn btn-outline btn-sm" onclick="navigate(${esc(JSON.stringify(a.navigate))})">${esc(a.label)}</button>`;
-    if (a.download) return `<button class="btn btn-outline btn-sm" onclick="API.downloadExport(${esc(JSON.stringify(a.download))},'${a.filename || 'file'}').catch(e=>toast(e.message))">📄 ${esc(a.label)}</button>`;
-    if (a.tool) return `<button class="btn btn-outline btn-sm" onclick='copilotRetool(${JSON.stringify(a).replace(/'/g, "&#39;")})'>${esc(a.label)}</button>`;
+    if (a.confirm) return `<button class="btn btn-success" onclick="copilotConfirm(${jsAttr((a.confirm))}, this)">✓ ${esc(a.label)}</button>`;
+    if (a.navigate) return `<button class="btn btn-outline btn-sm" onclick="navigate(${jsAttr((a.navigate))})">${esc(a.label)}</button>`;
+    if (a.download) return `<button class="btn btn-outline btn-sm" onclick="API.downloadExport(${jsAttr((a.download))},'${a.filename || 'file'}').catch(e=>toast(e.message))">📄 ${esc(a.label)}</button>`;
+    if (a.tool) return `<button class="btn btn-outline btn-sm" onclick="copilotRetool(${jsAttr(a)})">${esc(a.label)}</button>`;
     return '';
   }).join('');
   const conf = r.confidence === 'low' ? '<span class="copilot-conf">not sure</span>' : '';
@@ -3896,7 +3901,7 @@ async function copilotRetool(a) {
     const q = document.getElementById('copilot-q').value;
     const r = await apiFetch('/copilot/ask', { method: 'POST', body: { text: q, tool: a.tool, args: a.args, context: { page: smContext.page, resident_id: a.args && a.args.resident_id, resident_name: a.label } } });
     renderCopilotResult(r);
-  } catch (e) { out.innerHTML = `<div class="copilot-answer copilot-err">${e.message}</div>`; }
+  } catch (e) { out.innerHTML = `<div class="copilot-answer copilot-err">${esc(e.message)}</div>`; }
 }
 
 // Admin → Copilot log: every ask, confirm and refusal, newest first.
@@ -3914,7 +3919,7 @@ async function renderAdminCopilotTab() {
         const outcome = r.error ? `<span class="badge badge-red">${esc(r.error)}</span>` : r.confirmed_at ? `<span class="badge badge-green">done</span>` : r.proposal_id && !r.proposal_confirmed_at ? `<span class="badge badge-amber">prepared, not confirmed</span>` : `<span class="badge badge-gray">answered</span>`;
         return `<tr><td>${new Date(r.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td><td>${esc(r.username || '—')}</td><td>${r.request_text === 'confirm' ? `<em>${esc(r.preview_text || 'confirm')}</em>` : esc(r.request_text)}</td><td>${esc(did)}</td><td>${outcome}${r.result_text && r.request_text !== 'confirm' ? `<div class="text-muted" style="font-size:11px;margin-top:2px">${esc(r.result_text.slice(0, 80))}</div>` : ''}</td></tr>`;
       }).join('')}</tbody></table></div></div>`;
-  } catch (e) { host.innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
+  } catch (e) { host.innerHTML = `<div class="alert alert-danger">${esc(e.message)}</div>`; }
 }
 
 
@@ -3961,7 +3966,7 @@ function renderSubtabs(group, active) {
   const def = NAV_GROUPS[group];
   if (!def) return '';
   return `<div class="subtabs">${def.tabs.filter(t => !t.admin || isAdmin())
-    .map(t => `<button class="subtab ${t.page === active ? 'active' : ''}" onclick="navigate(${esc(JSON.stringify(t.page))})">${esc(t.label)}</button>`).join('')}</div>`;
+    .map(t => `<button class="subtab ${t.page === active ? 'active' : ''}" onclick="navigate(${jsAttr((t.page))})">${esc(t.label)}</button>`).join('')}</div>`;
 }
 // Landing on a group opens its first tab; the strip then rides above it.
 async function pgFinance() { navigate(isAdmin() ? 'finance-overview' : 'collect'); }
@@ -4026,7 +4031,7 @@ async function runSearch() {
     const add = (label, rows, render, go) => {
       if (!rows.length) return;
       parts.push(`<div class="search-group">${label}</div>`);
-      rows.forEach(row => { const i = searchRows.length; searchRows.push({ go: () => go(row) }); parts.push(`<button class="search-item" data-i="${i}" onclick="searchRows[${i}].go()">${render(row)}</button>`); });
+      rows.forEach(row => { const i = searchRows.length; searchRows.push({ go: () => go(row) }); parts.push(`<button class="search-item" data-i="${esc(i)}" onclick="searchRows[${i}].go()">${render(row)}</button>`); });
     };
     add('Residents', r.residents, g => `${icon('users')}<span><span>${esc(g.name)}${g.is_active ? '' : ' <span class="s-sub">(past)</span>'}</span><div class="s-sub">${g.room_number ? 'Room ' + g.room_number : 'No room'}${g.phone ? ' · ' + g.phone : ''}</div></span>${g.amount_due > 0 ? `<span class="s-right text-red">${fmt(g.amount_due)}</span>` : ''}`,
       g => { closeSearch(); navigateThen('guests', () => viewGuest(g.id)); });
@@ -4042,7 +4047,7 @@ async function runSearch() {
     if (!foundAny) parts.push(`<div class="search-group">Nothing matches “${esc(q)}”</div>`);
     parts.push(renderPaletteAsk(q));
     host.innerHTML = parts.filter(Boolean).join('');
-  } catch (e) { searchRows = []; host.innerHTML = (renderPaletteCommands(q) || '') + renderPaletteAsk(q) + `<div class="search-group">${e.message}</div>`; }
+  } catch (e) { searchRows = []; host.innerHTML = (renderPaletteCommands(q) || '') + renderPaletteAsk(q) + `<div class="search-group">${esc(e.message)}</div>`; }
 }
 
 // ── Quick action ─────────────────────────────────────────────────────────
@@ -4142,7 +4147,7 @@ async function pgHome(force) {
     ${rec.length ? `<div class="home-section-h">Siri recommends</div>
     <div class="card"><div style="padding:4px 16px">
       ${rec.map((r, i) => `<div class="today-row"><span class="t-main"><strong>${i + 1}.</strong> ${esc(r.text)}</span>
-        <button class="btn btn-primary btn-sm" onclick='${r.action.navigate ? `navigate("${r.action.navigate}")` : `copilotAsk(${JSON.stringify(r.action.ask)})`}'>${esc(r.action.label)}</button></div>`).join('')}
+        <button class="btn btn-primary btn-sm" onclick="${r.action.navigate ? `navigate(${jsAttr(r.action.navigate)})` : `copilotAsk(${jsAttr(r.action.ask)})`}">${esc(r.action.label)}</button></div>`).join('')}
     </div></div>` : ''}
 
     <div class="home-section-h">Today</div>
@@ -4215,7 +4220,7 @@ async function residentProfile(id, tab) {
     renderResident360();
   } catch (e) {
     openModal(`<div class="modal"><div class="modal-header"><h3>Resident</h3><button class="modal-close" onclick="closeModal()">×</button></div>
-      <div class="modal-body"><div class="alert alert-danger" style="display:block">${e.message}</div></div></div>`);
+      <div class="modal-body"><div class="alert alert-danger" style="display:block">${esc(e.message)}</div></div></div>`);
   }
 }
 
@@ -4224,7 +4229,7 @@ function renderResident360() {
   const due = ledger && ledger.currentBalance < 0 ? -ledger.currentBalance : 0;
   const credit = ledger && ledger.currentBalance > 0 ? ledger.currentBalance : 0;
   const months = g.monthly_rent > 0 ? Math.round(due / g.monthly_rent * 10) / 10 : 0;
-  const kv = rows => rows.filter(([, v]) => v !== undefined).map(([k, v]) => `<div class="r360-kv"><span>${k}</span><strong>${v || '—'}</strong></div>`).join('');
+  const kv = rows => rows.filter(([, v]) => v !== undefined).map(([k, v]) => `<div class="r360-kv"><span>${esc(k)}</span><strong>${esc(v || '—')}</strong></div>`).join('');
   const body = {
     overview: () => `
       <div class="r360-status">${due > 0 ? `<span class="badge badge-red">Owes ${fmt(due)}${months ? ` · ${months} mo` : ''}</span>` : credit > 0 ? `<span class="badge badge-green">In credit ${fmt(credit)}</span>` : `<span class="badge badge-green">Settled</span>`}
@@ -4292,20 +4297,20 @@ function renderMoveIn() {
       <div class="form-group"><label>Bed</label><input id="mi-bed" value="${esc(d.bed_number || '')}" placeholder="e.g. 2"/></div>
       <div id="mi-ready" class="text-muted" style="font-size:12px"></div>` },
     { t: 'Rent and deposit', html: `
-      <div class="form-group"><label>Monthly rent *</label><input id="mi-rent" type="number" inputmode="numeric" value="${d.monthly_rent != null ? d.monthly_rent : ''}"/></div>
-      <div class="form-group"><label>Deposit *</label><input id="mi-dep" type="number" inputmode="numeric" value="${d.deposit_amount != null ? d.deposit_amount : ''}"/></div>
-      <div class="form-row"><div class="form-group"><label>Move-in date *</label><input id="mi-join" type="date" value="${d.join_date || nowDate()}"/></div>
-      <div class="form-group"><label>Expected checkout</label><input id="mi-exp" type="date" value="${d.expected_checkout || ''}"/></div></div>` },
+      <div class="form-group"><label>Monthly rent *</label><input id="mi-rent" type="number" inputmode="numeric" value="${esc(d.monthly_rent != null ? d.monthly_rent : '')}"/></div>
+      <div class="form-group"><label>Deposit *</label><input id="mi-dep" type="number" inputmode="numeric" value="${esc(d.deposit_amount != null ? d.deposit_amount : '')}"/></div>
+      <div class="form-row"><div class="form-group"><label>Move-in date *</label><input id="mi-join" type="date" value="${esc(d.join_date || nowDate())}"/></div>
+      <div class="form-group"><label>Expected checkout</label><input id="mi-exp" type="date" value="${esc(d.expected_checkout || '')}"/></div></div>` },
     { t: 'ID proof', html: `
       <div class="voice-row"><button type="button" id="mi-scan" class="mic-btn" style="background:var(--amber)" onclick="moveInScanId()">${icon('camera')}</button>
         <span id="mi-scan-status" class="voice-status">Photograph her Aadhaar / ID to fill these in. The photo is never stored.</span></div>
-      <div class="form-row"><div class="form-group"><label>Type</label><select id="mi-idtype">${['', 'Aadhaar', 'PAN Card', 'Passport', 'Driving License', 'Voter ID'].map(t => `<option value="${t}" ${d.id_proof_type === t ? 'selected' : ''}>${t || '— select —'}</option>`).join('')}</select></div>
-      <div class="form-group"><label>Number</label><input id="mi-idnum" value="${d.id_proof_number || ''}"/></div></div>
+      <div class="form-row"><div class="form-group"><label>Type</label><select id="mi-idtype">${['', 'Aadhaar', 'PAN Card', 'Passport', 'Driving License', 'Voter ID'].map(t => `<option value="${esc(t)}" ${d.id_proof_type === t ? 'selected' : ''}>${t || '— select —'}</option>`).join('')}</select></div>
+      <div class="form-group"><label>Number</label><input id="mi-idnum" value="${esc(d.id_proof_number || '')}"/></div></div>
       <div class="form-group"><label>Address</label><textarea id="mi-address" rows="2">${esc(d.address || '')}</textarea></div>` },
     { t: 'First payment (optional)', html: `
       <p class="text-muted" style="font-size:13px;margin-bottom:10px">Record what she is paying today. Leave blank to skip.</p>
-      <div class="form-row"><div class="form-group"><label>Deposit received</label><input id="mi-pay-dep" type="number" inputmode="numeric" value="${d.pay_deposit || ''}"/></div>
-      <div class="form-group"><label>Rent received</label><input id="mi-pay-rent" type="number" inputmode="numeric" value="${d.pay_rent || ''}"/></div></div>
+      <div class="form-row"><div class="form-group"><label>Deposit received</label><input id="mi-pay-dep" type="number" inputmode="numeric" value="${esc(d.pay_deposit || '')}"/></div>
+      <div class="form-group"><label>Rent received</label><input id="mi-pay-rent" type="number" inputmode="numeric" value="${esc(d.pay_rent || '')}"/></div></div>
       <div class="form-group"><label>Mode</label><select id="mi-pay-mode">${['Cash', 'UPI', 'Bank Transfer'].map(m => `<option ${d.pay_mode === m ? 'selected' : ''}>${m}</option>`).join('')}</select></div>` },
     { t: 'Check and confirm', html: `
       <div class="copilot-preview"><div class="copilot-preview-h">Nothing is saved until you tap Confirm</div>
@@ -4392,6 +4397,20 @@ async function moveInSave() {
   if (al) al.classList.add('hidden');
   try {
     if (!moveIn.created) {
+      // S15.3-5 (R-6): a lost reply on THIS request would leave her created
+      // but unknown to us. Note who already has this phone before the first
+      // try; on a retry, a new active resident with the same phone and name
+      // is the one our earlier request created — adopt her, don't add twice.
+      const phoneKey = String(d.phone || '').replace(/\D/g, '');
+      const samePhone = async () => (await apiFetch(`/guests?active=all&search=${encodeURIComponent(phoneKey)}`))
+        .filter(x => String(x.phone || '').replace(/\D/g, '') === phoneKey);
+      if (!moveIn.preexisting) moveIn.preexisting = (await samePhone()).map(x => x.id);
+      else {
+        const mine = (await samePhone()).find(x => !moveIn.preexisting.includes(x.id) && x.is_active && String(x.name).trim() === String(d.name).trim());
+        if (mine) { moveIn.created = mine; moveIn.paidDone = {}; if (back) back.remove(); }
+      }
+    }
+    if (!moveIn.created) {
       moveIn.created = await API.createGuest({
         name: d.name, phone: d.phone, emergency_contact: d.emergency_contact || null, emergency_contact_name: d.emergency_contact_name || null,
         room_id: d.room_id, bed_number: d.bed_number || null, join_date: d.join_date, expected_checkout: d.expected_checkout || null,
@@ -4441,7 +4460,9 @@ async function moveInSave() {
   }
   if (failed.length) {
     unlock('↻ Retry saving the payment');
-    const msg = `${g.name} is added. NOT recorded yet: ${failed.map(f => `${f.p.collection_type} ${fmt(f.p.amount)} (${f.msg})`).join('; ')}. Tap Retry — she will not be added twice — or record it later in Collect.`;
+    // S15.3-4 (R-4): never send her to Collect while a retry is pending — if
+    // the payment did reach the server, a hand entry would count it twice.
+    const msg = `${g.name} is added. NOT confirmed yet: ${failed.map(f => `${f.p.collection_type} ${fmt(f.p.amount)} (${f.msg})`).join('; ')}. Tap Retry when the connection is back — nothing will be recorded twice. Do not record it again in Collect.`;
     if (al) showAlert(al, msg); else toast(msg);
     return;
   }
@@ -4479,18 +4500,18 @@ function renderCheckout() {
   const refund = deposit - ded;
   const steps = [
     { t: 'Leaving date and dues', html: `
-      <div class="form-group"><label>Checkout date</label><input id="co-date" type="date" max="${nowDate()}" value="${data.leave_date}"/></div>
+      <div class="form-group"><label>Checkout date</label><input id="co-date" type="date" max="${nowDate()}" value="${esc(data.leave_date)}"/></div>
       <div class="copilot-preview">${[['Outstanding rent', due ? fmt(due) : 'None'], ['Deposit agreed', fmt(deposit)]].map(([k, v]) => `<div class="copilot-kv"><span>${k}</span><strong>${v}</strong></div>`).join('')}${depNote}</div>${depWarn}
       ${due > 0 ? `<div class="alert alert-warning" style="display:block;margin-top:10px">She still owes ${fmt(due)}. Collect it first, or deduct it from the deposit on the next step.</div>` : ''}` },
     { t: 'Room inspection and deductions', html: `
-      <div class="form-group"><label>Deductions from deposit</label><input id="co-ded" type="number" inputmode="numeric" value="${data.deductions}" placeholder="0"/></div>
+      <div class="form-group"><label>Deductions from deposit</label><input id="co-ded" type="number" inputmode="numeric" value="${esc(data.deductions)}" placeholder="0"/></div>
       <div class="form-group"><label>What for?</label><textarea id="co-notes" rows="2" placeholder="Damage, unpaid rent, cleaning…">${esc(data.deduction_notes)}</textarea></div>
       ${due > 0 ? `<button class="btn btn-outline btn-sm" onclick="document.getElementById('co-ded').value=${Math.min(due, deposit)};document.getElementById('co-notes').value='Unpaid rent at checkout'">Deduct the ${fmt(Math.min(due, deposit))} she owes</button>` : ''}` },
     { t: 'Refund', html: `
       <div class="copilot-preview">${[['Deposit agreed', fmt(deposit)], ['Deductions', ded ? '− ' + fmt(ded) : '—'], ['Refund due', fmt(refund)]].map(([k, v]) => `<div class="copilot-kv"><span>${k}</span><strong>${v}</strong></div>`).join('')}${depNote}</div>
       ${depWarn}
       ${refund < 0 ? `<div class="alert alert-danger" style="display:block;margin-top:10px">Deductions exceed the deposit — she owes ${fmt(-refund)}. Reduce the deduction or collect the difference separately.</div>` : ''}
-      <div class="form-group" style="margin-top:10px"><label>Refund paid by</label><select id="co-mode">${['cash', 'upi', 'bank'].map(m => `<option value="${m}" ${data.refund_mode === m ? 'selected' : ''}>${m.toUpperCase()}</option>`).join('')}</select></div>
+      <div class="form-group" style="margin-top:10px"><label>Refund paid by</label><select id="co-mode">${['cash', 'upi', 'bank'].map(m => `<option value="${esc(m)}" ${data.refund_mode === m ? 'selected' : ''}>${m.toUpperCase()}</option>`).join('')}</select></div>
       <div id="co-alert" class="alert alert-danger hidden"></div>` }
   ];
   const st = steps[checkoutW.step - 1];
@@ -4644,8 +4665,8 @@ function renderRequestSheet(d, staff) {
       <p style="font-size:15px;margin-bottom:6px">${esc(r.description)}</p>
       ${r.likely_issue ? `<p class="text-muted" style="font-size:13px">Likely: ${esc(r.likely_issue)}</p>` : ''}
       <div class="form-row" style="margin-top:12px">
-        <div class="form-group"><label>Status</label><select id="rq-status">${['open', 'assigned', 'in_progress', 'resolved', 'closed'].map(x => `<option value="${x}" ${r.status === x ? 'selected' : ''}>${x.replace('_', ' ')}</option>`).join('')}</select></div>
-        <div class="form-group"><label>Priority</label><select id="rq-priority">${['low', 'medium', 'high'].map(x => `<option value="${x}" ${r.priority === x ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
+        <div class="form-group"><label>Status</label><select id="rq-status">${['open', 'assigned', 'in_progress', 'resolved', 'closed'].map(x => `<option value="${esc(x)}" ${r.status === x ? 'selected' : ''}>${x.replace('_', ' ')}</option>`).join('')}</select></div>
+        <div class="form-group"><label>Priority</label><select id="rq-priority">${['low', 'medium', 'high'].map(x => `<option value="${esc(x)}" ${r.priority === x ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
       </div>
       ${staff.length ? `<div class="form-group"><label>Assigned to</label><select id="rq-assign"><option value="">— nobody —</option>${staff.map(u => `<option value="${u.id}" ${String(r.assigned_to) === String(u.id) ? 'selected' : ''}>${esc(u.username)}</option>`).join('')}</select></div>` : ''}
       <div class="form-group"><label>Resolution note</label><textarea id="rq-note" rows="2" placeholder="What was done">${esc(r.resolution_notes || '')}</textarea></div>
@@ -4812,7 +4833,7 @@ function renderClosing(t) {
       ${t.closed
         ? `<span class="c-cnt">Counted ${fmt(t.closing.counted[mode])}</span>
            <span class="c-diff ${t.closing.difference[mode] === 0 ? '' : t.closing.difference[mode] < 0 ? 'text-red' : 'text-amber'}">${t.closing.difference[mode] === 0 ? '✓' : (t.closing.difference[mode] > 0 ? '+' : '') + fmt(t.closing.difference[mode])}</span>`
-        : `<input type="number" inputmode="numeric" id="close-${mode}" value="${t.expected[mode] || ''}" placeholder="0"/>`}
+        : `<input type="number" inputmode="numeric" id="close-${mode}" value="${esc(t.expected[mode] || '')}" placeholder="0"/>`}
     </div>`;
   if (t.closed) {
     const diffs = ['cash', 'upi', 'bank'].filter(m => t.closing.difference[m] !== 0);
@@ -4821,14 +4842,14 @@ function renderClosing(t) {
       ${row('cash', 'Cash')}${row('upi', 'UPI')}${row('bank', 'Bank')}
       ${diffs.length ? `<p style="font-size:13px;margin-top:8px" class="text-amber">${diffs.map(m => `${m.toUpperCase()} ${t.closing.difference[m] > 0 ? 'over' : 'short'} by ${fmt(Math.abs(t.closing.difference[m]))}`).join(' · ')} — recorded as a variance, nothing was changed.</p>` : '<p style="font-size:13px;margin-top:8px" class="text-green">Everything matched.</p>'}
       ${t.closing.note ? `<p class="t-sub">"${esc(t.closing.note)}"</p>` : ''}
-      ${isAdmin() ? `<button class="btn btn-outline btn-sm" style="margin-top:10px" onclick="reopenDay(${esc(JSON.stringify(t.date))})">Reopen the day</button>` : ''}`;
+      ${isAdmin() ? `<button class="btn btn-outline btn-sm" style="margin-top:10px" onclick="reopenDay(${jsAttr((t.date))})">Reopen the day</button>` : ''}`;
   }
   return `
     <p class="t-sub" style="margin-bottom:10px">Count what you actually hold and enter it. Nothing recorded today is changed — a difference is kept as a variance.</p>
     ${row('cash', 'Cash')}${row('upi', 'UPI')}${row('bank', 'Bank')}
     ${t.pending_not_counted.n ? `<p style="font-size:13px" class="text-amber">${t.pending_not_counted.n} payment${t.pending_not_counted.n === 1 ? '' : 's'} (${fmt(t.pending_not_counted.total)}) still waiting for confirmation — not included above.</p>` : ''}
     <div class="form-group" style="margin-top:8px"><label>Note (optional)</label><input id="close-note" placeholder="e.g. 200 short, checking with the cook"/></div>
-    <button class="btn btn-primary" style="width:100%" onclick="closeDay(${esc(JSON.stringify(t.date))})">Close the day</button>
+    <button class="btn btn-primary" style="width:100%" onclick="closeDay(${jsAttr((t.date))})">Close the day</button>
     <div id="close-alert" class="alert alert-danger hidden" style="margin-top:10px"></div>`;
 }
 async function closeDay(date) {
@@ -4979,7 +5000,7 @@ async function openNotifications() {
                 ${n.detail ? `<div class="t-sub">${esc(n.detail)}</div>` : ''}
                 <div class="t-sub">${fmtDate(n.created_at)}</div></span>
               <span class="flex gap-2">
-                ${n.action_page ? `<button class="btn btn-outline btn-sm" onclick="closeModal();navigate(${esc(JSON.stringify(n.action_page))})">Open</button>` : ''}
+                ${n.action_page ? `<button class="btn btn-outline btn-sm" onclick="closeModal();navigate(${jsAttr((n.action_page))})">Open</button>` : ''}
                 ${!n.read_at ? `<button class="btn btn-outline btn-sm" onclick="readNotification(${n.id})">✓</button>` : ''}
               </span>
             </div>
@@ -5078,10 +5099,10 @@ async function loadResidentDocs(guestId) {
     host.innerHTML = docs.map(d => `
       <div class="r360-row"><span>${esc(d.doc_type)}${d.expires_on ? `<div class="t-sub">expires ${fmtDate(d.expires_on)}</div>` : ''}</span>
         <span class="flex gap-2"><span class="badge ${cls[d.status]}">${d.status}</span>
-          <select onchange="setDocStatus(${guestId}, ${esc(JSON.stringify(d.doc_type))}, this.value)" style="margin:0;min-height:36px;width:auto">
-            ${['pending', 'verified', 'expired'].map(x => `<option value="${x}" ${d.status === x ? 'selected' : ''}>${x}</option>`).join('')}
+          <select onchange="setDocStatus(${guestId}, ${jsAttr((d.doc_type))}, this.value)" style="margin:0;min-height:36px;width:auto">
+            ${['pending', 'verified', 'expired'].map(x => `<option value="${esc(x)}" ${d.status === x ? 'selected' : ''}>${x}</option>`).join('')}
           </select></span></div>`).join('');
-  } catch (e) { host.innerHTML = `<p class="text-muted">${e.message}</p>`; }
+  } catch (e) { host.innerHTML = `<p class="text-muted">${esc(e.message)}</p>`; }
 }
 async function setDocStatus(guestId, docType, status) {
   try { await apiFetch(`/guests/${guestId}/documents`, { method: 'PUT', body: { doc_type: docType, status } }); loadResidentDocs(guestId); toast('Saved', 'ok'); }
@@ -5112,7 +5133,7 @@ async function renderAdminAiTab() {
             <strong>${Object.entries(srcs).map(([k, v]) => `${k} ${v}`).join(' · ')}</strong></div>`).join('') || '<p class="text-muted">No entries yet.</p>'}
           <p class="t-sub" style="margin-top:10px">${esc(m.note)}</p>
         </div></div>`;
-  } catch (e) { const h = host(); if (h) h.innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
+  } catch (e) { const h = host(); if (h) h.innerHTML = `<div class="alert alert-danger">${esc(e.message)}</div>`; }
 }
 
 
@@ -5131,7 +5152,7 @@ async function complaintScanFault() {
         <div style="font-size:14px;margin:6px 0"><strong>${esc(f.category)}</strong> · ${f.priority} priority<br>${esc(f.description || '')}
           ${f.likely_issue ? `<div class="t-sub">Likely: ${esc(f.likely_issue)}</div>` : ''}</div>
         <div class="flex gap-2">
-          <button class="btn btn-primary btn-sm" onclick='complaintUseFault(${JSON.stringify(f).replace(/'/g, "&#39;")})'>✓ Use this</button>
+          <button class="btn btn-primary btn-sm" onclick="complaintUseFault(${jsAttr(f)})">✓ Use this</button>
           <button class="btn btn-outline btn-sm" onclick="document.getElementById('cp-preview').classList.add('hidden')">✗ Ignore</button>
         </div>
       </div>`;
@@ -5180,14 +5201,14 @@ async function bulkSetup(scope, actions) {
 }
 function bulkCb(id, label) {
   const checked = bulkSel.ids.has(Number(id)) ? 'checked' : '';
-  return `<input type="checkbox" class="bulk-cb" data-id="${id}" ${checked} aria-label="Select ${esc(label)}" onchange="bulkToggle(${id}, this.checked, this.getAttribute('aria-label').slice(7))"/>`;
+  return `<input type="checkbox" class="bulk-cb" data-id="${esc(id)}" ${checked} aria-label="Select ${esc(label)}" onchange="bulkToggle(${id}, this.checked, this.getAttribute('aria-label').slice(7))"/>`;
 }
 function bulkToggle(id, on, label) {
   id = Number(id);
   if (on) {
     if (bulkLimits && bulkSel.ids.size >= bulkLimits.cap) {
       toast(`At most ${bulkLimits.cap} at a time — confirm this batch first, then pick the next.`);
-      const cb = document.querySelector(`.bulk-cb[data-id="${id}"]`); if (cb) cb.checked = false;
+      const cb = document.querySelector(`.bulk-cb[data-id="${esc(id)}"]`); if (cb) cb.checked = false;
       return;
     }
     bulkSel.ids.add(id); if (label) bulkSel.labels.set(id, label);
@@ -5275,7 +5296,7 @@ async function bulkPreview(action, ids, args) {
     <div class="modal-body"><div class="sm-skel"><div class="sm-skel-line" style="width:60%"></div><div class="sm-skel-line" style="width:40%"></div></div></div></div>`);
   let p;
   try { p = await apiFetch('/bulk/preview', { method: 'POST', body: { action, ids, args } }); }
-  catch (e) { return openModal(`<div class="modal"><div class="modal-header"><h3>Preview</h3><button class="modal-close" aria-label="Close" onclick="closeModal()">×</button></div><div class="modal-body"><div class="alert alert-danger" style="display:block">${e.message}</div></div></div>`); }
+  catch (e) { return openModal(`<div class="modal"><div class="modal-header"><h3>Preview</h3><button class="modal-close" aria-label="Close" onclick="closeModal()">×</button></div><div class="modal-body"><div class="alert alert-danger" style="display:block">${esc(e.message)}</div></div></div>`); }
   renderBulkPreview(p);
 }
 function bulkPreviewHtml(p) {
@@ -5347,14 +5368,14 @@ function renderPaletteCommands(q) {
   const cmds = commandsFor(q);
   if (!cmds.length) return '';
   const parts = ['<div class="search-group">Commands</div>'];
-  cmds.forEach(c => { const i = searchRows.length; searchRows.push({ go: () => paletteRunCommand(c.id) }); parts.push(`<button class="search-item search-cmd" data-cmd="${c.id}" data-i="${i}" onclick="searchRows[${i}].go()">${icon(c.icon)}<span>${esc(c.label)}</span></button>`); });
+  cmds.forEach(c => { const i = searchRows.length; searchRows.push({ go: () => paletteRunCommand(c.id) }); parts.push(`<button class="search-item search-cmd" data-cmd="${c.id}" data-i="${esc(i)}" onclick="searchRows[${i}].go()">${icon(c.icon)}<span>${esc(c.label)}</span></button>`); });
   return parts.join('');
 }
 function renderPaletteAsk(q) {
   if (!q || q.length < 2) return '';
   const i = searchRows.length;
   searchRows.push({ go: () => { const t = q; closeSearch(); const bar = document.getElementById('copilot-q'); if (bar) bar.value = t; copilotAsk(t); } });
-  return `<div class="search-group">Ask Siri</div><button class="search-item search-ask" data-i="${i}" onclick="searchRows[${i}].go()">${icon('sparkle')}<span>Ask Siri: “${q.replace(/</g, '&lt;')}”</span></button>`;
+  return `<div class="search-group">Ask Siri</div><button class="search-item search-ask" data-i="${esc(i)}" onclick="searchRows[${i}].go()">${icon('sparkle')}<span>Ask Siri: “${q.replace(/</g, '&lt;')}”</span></button>`;
 }
 
 // ── 3. Room 360 ──────────────────────────────────────────────────
@@ -5366,12 +5387,12 @@ async function roomProfile(id, tab) {
   openModal(`<div class="modal modal-lg"><div class="modal-header"><h3>Room</h3><button class="modal-close" aria-label="Close" onclick="closeModal()">×</button></div>
     <div class="modal-body"><div class="sm-skel"><div class="sm-skel-line" style="width:50%"></div><div class="sm-skel-card"></div></div></div></div>`);
   try { room360.data = await apiFetch(`/rooms/${id}/360`); smSetContext({ room_number: room360.data.room.room_number }); renderRoom360(); }
-  catch (e) { openModal(`<div class="modal"><div class="modal-header"><h3>Room</h3><button class="modal-close" aria-label="Close" onclick="closeModal()">×</button></div><div class="modal-body"><div class="alert alert-danger" style="display:block">${e.message}</div></div></div>`); }
+  catch (e) { openModal(`<div class="modal"><div class="modal-header"><h3>Room</h3><button class="modal-close" aria-label="Close" onclick="closeModal()">×</button></div><div class="modal-body"><div class="alert alert-danger" style="display:block">${esc(e.message)}</div></div></div>`); }
 }
 function renderRoom360() {
   const d = room360.data, r = d.room, h = d.health;
   const tile = roomMapCache ? roomMapCache.floors.flatMap(f => f.rooms).find(x => String(x.id) === String(r.id)) : null;
-  const kv = rows => rows.map(([k, v]) => `<div class="r360-kv"><span>${k}</span><strong>${v || '—'}</strong></div>`).join('');
+  const kv = rows => rows.map(([k, v]) => `<div class="r360-kv"><span>${esc(k)}</span><strong>${esc(v || '—')}</strong></div>`).join('');
   const cls = s => s >= 80 ? 'good' : s >= 60 ? 'ok' : 'low';
   const body = {
     overview: () => `
@@ -5432,7 +5453,7 @@ function inspectionForm(roomId) {
   openModal(`<div class="modal"><div class="modal-header"><h3>Record inspection</h3><button class="modal-close" aria-label="Close" onclick="closeModal()">×</button></div>
     <div class="modal-body">
       <div class="form-group"><label for="insp-cond">Condition</label><select id="insp-cond"><option value="good">Good</option><option value="ok" selected>OK</option><option value="poor">Poor — needs work</option></select></div>
-      <div class="form-group"><label for="insp-date">Date</label><input type="date" id="insp-date" value="${nowDate()}"/></div>
+      <div class="form-group"><label for="insp-date">Date</label><input type="date" id="insp-date" value="${esc(nowDate())}"/></div>
       <div class="form-group"><label for="insp-note">Note</label><textarea id="insp-note" rows="3" placeholder="What you saw — fan, geyser, walls, bathroom…"></textarea></div>
       <button class="btn btn-primary" style="width:100%" onclick="saveInspection(${roomId})">Save</button>
       <div id="insp-alert" class="alert alert-danger hidden" style="margin-top:10px"></div>
@@ -5449,7 +5470,7 @@ async function saveInspection(roomId) {
 // API (`why`, `basis`, `priority_why`); nothing here composes an explanation.
 function whyBtn(text, label) {
   if (!text) return '';
-  return `<button type="button" class="why-btn" aria-label="${(label || 'Why?').replace(/"/g, '&quot;')}" title="Why?" data-why="${String(text).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}" onclick="showWhy(this)">?</button>`;
+  return `<button type="button" class="why-btn" aria-label="${esc(label || 'Why?')}" title="Why?" data-why="${esc(text)}" onclick="showWhy(this)">?</button>`;
 }
 function showWhy(btn) {
   const text = btn.dataset.why || '';
