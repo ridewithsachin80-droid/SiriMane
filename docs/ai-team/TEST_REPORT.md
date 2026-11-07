@@ -112,3 +112,8 @@ N-4 (Low) `payment_mode`/`collection_month` unescaped in the portal → escaped 
 Not fixed, recorded: N-3 (Low) if Railway's environment id were missing, Test and production could share an id — owner check: boot log must say `source: railway`. F-15, F-16, F-20 open (F-20 needs an approved data update).
 
 G15h — fix commit: **11/11 PASS, 2,296 assertions** (api 262 = +5 malformed-iat cases).
+
+### Re-check of 01c8083 (same independent agent) — APPROVE FOR TEST DEPLOYMENT
+Re-ran 11/11 itself (2,296); N-2/N-4/N-5 confirmed fixed, N-2 mutation check reproduced.
+**N-6 (Medium, PRODUCTION BLOCKER until resolved):** while Test shares production's `JWT_SECRET`, a Test token minted by pre-S15 code is accepted by production after any production restart (boot-time cut-off). Resolution chosen: owner gives Test its own `JWT_SECRET` before Sprint 15 goes to production — this removes cross-environment token acceptance entirely. Fallback if not done: keep Test on S15 for >24 h before production.
+N-6d (test weakness) fixed: the post-boot legacy token is now dated after boot but in the past; mutation-checked — a per-request cut-off fails the gate.

@@ -146,7 +146,11 @@ async function main() {
       const cut = require('../middleware/auth').LEGACY_CUTOFF;
       const legacy = jwt.sign({ guestId: payload.guestId, type: 'guest', iat: cut - 3600, exp: Math.floor(Date.now() / 1000) + 3600 }, process.env.JWT_SECRET);
       r = await api('GET', '/guest-portal', null, legacy); eq(r.status, 200, 'S15-7 a token issued before the cut-off (no env) still works until it expires');
-      const lateLegacy = jwt.sign({ guestId: payload.guestId, type: 'guest', iat: cut + 60, exp: cut + 7200 > Date.now() / 1000 ? cut + 7200 : Math.floor(Date.now() / 1000) + 3600 }, process.env.JWT_SECRET);
+      // iat must be AFTER boot but already in the PAST, so a cut-off computed
+      // per request (now) would wrongly accept it — only a boot-time cut-off refuses. (Review N-6d)
+      while (Date.now() / 1000 < cut + 3) await new Promise(res => setTimeout(res, 200));
+      const lateLegacy = jwt.sign({ guestId: payload.guestId, type: 'guest', iat: cut + 1, exp: Math.floor(Date.now() / 1000) + 3600 }, process.env.JWT_SECRET);
+      ok(lateLegacy && (cut + 1) < Date.now() / 1000, 'S15-7 the late legacy token is dated after boot and before now');
       r = await api('GET', '/guest-portal', null, lateLegacy); eq(r.status, 401, 'S15-7 SECURITY (review F-03): a token with no env issued AFTER the cut-off is refused');
       for (const badIat of [null, '', true, [], '1']) {
         // jsonwebtoken refuses to SIGN a non-numeric iat, so build the token by hand
