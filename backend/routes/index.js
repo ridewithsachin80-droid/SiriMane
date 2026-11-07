@@ -1,7 +1,6 @@
 // routes/index.js — All API routes
 const router = require('express').Router();
 const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
 const PDFDocument = require('pdfkit');
 const pool = require('../db');
 const auth = require('../middleware/auth');

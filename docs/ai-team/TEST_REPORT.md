@@ -103,3 +103,12 @@ Limitations: performed by the owner in a desktop browser; the AI session cannot 
 | **G15g** | **7089aed** | **11/11 PASS, 2,291 assertions** | api 257 · ai 213 · assistant 82 · owner 94 · copilot 250 · finance 71 · notify 64 · bulk 116 · quick 195 · ui 732 · portal 217 |
 
 New defect: **D-15-4** (Low) — ui focus-return assertion failed 1 time in 9 runs. Cause not established. Room 360 / modal focus code was not changed in Sprint 15; `setContent` was (sub-tab re-injection). OPEN — diagnostics added.
+
+### Independent re-review (separate agent) of 7089aed — APPROVE FOR TEST DEPLOYMENT
+Re-ran 11/11 gates itself (2,291). S15-6 money PASS; S15-7 security sound. New findings, fixed in the next commit:
+N-1 (Med) fixed calendar cut-off would log everyone out on a later production deploy → cut-off is now server boot time ·
+N-2 (Low) non-numeric `iat` passed the cut-off → now must be a finite number; test verified by mutation (old check fails it) ·
+N-4 (Low) `payment_mode`/`collection_month` unescaped in the portal → escaped · N-5 (Info) unused `jwt` import in routes → removed.
+Not fixed, recorded: N-3 (Low) if Railway's environment id were missing, Test and production could share an id — owner check: boot log must say `source: railway`. F-15, F-16, F-20 open (F-20 needs an approved data update).
+
+G15h — fix commit: **11/11 PASS, 2,296 assertions** (api 262 = +5 malformed-iat cases).

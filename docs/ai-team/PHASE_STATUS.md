@@ -46,7 +46,7 @@ Source: UX/UI specialist review (separate agent, advisory) → owner approved "S
 | S15-4 | Move-in with no ID type saves `null`, never "— select —" | QA, DATA (no backfill — existing rows need a separately approved UPDATE) |
 | S15-5 | Finance/Operations sub-tabs stay after any in-page action; "Generate owner report" opens Reports; "Owner & Assets" → "Balance sheet"; Requests has one name; no button appears twice on one screen; one Ctrl+K binding; dead code removed | QA |
 | S15-6 | Payments header = confirmed only, plus a separate "waiting for confirmation" line. Before/after: ₹6,000 confirmed + ₹100 pending → was "₹6,100 total", now "₹6,000 received · ₹100 waiting" | **SEC/DATA REQUIRED** (money display) |
-| S15-7 | A token issued in one environment is rejected in another; tokens without the claim accepted until expiry (no mass logout) | **SEC REQUIRED** (auth) — independent agent review before push |
+| S15-7 | A token issued in one environment is rejected in another; tokens without the claim accepted only if issued before the server started (the old release's tokens, ≤24 h) — no mass logout on any later deploy (review N-1) | **SEC REQUIRED** (auth) — independent agent review before push |
 | S15-8 | All 11 gates green on a fresh DB, TZ=UTC; new assertions for S15-1…7; changed screens at 360/390 | QA |
 
 Execution mode for this phase: **LIMITED MULTI-AGENT** — main agent implements; a separate agent reviews the diff (G3). The UX review was a separate agent.

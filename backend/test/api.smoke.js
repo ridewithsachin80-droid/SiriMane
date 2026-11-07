@@ -148,6 +148,13 @@ async function main() {
       r = await api('GET', '/guest-portal', null, legacy); eq(r.status, 200, 'S15-7 a token issued before the cut-off (no env) still works until it expires');
       const lateLegacy = jwt.sign({ guestId: payload.guestId, type: 'guest', iat: cut + 60, exp: cut + 7200 > Date.now() / 1000 ? cut + 7200 : Math.floor(Date.now() / 1000) + 3600 }, process.env.JWT_SECRET);
       r = await api('GET', '/guest-portal', null, lateLegacy); eq(r.status, 401, 'S15-7 SECURITY (review F-03): a token with no env issued AFTER the cut-off is refused');
+      for (const badIat of [null, '', true, [], '1']) {
+        // jsonwebtoken refuses to SIGN a non-numeric iat, so build the token by hand
+        const b64 = o => Buffer.from(JSON.stringify(o)).toString('base64url');
+        const body = b64({ alg: 'HS256', typ: 'JWT' }) + '.' + b64({ guestId: payload.guestId, type: 'guest', iat: badIat, exp: Math.floor(Date.now() / 1000) + 3600 });
+        const odd = body + '.' + require('crypto').createHmac('sha256', process.env.JWT_SECRET).update(body).digest('base64url');
+        r = await api('GET', '/guest-portal', null, odd); eq(r.status, 401, `S15-7 SECURITY (review N-2): an env-less token with iat=${JSON.stringify(badIat)} is refused`);
+      }
       ok(require('../middleware/auth').ENV_ID.includes('#'), 'S15-7 (review F-04) the environment id includes the database identity');
       const adminPayload = JSON.parse(Buffer.from(adminTok.split('.')[1], 'base64url').toString());
       const foreignAdmin = jwt.sign({ userId: adminPayload.userId, env: 'some-other-environment' }, process.env.JWT_SECRET, { expiresIn: '1h' });

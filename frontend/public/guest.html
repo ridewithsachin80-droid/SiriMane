@@ -804,7 +804,7 @@ function renderPayTab(g) {
          <div class="receipt-line">
            <span>
              <strong style="font-size:13px">${fmt(lastConfirmed.amount)}</strong> <span style="font-size:12px;text-transform:capitalize">${escH(lastConfirmed.collection_type || 'payment')}</span>
-             <span style="font-size:11px;color:var(--p-text-light)"> · ${fmtDate(lastConfirmed.collection_date)}${lastConfirmed.collection_month ? ' · ' + lastConfirmed.collection_month : ''}</span>
+             <span style="font-size:11px;color:var(--p-text-light)"> · ${fmtDate(lastConfirmed.collection_date)}${lastConfirmed.collection_month ? ' · ' + escH(lastConfirmed.collection_month) : ''}</span>
            </span>
            <button class="btn btn-outline btn-sm" style="width:auto;margin:0" onclick="downloadGuestReceipt(${lastConfirmed.id})">🧾 Receipt</button>
          </div>
@@ -874,8 +874,8 @@ function renderDetails(g) {
       <div class="pay-item">
         <div>
           <div style="font-weight:600;text-transform:capitalize">${escH(p.collection_type)}</div>
-          <div style="color:var(--p-text-muted);font-size:11px">${fmtDate(p.collection_date)} · ${p.payment_mode}</div>
-          ${p.collection_month ? `<div style="color:var(--p-text-light);font-size:11px">${p.collection_month}</div>` : ''}
+          <div style="color:var(--p-text-muted);font-size:11px">${fmtDate(p.collection_date)} · ${escH(p.payment_mode)}</div>
+          ${p.collection_month ? `<div style="color:var(--p-text-light);font-size:11px">${escH(p.collection_month)}</div>` : ''}
         </div>
         <div style="text-align:right">
           <div class="text-green">${fmt(p.amount)}</div>
