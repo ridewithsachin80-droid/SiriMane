@@ -4418,6 +4418,8 @@ async function moveInSave() {
         id_proof_type: d.id_proof_type || null, id_proof_number: d.id_proof_number || null, notes: null,
         deposit_recorded_by_client: true   // Sprint 15.1: the deposit below is the only deposit record
       });
+      // S15.5-3: apiFetch answers a 401 with a redirect and NO value — not a save
+      if (!moveIn.created) { const e = new Error('Signed out — please log in again.'); e.status = 401; throw e; }
       moveIn.paidDone = {};
       if (back) back.remove();   // she exists now — going back to edit her would not change the saved record
     }
@@ -4459,8 +4461,9 @@ async function moveInSave() {
     const already = existing.find(c => c.collection_type === p.collection_type && Number(c.amount) === p.amount);
     if (already) { moveIn.paidDone[p.collection_type] = p.amount; continue; }   // it did save; the reply was lost
     try {
-      await API.createCollection({ guest_id: g.id, guest_name: g.name, amount: p.amount, collection_date: d.join_date,
+      const saved = await API.createCollection({ guest_id: g.id, guest_name: g.name, amount: p.amount, collection_date: d.join_date,
         collection_type: p.collection_type, payment_mode: d.pay_mode || 'Cash', collection_month: new Date(d.join_date).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }), description: 'At move-in' });
+      if (!saved) throw new Error('Signed out — please log in again.');   // S15.5-3: no value = not confirmed
       moveIn.paidDone[p.collection_type] = p.amount;
     } catch (e) { failed.push({ p, msg: e.message }); }
   }

@@ -205,6 +205,23 @@ async function main() {
       eq(s154Zero.data.phone, s154Num.replace(/^9/, '8'), 'S15.4-1 a leading 0 is dropped');
       await A('DELETE', `/guests/${s154Zero.data.id}`);
       await A('DELETE', `/guests/${s154.data.id}`);
+      // S15.5-1/2 (P-1): resident login with her number in any common form
+      {
+        const n10 = '7' + String(Date.now()).slice(-9);
+        const g155 = await A('POST', '/guests', { name: 'S155 Login', phone: n10, join_date: today, monthly_rent: 5000, deposit_amount: 0 });
+        const L = (m, p) => api('POST', '/guest-login', { mobile: m, password: p });
+        eq((await L('+91 ' + n10.slice(0, 5) + ' ' + n10.slice(5), '+91' + n10)).status, 200, 'S15.5-1 "+91 xxxxx xxxxx" logs in; default password typed with +91 (first login)');
+        eq((await L(n10, n10)).status, 200, 'S15.5-2 after that first login, the plain 10 digits still work (hash is of the digits)');
+        eq((await L('0' + n10, '+91 ' + n10)).status, 200, 'S15.5-2 "0…" mobile + "+91 …" password both accepted');
+        eq((await L(n10, '1234567')).status, 401, 'S15.5 SECURITY: a wrong password is still refused');
+        eq((await L('12345', '12345')).status, 401, 'S15.5 SECURITY: a short number matches nobody');
+        // A resident saved WITH spaces before 15.4 (written directly, as old data is)
+        const old10 = '6' + String(Date.now()).slice(-9);
+        const gOld = await A('POST', '/guests', { name: 'S155 Old Spaced', phone: old10, join_date: today, monthly_rent: 5000, deposit_amount: 0 });
+        await pool.query('UPDATE guests SET phone=$1 WHERE id=$2', [old10.slice(0, 5) + ' ' + old10.slice(5), gOld.data.id]);
+        eq((await L(old10, old10)).status, 200, 'S15.5-1 a phone stored with spaces before 15.4 logs in with the plain digits — no backfill needed');
+        await A('DELETE', `/guests/${g155.data.id}`); await A('DELETE', `/guests/${gOld.data.id}`);
+      }
       for (const n of ['S151 Old Form', 'S151 Wizard', 'S151 Truthy']) { const g = (await A('GET', '/guests')).data.find(x => x.name === n); if (g) await A('DELETE', `/guests/${g.id}`); }
     }
     console.log('✓ resident complaints');
@@ -424,8 +441,9 @@ async function main() {
 
     // ── Login rate limit (last: it burns attempts for this IP) ────────────
     let last;
-    // Two failed attempts already happened (malformed JSON + bad password), so 8 more = 10 failures.
-    for (let i = 0; i < 8; i++) last = await api('POST', '/auth/login', { username: 'admin', password: 'nope' + i });
+    // Four failed attempts already happened (malformed JSON + bad password, and the two
+    // deliberate S15.5 refusals — admin and resident logins share one limiter), so 6 more = 10.
+    for (let i = 0; i < 6; i++) last = await api('POST', '/auth/login', { username: 'admin', password: 'nope' + i });
     eq(last.status, 401, '10th bad attempt still 401');
     last = await api('POST', '/auth/login', { username: 'admin', password: 'nope' }); eq(last.status, 429, '11th attempt → 429'); ok(last.ct.includes('json') && /wait/i.test(last.data.error), '429 is JSON with message');
     console.log('✓ login rate limit');

@@ -1332,12 +1332,17 @@ module.exports = router;
 router.post('/guest-login', async (req, res) => {
   const { mobile, password } = req.body;
   if (!mobile || !password) return res.status(400).json({ error: 'Mobile and password required' });
+  // Sprint 15.5 (P-1): "+91 98…", "98765 43210", "098…" are all her number.
+  // Match on the last 10 digits on BOTH sides, so residents whose phone was
+  // saved with spaces before Sprint 15.4 can log in without a data backfill.
+  const mobileKey = String(normPhone(mobile) || '').slice(-10);
+  if (mobileKey.length !== 10) return res.status(401).json({ error: 'No active account found with this mobile number' });
   try {
     const r = await pool.query(
       `SELECT g.*, ro.room_number FROM guests g 
        LEFT JOIN rooms ro ON g.room_id = ro.id 
-       WHERE g.phone = $1 AND g.is_active = true LIMIT 1`,
-      [mobile]
+       WHERE right(regexp_replace(COALESCE(g.phone,''), '[^0-9]', '', 'g'), 10) = $1 AND g.is_active = true LIMIT 1`,
+      [mobileKey]
     );
     const guest = r.rows[0];
     if (!guest) return res.status(401).json({ error: 'No active account found with this mobile number' });
@@ -1346,12 +1351,16 @@ router.post('/guest-login', async (req, res) => {
     let valid = false;
     if (guest.password_hash) {
       valid = await bcrypt.compare(password, guest.password_hash);
+      // A first login after 15.5 stores the hash of the plain digits; let her
+      // type the default the way her phone autofills it ("+91 …").
+      if (!valid && /^[\d\s+()-]{10,}$/.test(String(password))) valid = await bcrypt.compare(String(normPhone(password)).slice(-10), guest.password_hash);
     } else {
       // Default password is mobile number itself
-      valid = (password === mobile);
+      // S15.5-2: the default accepts her number in any of the forms above
+      valid = (password === mobile) || String(normPhone(password) || '').slice(-10) === mobileKey;
       if (valid) {
-        // Auto-set the hash for future logins
-        const hash = await bcrypt.hash(mobile, 10);
+        // Auto-set the hash for future logins — of the plain 10 digits
+        const hash = await bcrypt.hash(mobileKey, 10);
         await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [hash, guest.id]);
       }
     }
