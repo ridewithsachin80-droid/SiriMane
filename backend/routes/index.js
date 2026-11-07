@@ -1338,34 +1338,50 @@ router.post('/guest-login', async (req, res) => {
   const mobileKey = String(normPhone(mobile) || '').slice(-10);
   if (mobileKey.length !== 10) return res.status(401).json({ error: 'No active account found with this mobile number' });
   try {
+    // S15.5 review A-1: more than one active resident can carry the same
+    // number (sisters; one saved "+91 …", one plain). Check the password
+    // against EVERY match and log in only when exactly one accepts it — the
+    // old exact-text match let each sister in with her own password.
     const r = await pool.query(
-      `SELECT g.*, ro.room_number FROM guests g 
-       LEFT JOIN rooms ro ON g.room_id = ro.id 
-       WHERE right(regexp_replace(COALESCE(g.phone,''), '[^0-9]', '', 'g'), 10) = $1 AND g.is_active = true LIMIT 1`,
+      `SELECT g.*, ro.room_number FROM guests g
+       LEFT JOIN rooms ro ON g.room_id = ro.id
+       WHERE right(regexp_replace(COALESCE(g.phone,''), '[^0-9]', '', 'g'), 10) = $1 AND g.is_active = true
+       ORDER BY g.id LIMIT 5`,
       [mobileKey]
     );
-    const guest = r.rows[0];
-    if (!guest) return res.status(401).json({ error: 'No active account found with this mobile number' });
+    if (!r.rows.length) return res.status(401).json({ error: 'No active account found with this mobile number' });
 
-    // If no password set, default = mobile number
-    let valid = false;
-    if (guest.password_hash) {
-      valid = await bcrypt.compare(password, guest.password_hash);
-      // A first login after 15.5 stores the hash of the plain digits; let her
-      // type the default the way her phone autofills it ("+91 …").
-      if (!valid && /^[\d\s+()-]{10,}$/.test(String(password))) valid = await bcrypt.compare(String(normPhone(password)).slice(-10), guest.password_hash);
-    } else {
-      // Default password is mobile number itself
-      // S15.5-2: the default accepts her number in any of the forms above
-      valid = (password === mobile) || String(normPhone(password) || '').slice(-10) === mobileKey;
-      if (valid) {
-        // Auto-set the hash for future logins — of the plain 10 digits
-        const hash = await bcrypt.hash(mobileKey, 10);
-        await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [hash, guest.id]);
+    const phoneLike = /^[\d\s+()-]{10,}$/.test(String(password));
+    const typedKey = String(normPhone(password) || '').slice(-10);
+    const accepts = async (g) => {
+      if (g.password_hash) {
+        if (await bcrypt.compare(password, g.password_hash)) return true;
+        // A first login after 15.5 stores the hash of the plain digits; let
+        // her type the default the way her phone autofills it ("+91 …").
+        return phoneLike && await bcrypt.compare(typedKey, g.password_hash);
       }
-    }
+      // No password set yet: the default is her mobile number, in any form
+      return password === mobile || typedKey === mobileKey;
+    };
+    const matched = [];
+    for (const g of r.rows) if (await accepts(g)) matched.push(g);
 
-    if (!valid) return res.status(401).json({ error: 'Incorrect password. Default password is your mobile number.' });
+    if (!matched.length) return res.status(401).json({ error: 'Incorrect password. Default password is your mobile number.' });
+    let guest = matched[0];
+    if (matched.length > 1) {
+      // Before 15.5 the login matched the saved text exactly, so a resident
+      // saved as "+91 …" logged in by typing "+91 …". Keep that: an exact
+      // text match decides. Otherwise we cannot tell who she is, and nobody
+      // is logged in as the wrong person.
+      const exact = matched.filter(g => g.phone === mobile);
+      if (exact.length !== 1) return res.status(409).json({ error: 'Two residents share this mobile number. Please ask the warden to give each of you your own number in the app.' });
+      guest = exact[0];
+    }
+    if (!guest.password_hash) {
+      // Auto-set the hash for future logins — of the plain 10 digits
+      const hash = await bcrypt.hash(mobileKey, 10);
+      await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [hash, guest.id]);
+    }
 
     const token = auth.signToken({ guestId: guest.id, type: 'guest' }, { expiresIn: '24h' });
     res.json({

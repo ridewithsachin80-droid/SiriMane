@@ -209,7 +209,9 @@ async function main() {
       {
         const n10 = '7' + String(Date.now()).slice(-9);
         const g155 = await A('POST', '/guests', { name: 'S155 Login', phone: n10, join_date: today, monthly_rent: 5000, deposit_amount: 0 });
-        const L = (m, p) => api('POST', '/guest-login', { mobile: m, password: p });
+        // Own client address (trust proxy = 1) so these deliberate failures don't
+        // consume the limiter budget the rate-limit test below counts on.
+        const L = async (m, p) => { const r = await fetch(BASE + '/api/guest-login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': '10.15.5.1' }, body: JSON.stringify({ mobile: m, password: p }) }); return { status: r.status, data: await r.json().catch(() => ({})) }; };
         eq((await L('+91 ' + n10.slice(0, 5) + ' ' + n10.slice(5), '+91' + n10)).status, 200, 'S15.5-1 "+91 xxxxx xxxxx" logs in; default password typed with +91 (first login)');
         eq((await L(n10, n10)).status, 200, 'S15.5-2 after that first login, the plain 10 digits still work (hash is of the digits)');
         eq((await L('0' + n10, '+91 ' + n10)).status, 200, 'S15.5-2 "0…" mobile + "+91 …" password both accepted');
@@ -221,6 +223,24 @@ async function main() {
         await pool.query('UPDATE guests SET phone=$1 WHERE id=$2', [old10.slice(0, 5) + ' ' + old10.slice(5), gOld.data.id]);
         eq((await L(old10, old10)).status, 200, 'S15.5-1 a phone stored with spaces before 15.4 logs in with the plain digits — no backfill needed');
         await A('DELETE', `/guests/${g155.data.id}`); await A('DELETE', `/guests/${gOld.data.id}`);
+        // A-1: two sisters share a number — one saved "+91 …" (old data), one plain
+        const sis = '8' + String(Date.now()).slice(-9);
+        const sA = await A('POST', '/guests', { name: 'S155 Sister A', phone: sis, join_date: today, monthly_rent: 5000, deposit_amount: 0 });
+        const sB = await A('POST', '/guests', { name: 'S155 Sister B', phone: sis, join_date: today, monthly_rent: 5000, deposit_amount: 0 });
+        await pool.query('UPDATE guests SET phone=$1 WHERE id=$2', ['+91 ' + sis, sA.data.id]);
+        // (i) both still on the default password: the exact saved text decides, as before 15.5
+        let rr = await L('+91 ' + sis, '+91 ' + sis); eq(rr.status, 200, 'A-1 sister A (saved "+91 …") logs in typing "+91 …"'); eq(rr.data.guest && rr.data.guest.id, sA.data.id, 'A-1 …as sister A');
+        rr = await L(sis, sis); eq(rr.status, 200, 'A-1 sister B (saved plain) logs in typing the plain number'); eq(rr.data.guest && rr.data.guest.id, sB.data.id, 'A-1 …as sister B, never A');
+        // (ii) each now has her own password (hashes were set by those first logins); custom passwords
+        await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [await require('bcrypt').hash('alpha-123', 6), sA.data.id]);
+        await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [await require('bcrypt').hash('beta-456', 6), sB.data.id]);
+        rr = await L(sis, 'beta-456'); eq(rr.data.guest && rr.data.guest.id, sB.data.id, 'A-1 SECURITY: B logs in with her own password, as B');
+        rr = await L(sis, 'alpha-123'); eq(rr.data.guest && rr.data.guest.id, sA.data.id, 'A-1 SECURITY: A logs in with her own password even typing the plain number, as A');
+        // (iii) same saved text and same password: nobody is logged in as the wrong person
+        await pool.query('UPDATE guests SET phone=$1, password_hash=NULL WHERE id IN ($2,$3)', [sis, sA.data.id, sB.data.id]);
+        rr = await L(sis, sis); eq(rr.status, 409, 'A-1 SECURITY: identical number and password → refused, not a random sister');
+        ok(/warden/.test(rr.data.error || ''), 'A-1 the message tells her what to do');
+        await A('DELETE', `/guests/${sA.data.id}`); await A('DELETE', `/guests/${sB.data.id}`);
       }
       for (const n of ['S151 Old Form', 'S151 Wizard', 'S151 Truthy']) { const g = (await A('GET', '/guests')).data.find(x => x.name === n); if (g) await A('DELETE', `/guests/${g.id}`); }
     }
@@ -441,9 +461,8 @@ async function main() {
 
     // ── Login rate limit (last: it burns attempts for this IP) ────────────
     let last;
-    // Four failed attempts already happened (malformed JSON + bad password, and the two
-    // deliberate S15.5 refusals — admin and resident logins share one limiter), so 6 more = 10.
-    for (let i = 0; i < 6; i++) last = await api('POST', '/auth/login', { username: 'admin', password: 'nope' + i });
+    // Two failed attempts already happened (malformed JSON + bad password), so 8 more = 10 failures.
+    for (let i = 0; i < 8; i++) last = await api('POST', '/auth/login', { username: 'admin', password: 'nope' + i });
     eq(last.status, 401, '10th bad attempt still 401');
     last = await api('POST', '/auth/login', { username: 'admin', password: 'nope' }); eq(last.status, 429, '11th attempt → 429'); ok(last.ct.includes('json') && /wait/i.test(last.data.error), '429 is JSON with message');
     console.log('✓ login rate limit');
