@@ -1,0 +1,14 @@
+# dependencies — Railway runs `cd backend && npm install` at build time
+node_modules/
+
+# local test-gate output (screenshots, scratch logs)
+backend/test/screenshots/
+
+# local env — never commit secrets
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+Thumbs.db
