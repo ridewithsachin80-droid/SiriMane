@@ -273,10 +273,10 @@ function renderRoomRows(list) {
   return list.map(r=>{
     const occ = parseInt(r.occupied_beds)||0;
     const full = occ >= r.total_beds;
-    return `<tr data-search="${r.room_number.toLowerCase()} floor ${r.floor} ${r.room_type.toLowerCase()}">
-      <td><strong>${r.room_number}</strong></td>
+    return `<tr data-search="${esc(r.room_number.toLowerCase())} floor ${r.floor} ${r.room_type.toLowerCase()}">
+      <td><strong>${esc(r.room_number)}</strong></td>
       <td>Floor ${r.floor}</td>
-      <td style="text-transform:capitalize">${r.room_type}</td>
+      <td style="text-transform:capitalize">${esc(r.room_type)}</td>
       <td>${r.total_beds} beds</td>
       <td>${occ}/${r.total_beds}</td>
       <td>${fmt(r.monthly_rent)}/bed</td>
@@ -284,7 +284,7 @@ function renderRoomRows(list) {
       <td>
         <div class="flex gap-2">
           <button class="btn btn-outline btn-sm" onclick="roomModal(${JSON.stringify(r).replace(/"/g,'&quot;')})">Edit</button>
-          ${isAdmin()?`<button class="btn btn-danger btn-sm" onclick="delRoom(${r.id},'${r.room_number}')">Delete</button>`:''}
+          ${isAdmin()?`<button class="btn btn-danger btn-sm" onclick="delRoom(${r.id},${esc(JSON.stringify(r.room_number))})">Delete</button>`:''}
         </div>
       </td>
     </tr>`;
@@ -314,7 +314,7 @@ function roomModal(r={}) {
       <div class="modal-body">
         <div id="rm-alert" class="alert alert-danger hidden"></div>
         <div class="form-row">
-          <div class="form-group"><label>Room Number *</label><input id="rm-num" value="${r.room_number||''}" placeholder="e.g. 101"/></div>
+          <div class="form-group"><label>Room Number *</label><input id="rm-num" value="${esc(r.room_number||'')}" placeholder="e.g. 101"/></div>
           <div class="form-group"><label>Floor</label><input id="rm-floor" type="number" value="${r.floor||1}" min="0"/></div>
         </div>
         <div class="form-row">
@@ -411,22 +411,22 @@ function renderGuestRows(filtered, f) {
     const variance = hasVariance(g);
     const needsApproval = variance && !g.rent_variance_approved;
     return `
-    <tr data-search="${g.name.toLowerCase()} ${g.phone||''}" style="${!g.is_active?'opacity:0.55':''}">
+    <tr data-search="${esc(g.name.toLowerCase())} ${esc(g.phone||'')}" style="${!g.is_active?'opacity:0.55':''}">
       <td class="bulk-td">${bulkCb(g.id, g.name)}</td>
-      <td><strong style="${!g.is_active?'text-decoration:line-through':''}">${g.name}</strong><br><span class="text-muted">${g.email||''}</span></td>
-      <td style="${!g.is_active?'text-decoration:line-through':''}">${g.phone||'—'}</td>
+      <td><strong style="${!g.is_active?'text-decoration:line-through':''}">${esc(g.name)}</strong><br><span class="text-muted">${g.email||''}</span></td>
+      <td style="${!g.is_active?'text-decoration:line-through':''}">${esc(g.phone||'—')}</td>
       <td style="${!g.is_active?'text-decoration:line-through':''}">${g.room_number?'Room '+g.room_number+(g.bed_number?' / Bed '+g.bed_number:''):'-'}</td>
       <td>${fmtDate(g.join_date)}${!g.is_active && g.leave_date ? `<br><span class="text-muted" style="font-size:11px">→ ${fmtDate(g.leave_date)}</span>` : ''}</td>
       <td style="${!g.is_active?'text-decoration:line-through':''}">${fmt(g.monthly_rent)}/mo ${variance?`<span class="badge ${needsApproval?'badge-amber':'badge-blue'}" title="Room rate is ${fmt(g.room_rent)}">${needsApproval?'Pending Approval':'Variance'}</span>`:''}</td>
       <td style="${!g.is_active?'text-decoration:line-through':''}">${fmt(g.deposit_amount)}</td>
       <td><span class="badge ${g.is_active?'badge-green':'badge-red'}">${g.is_active?'Active':'Left'}</span></td>
-      <td><span class="badge badge-gray">${g.id_proof_type||'—'}</span></td>
+      <td><span class="badge badge-gray">${esc(g.id_proof_type||'—')}</span></td>
       <td>
         <div class="flex gap-2">
           <button class="btn btn-outline btn-sm" onclick="residentProfile(${g.id})">View</button>
           <button class="btn btn-primary btn-sm" onclick="guestModal(null,${g.id})">Edit</button>
           ${needsApproval && isAdmin()?`<button class="btn btn-success btn-sm" onclick="approveRentVariance(${g.id})">Approve Rent</button>`:''}
-          ${g.is_active && isAdmin()?`<button class="btn btn-outline btn-sm" onclick="roomShiftModal(${g.id},'${g.name.replace(/'/g,"\\'")}')">Shift Room</button>`:''}
+          ${g.is_active && isAdmin()?`<button class="btn btn-outline btn-sm" onclick="roomShiftModal(${g.id},${esc(JSON.stringify(g.name))})">Shift Room</button>`:''}
           ${g.is_active && isAdmin()?`<button class="btn btn-danger btn-sm" onclick="checkoutWizard(${g.id})">Checkout</button>`:''}
         </div>
       </td>
@@ -484,22 +484,22 @@ async function guestModal(gData=null, id=null) {
         </div>
         <div id="gf-preview" class="hidden"></div>
         <div class="form-row">
-          <div class="form-group"><label>Full Name *</label><input id="gf-name" value="${g.name||''}" placeholder="Full name"/></div>
-          <div class="form-group"><label>Phone</label><input id="gf-phone" value="${g.phone||''}" placeholder="Mobile"/></div>
+          <div class="form-group"><label>Full Name *</label><input id="gf-name" value="${esc(g.name||'')}" placeholder="Full name"/></div>
+          <div class="form-group"><label>Phone</label><input id="gf-phone" value="${esc(g.phone||'')}" placeholder="Mobile"/></div>
         </div>
         <div class="form-row">
           <div class="form-group"><label>Email</label><input id="gf-email" type="email" value="${g.email||''}" placeholder="Email"/></div>
-          <div class="form-group"><label>Emergency Contact</label><input id="gf-emg" value="${g.emergency_contact||''}" placeholder="Emergency phone"/></div>
+          <div class="form-group"><label>Emergency Contact</label><input id="gf-emg" value="${esc(g.emergency_contact||'')}" placeholder="Emergency phone"/></div>
         </div>
-        <div class="form-group"><label>Home / Permanent Address</label><textarea id="gf-address" rows="2" placeholder="e.g. House no, street, city, state, pincode">${g.address||''}</textarea></div>
+        <div class="form-group"><label>Home / Permanent Address</label><textarea id="gf-address" rows="2" placeholder="e.g. House no, street, city, state, pincode">${esc(g.address||'')}</textarea></div>
         <div class="form-row">
           <div class="form-group"><label>Room</label>
             <select id="gf-room" onchange="checkRentVariance()">
               <option value="">— Select Room —</option>
-              ${rooms.map(r=>`<option value="${r.id}" data-rent="${r.monthly_rent}" ${g.room_id==r.id?'selected':''}>Room ${r.room_number} (${r.available_beds} beds free)</option>`).join('')}
+              ${rooms.map(r=>`<option value="${r.id}" data-rent="${r.monthly_rent}" ${g.room_id==r.id?'selected':''}>Room ${esc(r.room_number)} (${r.available_beds} beds free)</option>`).join('')}
             </select>
           </div>
-          <div class="form-group"><label>Bed / Berth Number</label><input id="gf-bed" type="number" value="${g.bed_number||''}" placeholder="1, 2..."/></div>
+          <div class="form-group"><label>Bed / Berth Number</label><input id="gf-bed" type="number" value="${esc(g.bed_number||'')}" placeholder="1, 2..."/></div>
         </div>
         <div class="form-row">
           <div class="form-group"><label>Check-in Date *</label><input id="gf-join" type="date" value="${g.join_date?g.join_date.split('T')[0]:nowDate()}"/></div>
@@ -518,7 +518,7 @@ async function guestModal(gData=null, id=null) {
           </div>
         </div>
         <div class="form-group"><label>ID Proof Number</label><input id="gf-idnum" value="${g.id_proof_number||''}" placeholder="As printed on the document" autocomplete="off"/></div>
-        <div class="form-group"><label>Notes</label><textarea id="gf-notes" rows="2">${g.notes||''}</textarea></div>
+        <div class="form-group"><label>Notes</label><textarea id="gf-notes" rows="2">${esc(g.notes||'')}</textarea></div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
@@ -593,7 +593,7 @@ async function viewGuest(id) {
     const balanceClass = balance===null ? '' : balance < -0.5 ? 'text-red' : balance > 0.5 ? 'text-green' : 'text-muted';
     openModal(`
       <div class="modal modal-lg">
-        <div class="modal-header"><h3>👤 ${g.name}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+        <div class="modal-header"><h3>👤 ${esc(g.name)}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
         <div class="modal-body">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px">
             ${[['Phone',g.phone],['Email',g.email],['Room',g.room_number?'Room '+g.room_number:'—'],['Bed',g.bed_number||'—'],['Check-in',fmtDate(g.join_date)],['Rent',fmt(g.monthly_rent)+'/mo'],['Deposit',fmt(g.deposit_amount)],['Emergency',g.emergency_contact||'—'],['Address',g.address||'—']].map(([l,v])=>`
@@ -613,7 +613,7 @@ async function viewGuest(id) {
               ? '<p class="text-muted">No rent ledger yet — needs a join date and a monthly rent set.</p>'
               : `<div class="table-wrap mb-5"><table><thead><tr><th>MONTH</th><th>RENT DUE</th><th>RENT PAID</th><th>BALANCE</th></tr></thead><tbody>
                 ${ledgerData.ledger.map(m=>`<tr>
-                  <td>${m.label}</td>
+                  <td>${esc(m.label)}</td>
                   <td>${fmt(m.rent_due)}</td>
                   <td class="text-green">${fmt(m.rent_paid)}</td>
                   <td class="${m.running_balance<-0.5?'text-red fw-600':m.running_balance>0.5?'text-green fw-600':''}">${m.running_balance<-0.5?fmt(Math.abs(m.running_balance))+' due':m.running_balance>0.5?fmt(m.running_balance)+' credit':'Settled'}</td>
@@ -628,30 +628,30 @@ async function viewGuest(id) {
           ${history.length===0
             ? '<p class="text-muted mb-5">No rate history recorded.</p>'
             : `<table class="mb-5"><thead><tr><th>EFFECTIVE FROM</th><th>RATE</th><th>SET BY</th><th>NOTE</th></tr></thead><tbody>
-              ${history.map(h=>`<tr><td>${fmtDate(h.effective_from)}</td><td class="fw-600">${fmt(h.monthly_rent)}</td><td>${h.username||'—'}</td><td class="text-muted">${h.note||'—'}</td></tr>`).join('')}
+              ${history.map(h=>`<tr><td>${fmtDate(h.effective_from)}</td><td class="fw-600">${fmt(h.monthly_rent)}</td><td>${esc(h.username||'—')}</td><td class="text-muted">${esc(h.note||'—')}</td></tr>`).join('')}
               </tbody></table>`}
 
           <div class="flex justify-between items-center mb-4">
             <h4 style="font-size:14px;margin:0">Room Shift History</h4>
-            ${isAdmin()?`<button class="btn btn-outline btn-sm" onclick="roomShiftModal(${g.id},'${g.name.replace(/'/g,"\\'")}')">+ Shift Room</button>`:''}
+            ${isAdmin()?`<button class="btn btn-outline btn-sm" onclick="roomShiftModal(${g.id},${esc(JSON.stringify(g.name))})">+ Shift Room</button>`:''}
           </div>
           ${roomHistory.length===0
             ? '<p class="text-muted mb-5">No internal room shifts recorded.</p>'
             : `<table class="mb-5"><thead><tr><th>EFFECTIVE FROM</th><th>MOVE</th><th>BY</th><th>NOTE</th></tr></thead><tbody>
-              ${roomHistory.map(h=>`<tr><td>${fmtDate(h.effective_from)}</td><td>${h.from_room_number?'Room '+h.from_room_number:'—'} → Room ${h.to_room_number}${h.to_bed_number?' / Bed '+h.to_bed_number:''}</td><td>${h.username||'—'}</td><td class="text-muted">${h.note||'—'}</td></tr>`).join('')}
+              ${roomHistory.map(h=>`<tr><td>${fmtDate(h.effective_from)}</td><td>${h.from_room_number?'Room '+h.from_room_number:'—'} → Room ${esc(h.to_room_number)}${h.to_bed_number?' / Bed '+h.to_bed_number:''}</td><td>${esc(h.username||'—')}</td><td class="text-muted">${esc(h.note||'—')}</td></tr>`).join('')}
               </tbody></table>`}
 
           <h4 style="margin-bottom:10px;font-size:14px">All Transactions</h4>
           ${g.payments.length===0
             ? '<p class="text-muted">No payments recorded</p>'
             : `<table><thead><tr><th>Date</th><th>Amount</th><th>Type</th><th>Mode</th></tr></thead><tbody>
-              ${g.payments.map(p=>`<tr><td>${fmtDate(p.collection_date)}</td><td class="text-green fw-600">${fmt(p.amount)}</td><td>${p.collection_type}</td><td>${p.payment_mode}</td></tr>`).join('')}
+              ${g.payments.map(p=>`<tr><td>${fmtDate(p.collection_date)}</td><td class="text-green fw-600">${fmt(p.amount)}</td><td>${esc(p.collection_type)}</td><td>${esc(p.payment_mode)}</td></tr>`).join('')}
               </tbody></table>`}
         </div>
         <div class="modal-footer">
           <button class="btn btn-outline" onclick="closeModal()">Close</button>
           <button class="btn btn-primary" onclick="closeModal();guestModal(null,${g.id})">Edit</button>
-          <button class="btn btn-success" onclick="closeModal();collectionModal(${g.id},'${g.name}')">Add Payment</button>
+          <button class="btn btn-success" onclick="closeModal();collectionModal(${g.id},${esc(JSON.stringify(g.name))})">Add Payment</button>
         </div>
       </div>`);
   } catch(e) { alert(e.message); }
@@ -705,7 +705,7 @@ async function roomShiftModal(guestId, guestName) {
           <div class="form-group"><label>New Room *</label>
             <select id="rs-room">
               <option value="">— Select Room —</option>
-              ${rooms.map(r=>`<option value="${r.id}" ${g.room_id==r.id?'disabled':''}>Room ${r.room_number} (${r.available_beds} beds free)</option>`).join('')}
+              ${rooms.map(r=>`<option value="${r.id}" ${g.room_id==r.id?'disabled':''}>Room ${esc(r.room_number)} (${r.available_beds} beds free)</option>`).join('')}
             </select>
           </div>
           <div class="form-group"><label>New Bed / Berth</label><input id="rs-bed" type="number" placeholder="1, 2..."/></div>
@@ -866,15 +866,15 @@ async function pgChecklist(date) {
       </div>
       ${data.sections.map(sec => `
         <div class="card mb-6">
-          <div class="card-header"><h3>${sec.label}</h3></div>
+          <div class="card-header"><h3>${esc(sec.label)}</h3></div>
           <div style="padding:4px 20px 16px">
             ${sec.items.length===0 ? '<div class="text-muted" style="padding:12px 0">No tasks in this section</div>' : sec.items.map(item => `
               <label style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--surface-2);cursor:pointer">
                 <input type="checkbox" ${item.is_checked?'checked':''} onchange="toggleChecklistItem(${item.id}, this.checked)" style="margin-top:3px;width:18px;height:18px;flex-shrink:0"/>
                 <span style="flex:1">
-                  <span style="${item.is_checked?'text-decoration:line-through;color:var(--text-muted)':''}">${item.time_label && item.time_label!=='—' ? `<strong>${item.time_label}</strong> — `:''}${item.task}</span>
+                  <span style="${item.is_checked?'text-decoration:line-through;color:var(--text-muted)':''}">${item.time_label && item.time_label!=='—' ? `<strong>${esc(item.time_label)}</strong> — `:''}${esc(item.task)}</span>
                   ${/complaint|maintenance register/i.test(item.task) ? ` <button class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:11px" onclick="event.preventDefault();navigate('complaints')">Open Register →</button>` : ''}
-                  ${item.is_checked && item.checked_by_username ? `<br><span class="text-muted" style="font-size:12px">✔ ${item.checked_by_username}${item.checked_at?' at '+new Date(item.checked_at).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}):''}</span>` : ''}
+                  ${item.is_checked && item.checked_by_username ? `<br><span class="text-muted" style="font-size:12px">✔ ${esc(item.checked_by_username)}${item.checked_at?' at '+new Date(item.checked_at).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}):''}</span>` : ''}
                 </span>
               </label>
             `).join('')}
@@ -923,7 +923,7 @@ async function renderChecklistHistory(ym) {
         <table>
           <thead><tr><th>DATE</th><th>DONE</th><th>%</th></tr></thead>
           <tbody>
-            ${rows.map(r => `<tr onclick="closeModal();pgChecklist('${r.date}')" style="cursor:pointer">
+            ${rows.map(r => `<tr onclick="closeModal();pgChecklist(${esc(JSON.stringify(r.date))})" style="cursor:pointer">
               <td>${fmtDate(r.date)}</td>
               <td>${r.checked} / ${r.total}</td>
               <td><span class="badge ${r.percent>=100?'badge-green':r.percent>=50?'badge-blue':'badge-red'}">${r.percent}%</span></td>
@@ -951,7 +951,7 @@ async function renderChecklistManage(editItem) {
       <div style="max-height:300px;overflow-y:auto;margin-bottom:14px">
         ${items.length===0 ? '<div class="text-muted">No tasks yet</div>' : items.map(i => `
           <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--surface-2);gap:8px">
-            <span style="font-size:13px"><strong>${i.section}</strong>${i.time_label && i.time_label!=='—' ? ' · '+i.time_label:''} — ${i.task}</span>
+            <span style="font-size:13px"><strong>${esc(i.section)}</strong>${i.time_label && i.time_label!=='—' ? ' · '+i.time_label:''} — ${esc(i.task)}</span>
             <span style="flex-shrink:0;display:flex;gap:6px">
               <button class="btn btn-outline btn-sm" onclick='renderChecklistManage(${JSON.stringify(i).replace(/'/g,"&#39;")})'>Edit</button>
               <button class="btn btn-outline btn-sm" onclick="removeChecklistItem(${i.id})">Remove</button>
@@ -1030,7 +1030,7 @@ async function pgComplaints(filter) {
             <thead><tr><th class="bulk-th" scope="col"><span class="sr-only">Select</span></th><th scope="col">DATE</th><th scope="col">CATEGORY</th><th scope="col">ISSUE</th><th scope="col">FROM</th><th scope="col">PRIORITY</th><th scope="col">STATUS</th><th scope="col">ACTIONS</th></tr></thead>
             <tbody id="complaints-tb">
               ${list.map(c => `
-                <tr data-search="${esc(c.category.toLowerCase())} ${esc(c.description.toLowerCase())} ${(c.guest_name||'').toLowerCase()} ${(c.room_number||'').toLowerCase()}">
+                <tr data-search="${esc(c.category.toLowerCase())} ${esc(c.description.toLowerCase())} ${esc((c.guest_name||'').toLowerCase())} ${esc((c.room_number||'').toLowerCase())}">
                   <td class="bulk-td">${bulkCb(c.id, c.category + (c.room_number ? ' Room ' + c.room_number : ''))}</td>
                   <td>${fmtDate(c.created_at)}</td>
                   <td>${esc(c.category)}</td>
@@ -1172,18 +1172,19 @@ async function pgPayments(month, year) {
 // server's automatic deposit stores no month and a lower-case mode, which made
 // the same kind of payment read "Nov 2026 · cash" on one card and
 // "November 2026 · Cash" on the next.
-function payTypeLabel(t) { const x = String(t || 'rent'); return x.charAt(0).toUpperCase() + x.slice(1).replace(/_/g, ' '); }
-function payModeLabel(m) { const x = String(m || '—'); return /^upi$/i.test(x) ? 'UPI' : x.charAt(0).toUpperCase() + x.slice(1); }
+// These return HTML-safe text: type, mode and month can be typed by staff (S15.2-3).
+function payTypeLabel(t) { const x = String(t || 'rent'); return esc(x.charAt(0).toUpperCase() + x.slice(1).replace(/_/g, ' ')); }
+function payModeLabel(m) { const x = String(m || '—'); return esc(/^upi$/i.test(x) ? 'UPI' : x.charAt(0).toUpperCase() + x.slice(1)); }
 function payMonthLabel(c) {
   const m = c.collection_month;
   if (m && /^\d{4}-\d{2}$/.test(m)) { const [y, mo] = m.split('-').map(Number); return new Date(y, mo - 1, 1).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }); }
-  if (m) return m;
+  if (m) return esc(m);
   return c.collection_date ? new Date(c.collection_date).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }) : '—';
 }
 function renderPaymentRows(list) {
   if (list.length === 0) return `<tr class="empty-row"><td colspan="8">No payments match.</td></tr>`;
-  return list.map(c=>`<tr data-search="${(c.guest_name||'').toLowerCase()}">
-      <td><strong>${c.guest_name||'—'}</strong></td>
+  return list.map(c=>`<tr data-search="${esc((c.guest_name||'').toLowerCase())}">
+      <td><strong>${esc(c.guest_name||'—')}</strong></td>
       <td class="pay-type">${payTypeLabel(c.collection_type)}</td>
       <td class="pay-month">${payMonthLabel(c)}</td>
       <td class="text-green fw-600">${fmt(c.amount)}</td>
@@ -1240,11 +1241,11 @@ async function pgAnnouncements() {
           ? '<div style="text-align:center;padding:48px;color:var(--text-muted)">📢<br><br>No messages posted yet. Click Post Message.</div>'
           : `<div id="ann-list">
             ${list.map(a=>`
-            <div data-search="${a.title.toLowerCase()} ${esc(a.message.toLowerCase())}" style="padding:16px 20px;border-bottom:1px solid var(--border)">
+            <div data-search="${esc(a.title.toLowerCase())} ${esc(a.message.toLowerCase())}" style="padding:16px 20px;border-bottom:1px solid var(--border)">
               <div class="flex justify-between items-center mb-4">
                 <div class="flex items-center gap-2">
                   <span class="badge ${a.priority==='urgent'?'badge-red':a.priority==='important'?'badge-amber':'badge-blue'}">${a.priority}</span>
-                  <strong style="font-size:14px">${a.title}</strong>
+                  <strong style="font-size:14px">${esc(a.title)}</strong>
                 </div>
                 <div class="flex items-center gap-2">
                   <span class="text-muted" style="font-size:12px">${fmtDate(a.created_at)}</span>
@@ -1325,7 +1326,7 @@ async function pgInbox() {
         ${msgs.length===0
           ? '<div style="text-align:center;padding:48px;color:var(--text-muted)">📭<br><br>No messages from guests yet.</div>'
           : msgs.map(m=>`
-          <div data-search="${esc(`${m.guest_name||''} ${m.subject||''} ${m.message||''} ${m.room_number||''}`.toLowerCase())}" class="inbox-item ${!m.is_read?'unread':''}" onclick="viewInboxMsg(${esc(JSON.stringify(m))})">
+          <div data-search="${esc(`${esc(m.guest_name||'')} ${esc(m.subject||'')} ${esc(m.message||'')} ${esc(m.room_number||'')}`.toLowerCase())}" class="inbox-item ${!m.is_read?'unread':''}" onclick="viewInboxMsg(${esc(JSON.stringify(m))})">
             <div class="flex justify-between items-center">
               <div>
                 <strong style="font-size:14px">${esc(m.guest_name)}</strong>
@@ -1354,9 +1355,9 @@ async function viewInboxMsg(m) {
           <strong style="font-size:14px">${esc(m.subject||'No subject')}</strong>
           <p style="margin-top:8px;font-size:14px">${esc(m.message)}</p>
         </div>
-        ${m.reply?`<div style="background:var(--green-light);padding:12px;border-radius:8px;margin-bottom:14px"><div style="font-size:11px;color:#065F46;font-weight:600;margin-bottom:4px">YOUR REPLY</div><p style="font-size:13px;color:#065F46">${m.reply}</p></div>`:''}
+        ${m.reply?`<div style="background:var(--green-light);padding:12px;border-radius:8px;margin-bottom:14px"><div style="font-size:11px;color:#065F46;font-weight:600;margin-bottom:4px">YOUR REPLY</div><p style="font-size:13px;color:#065F46">${esc(m.reply)}</p></div>`:''}
         <div id="ib-alert" class="alert alert-danger hidden"></div>
-        <div class="form-group"><label>${m.reply?'Update Reply':'Reply'}</label><textarea id="ib-reply" rows="3" placeholder="Type your reply...">${m.reply||''}</textarea></div>
+        <div class="form-group"><label>${m.reply?'Update Reply':'Reply'}</label><textarea id="ib-reply" rows="3" placeholder="Type your reply...">${esc(m.reply||'')}</textarea></div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-outline" onclick="closeModal()">Close</button>
@@ -1543,7 +1544,7 @@ function renderPurchaseRows(list) {
       <td>${esc(p.description||'—')}</td>
       <td class="text-red fw-600">${fmt(p.amount)}</td>
       <td>${esc(p.paid_to||'—')}</td>
-      <td>${p.payment_mode}</td>
+      <td>${esc(p.payment_mode)}</td>
       <td>${pending && isAdmin()
         ? `<div class="flex gap-2"><button class="btn btn-primary btn-sm" onclick="confirmPendingPurchase(${p.id})">Approve</button><button class="btn btn-danger btn-sm btn-icon" onclick="delPurchase(${p.id})">✕</button></div>`
         : isAdmin() ? `<button class="btn btn-danger btn-sm btn-icon" onclick="delPurchase(${p.id})">✕</button>` : '—'}</td>
@@ -1891,11 +1892,11 @@ function renderCollectionRows(list) {
       const pending = pendingVerification || pendingApproval;
       return `<tr ${pending?'style="background:#FFFBEB"':''}>
       <td>${fmtDate(c.collection_date)}</td>
-      <td><span class="badge badge-green" style="text-transform:capitalize">${c.collection_type}</span> ${pendingVerification?'<span class="badge badge-amber">Pending Verification</span>':pendingApproval?'<span class="badge badge-amber">Pending Approval</span>':''}</td>
-      <td>${c.guest_name||'—'}</td>
+      <td><span class="badge badge-green" style="text-transform:capitalize">${esc(c.collection_type)}</span> ${pendingVerification?'<span class="badge badge-amber">Pending Verification</span>':pendingApproval?'<span class="badge badge-amber">Pending Approval</span>':''}</td>
+      <td>${esc(c.guest_name||'—')}</td>
       <td>${esc(c.description||c.collection_month||'—')}</td>
       <td class="text-green fw-600">${fmt(c.amount)}</td>
-      <td>${c.payment_mode}</td>
+      <td>${esc(c.payment_mode)}</td>
       <td>
         <div class="flex gap-2">
           <button class="btn btn-outline btn-sm" onclick="downloadReceipt(${c.id})" title="Download receipt">🧾</button>
@@ -1972,7 +1973,7 @@ async function collectionModal(guestId=null, guestName='') {
         <div class="form-group"><label>Guest</label>
           <select id="cl-guest">
             <option value="">— Walk-in / Other —</option>
-            ${guests.map(g=>`<option value="${g.id}" ${g.id==guestId?'selected':''}>${g.name}${g.room_number?' (Room '+g.room_number+')':''}</option>`).join('')}
+            ${guests.map(g=>`<option value="${g.id}" ${g.id==guestId?'selected':''}>${esc(g.name)}${g.room_number?' (Room '+g.room_number+')':''}</option>`).join('')}
           </select>
         </div>
         <div class="form-row">
@@ -2139,11 +2140,11 @@ function renderRentDueRows(list) {
     const depPending = parseFloat(g.deposit_pending||0);
     const totalPayable = due + depPending;
     const anyPending = due>0 || depPending>0;
-    return `<tr data-search="${g.name.toLowerCase()} ${(g.room_number||'').toLowerCase()} ${(g.phone||'').toLowerCase()}">
+    return `<tr data-search="${esc(g.name.toLowerCase())} ${esc((g.room_number||'').toLowerCase())} ${esc((g.phone||'').toLowerCase())}">
       <td class="bulk-td">${bulkCb(g.id, g.name)}</td>
-      <td><strong>${g.name}</strong></td>
+      <td><strong>${esc(g.name)}</strong></td>
       <td>${g.room_number?'Room '+g.room_number:'—'}</td>
-      <td>${g.phone||'—'}</td>
+      <td>${esc(g.phone||'—')}</td>
       <td>${fmt(g.monthly_rent)}</td>
       <td class="${due>0?'text-red fw-600':credit>0?'text-green fw-600':''}">${due>0?fmt(due)+' due':credit>0?fmt(credit)+' credit':'Settled'}</td>
       <td class="${depPending>0?'text-red fw-600':''}">${depPending>0?fmt(depPending):'—'}</td>
@@ -2236,11 +2237,11 @@ function openRentRemindersModal() {
             <thead><tr><th>Name</th><th>Room</th><th>Rent Due</th><th>Deposit Pending</th><th>Phone</th><th></th></tr></thead>
             <tbody>
               ${pending.map(g => `<tr>
-                  <td>${g.name}</td>
+                  <td>${esc(g.name)}</td>
                   <td>${g.room_number?'Room '+g.room_number:'—'}</td>
                   <td class="${parseFloat(g.amount_due)>0?'text-red fw-600':''}">${parseFloat(g.amount_due)>0?fmt(g.amount_due):'—'}</td>
                   <td class="${parseFloat(g.deposit_pending||0)>0?'text-red fw-600':''}">${parseFloat(g.deposit_pending||0)>0?fmt(g.deposit_pending):'—'}</td>
-                  <td>${g.phone||'—'}</td>
+                  <td>${esc(g.phone||'—')}</td>
                   <td>${g.phone
                     ? `<button class="btn btn-outline btn-sm" onclick="sendOneRentReminder(${g.id})">💬 WhatsApp</button>`
                     : `<span style="font-size:12px;color:var(--text-muted,#999)">No phone</span>`}</td>
@@ -2372,8 +2373,8 @@ function renderReportsPage(r, controlsHtml) {
         </div>
       </div>
       <div class="flex gap-2 mb-5">
-        <button class="btn btn-outline btn-sm" onclick="exportReport('csv','${r.dateFrom}','${r.dateTo}')">⬇ Export CSV</button>
-        <button class="btn btn-outline btn-sm" onclick="exportReport('pdf','${r.dateFrom}','${r.dateTo}')">⬇ Export PDF</button>
+        <button class="btn btn-outline btn-sm" onclick="exportReport('csv',${esc(JSON.stringify(r.dateFrom))},${esc(JSON.stringify(r.dateTo))})">⬇ Export CSV</button>
+        <button class="btn btn-outline btn-sm" onclick="exportReport('pdf',${esc(JSON.stringify(r.dateFrom))},${esc(JSON.stringify(r.dateTo))})">⬇ Export PDF</button>
       </div>`:''}
       <div class="stat-grid mb-6">
         <div class="stat-card" style="border-left:4px solid var(--green)">
@@ -2400,7 +2401,7 @@ function renderReportsPage(r, controlsHtml) {
               ? '<div style="text-align:center;padding:32px;color:var(--text-muted)">💵<br><br>No collections in this period</div>'
               : r.incomeBreakdown.map(i=>`
               <div class="flex justify-between items-center" style="padding:10px 0;border-bottom:1px solid var(--border)">
-                <span style="text-transform:capitalize;font-size:14px">${i.collection_type}</span>
+                <span style="text-transform:capitalize;font-size:14px">${esc(i.collection_type)}</span>
                 <strong class="text-green">${fmt(i.total)}</strong>
               </div>`).join('')}
           </div>
@@ -2469,8 +2470,8 @@ function renderTrendChart(trend) {
     const xLabel = showYear ? `${parts[0]} '${(parts[1]||'').slice(-2)}` : parts[0];
     return `
       <g>
-        <rect x="${x+15}" y="${baseY-incH}" width="22" height="${incH}" fill="var(--green)" rx="2"><title>${t.label} Income: ${fmt(t.income)}</title></rect>
-        <rect x="${x+45}" y="${baseY-expH}" width="22" height="${expH}" fill="var(--red)" rx="2"><title>${t.label} Expenses: ${fmt(t.expenses)}</title></rect>
+        <rect x="${x+15}" y="${baseY-incH}" width="22" height="${incH}" fill="var(--green)" rx="2"><title>${esc(t.label)} Income: ${fmt(t.income)}</title></rect>
+        <rect x="${x+45}" y="${baseY-expH}" width="22" height="${expH}" fill="var(--red)" rx="2"><title>${esc(t.label)} Expenses: ${fmt(t.expenses)}</title></rect>
         <text x="${x+45}" y="${baseY+18}" text-anchor="middle" font-size="11" fill="var(--text-muted)">${xLabel}</text>
       </g>`;
   }).join('');
@@ -2575,12 +2576,12 @@ async function pgBalanceSheet(asOf) {
             <tbody id="assets-tb">
               ${assets.length===0
                 ? `<tr class="empty-row"><td colspan="6">${emptyState('bed', 'No assets recorded', 'Beds, geysers, furniture — anything the PG owns.', '<button class="btn btn-primary btn-sm" onclick="fixedAssetModal()">Add asset</button>')}</td></tr>`
-                : assets.map(a=>`<tr data-search="${a.name.toLowerCase()} ${esc(a.category.toLowerCase())} ${(a.notes||'').toLowerCase()}">
+                : assets.map(a=>`<tr data-search="${esc(a.name.toLowerCase())} ${esc(a.category.toLowerCase())} ${esc((a.notes||'').toLowerCase())}">
                   <td>${fmtDate(a.purchase_date)}</td>
-                  <td><strong>${a.name}</strong></td>
+                  <td><strong>${esc(a.name)}</strong></td>
                   <td><span class="badge badge-blue">${esc(a.category)}</span></td>
                   <td class="fw-600">${fmt(a.value)}</td>
-                  <td class="text-muted">${a.notes||'—'}</td>
+                  <td class="text-muted">${esc(a.notes||'—')}</td>
                   <td><button class="btn btn-danger btn-sm btn-icon" onclick="delFixedAsset(${a.id})">✕</button></td>
                 </tr>`).join('')}
             </tbody>
@@ -2603,11 +2604,11 @@ async function pgBalanceSheet(asOf) {
             <tbody id="capital-tb">
               ${capital.length===0
                 ? `<tr class="empty-row"><td colspan="5">${emptyState('wallet', 'No capital recorded', 'Money the owner has put in or taken out.', '<button class="btn btn-primary btn-sm" onclick="capitalModal()">Add transaction</button>')}</td></tr>`
-                : capital.map(c=>`<tr data-search="${(c.note||'').toLowerCase()} ${(c.username||'').toLowerCase()}">
+                : capital.map(c=>`<tr data-search="${esc((c.note||'').toLowerCase())} ${esc((c.username||'').toLowerCase())}">
                   <td>${fmtDate(c.transaction_date)}</td>
                   <td class="fw-600 ${parseFloat(c.amount)<0?'text-red':'text-green'}">${fmt(c.amount)}</td>
                   <td class="text-muted">${esc(c.note||'—')}</td>
-                  <td>${c.username||'—'}</td>
+                  <td>${esc(c.username||'—')}</td>
                   <td><button class="btn btn-danger btn-sm btn-icon" onclick="delCapitalTransaction(${c.id})">✕</button></td>
                 </tr>`).join('')}
             </tbody>
@@ -2842,11 +2843,11 @@ async function renderAdminStaffTab() {
           <table>
             <thead><tr><th>USERNAME</th><th>ROLE</th><th>CREATED</th><th>ACTIONS</th></tr></thead>
             <tbody id="staff-tb">
-              ${users.map(u=>`<tr data-search="${u.username.toLowerCase()} ${u.role.toLowerCase()}">
-                <td><strong>${u.username}</strong></td>
+              ${users.map(u=>`<tr data-search="${esc(u.username.toLowerCase())} ${u.role.toLowerCase()}">
+                <td><strong>${esc(u.username)}</strong></td>
                 <td><span class="badge ${u.role==='admin'?'badge-purple':'badge-blue'}">${u.role}</span></td>
                 <td>${fmtDate(u.created_at)}</td>
-                <td>${u.username!==JSON.parse(localStorage.getItem('sm_user')||'{}').username?`<button class="btn btn-danger btn-sm btn-icon" onclick="delStaffUser(${u.id},'${u.username}')">✕</button>`:'<span class="text-muted">You</span>'}</td>
+                <td>${u.username!==JSON.parse(localStorage.getItem('sm_user')||'{}').username?`<button class="btn btn-danger btn-sm btn-icon" onclick="delStaffUser(${u.id},${esc(JSON.stringify(u.username))})">✕</button>`:'<span class="text-muted">You</span>'}</td>
               </tr>`).join('')}
             </tbody>
           </table>
@@ -2907,11 +2908,11 @@ async function renderAdminAuditTab() {
             <tbody id="audit-tb">
               ${log.length===0
                 ? `<tr class="empty-row"><td colspan="4">${emptyState('calendar', 'No activity yet', 'Actions taken in the app will be listed here.', '')}</td></tr>`
-                : log.map(a=>`<tr data-search="${(a.username||'').toLowerCase()} ${a.action.toLowerCase()} ${(a.details||'').toLowerCase()}">
+                : log.map(a=>`<tr data-search="${esc((a.username||'').toLowerCase())} ${a.action.toLowerCase()} ${esc((a.details||'').toLowerCase())}">
                   <td style="white-space:nowrap">${new Date(a.created_at).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}</td>
-                  <td>${a.username||'—'}</td>
+                  <td>${esc(a.username||'—')}</td>
                   <td><span class="badge badge-gray">${a.action}</span></td>
-                  <td>${a.details||'—'}</td>
+                  <td>${esc(a.details||'—')}</td>
                 </tr>`).join('')}
             </tbody>
           </table>
@@ -2937,12 +2938,12 @@ async function renderAdminRefundsTab() {
             <tbody id="refunds-tb">
               ${refunds.length===0
                 ? `<tr class="empty-row"><td colspan="9">${emptyState('logout', 'No checkouts yet', 'Deposit refunds appear here once a resident checks out.', '')}</td></tr>`
-                : refunds.map(r=>`<tr data-search="${r.guest_name.toLowerCase()} ${(r.room_number||'').toLowerCase()}">
+                : refunds.map(r=>`<tr data-search="${esc(r.guest_name.toLowerCase())} ${esc((r.room_number||'').toLowerCase())}">
                   <td>${fmtDate(r.created_at)}</td>
-                  <td><strong>${r.guest_name}</strong></td>
-                  <td>${r.room_number||'—'}</td>
+                  <td><strong>${esc(r.guest_name)}</strong></td>
+                  <td>${esc(r.room_number||'—')}</td>
                   <td>${fmt(r.deposit_amount)}</td>
-                  <td class="text-red">${fmt(r.deductions)}${r.deduction_notes?` <span class="text-muted" style="font-size:11px">(${r.deduction_notes})</span>`:''}</td>
+                  <td class="text-red">${fmt(r.deductions)}${r.deduction_notes?` <span class="text-muted" style="font-size:11px">(${esc(r.deduction_notes)})</span>`:''}</td>
                   <td class="${parseFloat(r.refund_amount)<0?'text-red':'text-green'} fw-600">${fmt(r.refund_amount)}</td>
                   <td>${r.refund_mode}</td>
                   <td>${r.processed_by_username||'—'}</td>
@@ -3105,7 +3106,7 @@ function initTabBar() {
   bar.className = 'sm-tabbar';
   bar.innerHTML = SM_TABS.map(t => `
     <button class="sm-tab" data-tab="${t.page}" type="button">
-      <span class="sm-tab-icon">${icon(t.ic, 'ic ic-lg')}</span>${t.label}
+      <span class="sm-tab-icon">${icon(t.ic, 'ic ic-lg')}</span>${esc(t.label)}
     </button>`).join('');
   document.getElementById('app').appendChild(bar);
   bar.querySelectorAll('.sm-tab').forEach(b => {
@@ -3187,7 +3188,7 @@ function renderCollectPeople() {
     const total = due + dep;
     return `<button type="button" class="sm-person ${collectState.guest?.id === g.id ? 'selected' : ''}" onclick="selectCollectGuest(${g.id})">
       <span>
-        <span class="sm-person-name">${g.name}</span><br>
+        <span class="sm-person-name">${esc(g.name)}</span><br>
         <span class="sm-person-sub">${g.room_number ? 'Room ' + g.room_number : 'No room'} · ${fmt(g.monthly_rent)}/mo</span>
       </span>
       <span class="sm-person-due ${total > 0 ? 'text-red' : 'text-green'}">${total > 0 ? fmt(total) : 'Settled'}</span>
@@ -3285,7 +3286,7 @@ function showCollectDone(g, amount, saved) {
     <div class="card sm-done-card">
       <div class="sm-done-tick">✅</div>
       <h3 style="margin:8px 0 4px">${fmt(amount)} recorded</h3>
-      <p class="text-muted" style="margin-bottom:6px">${g.name}${g.room_number ? ' · Room ' + g.room_number : ''}</p>
+      <p class="text-muted" style="margin-bottom:6px">${esc(g.name)}${g.room_number ? ' · Room ' + g.room_number : ''}</p>
       ${pending ? `<p style="font-size:13px;color:var(--amber)">Waiting for admin confirmation before it counts as income.</p>` : ''}
       <div style="display:grid;gap:10px;max-width:320px;margin:18px auto 0">
         ${wa ? `<a class="btn btn-success" style="justify-content:center" href="${wa}" target="_blank" rel="noopener">${icon('whatsapp')} Send receipt on WhatsApp</a>` : `<span class="text-muted" style="font-size:13px">No phone number on file for WhatsApp</span>`}
@@ -3437,7 +3438,7 @@ function showCollectPreview(text, p) {
   box.innerHTML = `
     <div class="card" style="padding:14px;border:2px solid var(--primary);background:var(--accent-soft)">
       <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted,var(--text-muted))">AI heard — please check</div>
-      <div style="font-size:16px;font-weight:700;margin:6px 0 2px">${p.guest.name}${p.guest.room_number ? ' · Room ' + p.guest.room_number : ''}</div>
+      <div style="font-size:16px;font-weight:700;margin:6px 0 2px">${esc(p.guest.name)}${p.guest.room_number ? ' · Room ' + p.guest.room_number : ''}</div>
       <div style="font-size:14px">${p.amount ? '<strong>' + fmt(p.amount) + '</strong>' : '<span class="text-red">amount not heard</span>'} · ${p.mode || 'mode not heard'} · ${p.type}</div>
       ${p.amount && due > 0 && Math.abs(p.amount - due) > 0.5 ? `<div style="font-size:12px;color:var(--amber);margin-top:4px">Her running balance is ${fmt(due)} — different from what was said.</div>` : ''}
       <div class="flex gap-2" style="margin-top:10px">
@@ -3542,8 +3543,8 @@ async function guestScanId() {
       <div class="card" style="padding:12px;border:2px solid var(--primary);background:var(--accent-soft);margin-bottom:12px">
         <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted,var(--text-muted))">Read from the ID (${f.confidence} confidence) — please check</div>
         <div style="font-size:14px;margin:6px 0">
-          <strong>${f.name || 'name not found'}</strong>${f.id_proof_type ? ' · ' + f.id_proof_type : ''}${f.id_proof_number ? ' · ' + f.id_proof_number.replace(/.(?=.{4})/g, '•') : ''}<br>
-          <span style="font-size:13px;color:var(--text-muted,var(--text-muted))">${f.address || 'address not found'}</span>
+          <strong>${esc(f.name || 'name not found')}</strong>${f.id_proof_type ? ' · ' + f.id_proof_type : ''}${f.id_proof_number ? ' · ' + f.id_proof_number.replace(/.(?=.{4})/g, '•') : ''}<br>
+          <span style="font-size:13px;color:var(--text-muted,var(--text-muted))">${esc(f.address || 'address not found')}</span>
         </div>
         <div class="flex gap-2">
           <button class="btn btn-primary btn-sm" onclick='guestUseScan(${JSON.stringify(f).replace(/'/g, "&#39;")})'>✓ Use this</button>
@@ -3600,8 +3601,8 @@ async function loadAttention() {
       <div style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--border)">
         <span style="flex:0 0 8px;height:8px;border-radius:50%;background:${color[f.level]};margin-top:6px"></span>
         <div style="flex:1;min-width:0">
-          <div style="font-size:14px;font-weight:600">${f.title}${f.why ? whyBtn(f.why, 'Why is this flagged?') : ''}</div>
-          <div style="font-size:12px;color:var(--text-muted,var(--text-muted))">${f.detail}</div>
+          <div style="font-size:14px;font-weight:600">${esc(f.title)}${f.why ? whyBtn(f.why, 'Why is this flagged?') : ''}</div>
+          <div style="font-size:12px;color:var(--text-muted,var(--text-muted))">${esc(f.detail)}</div>
         </div>
         ${f.action ? `<button class="btn btn-outline btn-sm" style="min-height:36px" onclick="navigate('${f.action}')">Open</button>` : ''}
       </div>`).join('') + (flags.length > 6 ? `<div class="text-muted" style="font-size:12px;padding-top:8px">…and ${flags.length - 6} more in the owner report</div>` : '');
@@ -3622,15 +3623,15 @@ async function loadBrief(force) {
     pill.onclick = () => showHealthDetail(b.health);
     const level = (arr, dot) => arr.map(l => `<div class="brief-line">${dot} ${l}</div>`).join('');
     body.innerHTML = `
-      <div class="brief-date">${b.dateLabel}</div>
+      <div class="brief-date">${esc(b.dateLabel)}</div>
       <div class="brief-section"><div class="brief-h">What changed</div>${b.changed.map(l => `<div class="brief-line">• ${l}</div>`).join('')}</div>
       <div class="brief-section"><div class="brief-h">Needs attention</div>
         ${level(b.attention.high, '🔴')}${level(b.attention.medium, '🟠')}${level(b.attention.low, '🟢')}
         ${!b.attention.high.length && !b.attention.medium.length && !b.attention.low.length ? '<div class="brief-line">✅ Nothing needs attention</div>' : ''}
       </div>
       <div class="brief-section"><div class="brief-h">Siri recommends</div>
-        ${b.recommendations.map((r, i) => `<div class="brief-rec"><span>${i + 1}. ${r.text}</span>
-          <button class="btn btn-primary btn-sm" onclick='${r.action.navigate ? `navigate("${r.action.navigate}")` : `copilotAsk(${JSON.stringify(r.action.ask)})`}'>${r.action.label}</button></div>`).join('')}
+        ${b.recommendations.map((r, i) => `<div class="brief-rec"><span>${i + 1}. ${esc(r.text)}</span>
+          <button class="btn btn-primary btn-sm" onclick='${r.action.navigate ? `navigate("${r.action.navigate}")` : `copilotAsk(${JSON.stringify(r.action.ask)})`}'>${esc(r.action.label)}</button></div>`).join('')}
       </div>`;
     const when = new Date(b.computed_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
     document.getElementById('brief-meta').textContent = `Computed ${when}${b.cached ? ' · tap ↻ for fresh numbers' : ''}`;
@@ -3639,7 +3640,7 @@ async function loadBrief(force) {
 function showHealthDetail(h) {
   const rows = Object.entries(h.components).map(([k, c]) => `
     <div style="display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--border)">
-      <div><div style="font-weight:600;text-transform:capitalize">${k}</div><div style="font-size:12px;color:var(--text-muted,var(--text-muted))">${c.why}</div></div>
+      <div><div style="font-weight:600;text-transform:capitalize">${k}</div><div style="font-size:12px;color:var(--text-muted,var(--text-muted))">${esc(c.why)}</div></div>
       <div style="font-size:18px;font-weight:700;white-space:nowrap">${c.score == null ? '—' : c.score}</div>
     </div>`).join('');
   openModal(`<div class="modal"><div class="modal-header"><h3>Property health · ${h.overall}/100</h3><button class="modal-close" onclick="closeModal()">×</button></div>
@@ -3697,10 +3698,10 @@ async function renderReminders() {
     ${list.length ? list.map((g, i) => `
       <div class="card" style="padding:14px;margin-bottom:12px" id="rem-${g.guest_id}">
         <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
-          <div><strong style="font-size:15px">${g.name}</strong><div class="text-muted" style="font-size:12px">${g.room_number ? 'Room ' + g.room_number + ' · ' : ''}${fmt(g.amount_due)} due${g.months_behind >= 1 ? ' · ' + g.months_behind + ' month' + (g.months_behind === 1 ? '' : 's') : ''}</div></div>
+          <div><strong style="font-size:15px">${esc(g.name)}</strong><div class="text-muted" style="font-size:12px">${g.room_number ? 'Room ' + g.room_number + ' · ' : ''}${fmt(g.amount_due)} due${g.months_behind >= 1 ? ' · ' + g.months_behind + ' month' + (g.months_behind === 1 ? '' : 's') : ''}</div></div>
           ${g.last_reminded ? `<span class="badge badge-gray" title="Last reminded">sent ${fmtDate(g.last_reminded)}</span>` : ''}
         </div>
-        <textarea id="rem-text-${g.guest_id}" rows="4" style="margin-top:10px;font-size:14px">${g.text}</textarea>
+        <textarea id="rem-text-${g.guest_id}" rows="4" style="margin-top:10px;font-size:14px">${esc(g.text)}</textarea>
         <div class="flex gap-2" style="margin-top:8px">
           ${g.phone ? `<button class="btn btn-success btn-sm" onclick="sendReminder(${g.guest_id})">${icon('whatsapp')} Send on WhatsApp</button>` : `<span class="text-muted" style="font-size:12px">No phone on file</span>`}
           <button class="btn btn-outline btn-sm" onclick="collectFrom(${g.guest_id})">${icon('rupee')} Collect</button>
@@ -3734,8 +3735,8 @@ async function loadOwnerReport(force) {
     ownerReportCache = r;
     out.textContent = r.summary;
     document.getElementById('owner-forecast').innerHTML = `Next 3 months (simple projection): ` +
-      r.forecast.months.map(m => `<strong>${m.label}</strong> ${fmt(m.income)} in / ${fmt(m.expenses)} out`).join(' · ') +
-      `<br><span style="font-size:11px">${r.forecast.basis}</span>`;
+      r.forecast.months.map(m => `<strong>${esc(m.label)}</strong> ${fmt(m.income)} in / ${fmt(m.expenses)} out`).join(' · ') +
+      `<br><span style="font-size:11px">${esc(r.forecast.basis)}</span>`;
     document.getElementById('owner-meta').textContent = `${r.cached ? 'Final report' : 'Computed just now'} · ${new Date(r.generated_at).toLocaleString('en-IN')}`;
   } catch (e) { out.textContent = 'Could not load the owner report: ' + e.message; }
 }
@@ -3843,26 +3844,26 @@ function renderCopilotResult(r) {
   const out = document.getElementById('copilot-out');
   const ev = (r.evidence || []).slice(0, 8);
   const evidence = ev.length ? `<div class="copilot-evidence">${ev.map(x => {
-    if (x.text && x.name) return `<div><strong>${x.name}</strong>${x.room ? ' · Room ' + x.room : ''} — ${fmt(x.amount_due)}</div>`;
-    if (x.name && 'amount_due' in x) return `<div><strong>${x.name}</strong>${x.room || x.room_number ? ' · Room ' + (x.room || x.room_number) : ''} — ${fmt(x.amount_due)}${x.months ? ` · ${x.months} mo` : ''}</div>`;
-    if (x.room_number && 'vacant' in x) return `<div><strong>Room ${x.room_number}</strong> — ${x.vacant} free of ${x.total_beds}${x.residents && x.residents.length ? ' · ' + x.residents.map(z => z.name).join(', ') : ''}</div>`;
+    if (x.text && x.name) return `<div><strong>${esc(x.name)}</strong>${x.room ? ' · Room ' + x.room : ''} — ${fmt(x.amount_due)}</div>`;
+    if (x.name && 'amount_due' in x) return `<div><strong>${esc(x.name)}</strong>${x.room || x.room_number ? ' · Room ' + (x.room || x.room_number) : ''} — ${fmt(x.amount_due)}${x.months ? ` · ${x.months} mo` : ''}</div>`;
+    if (x.room_number && 'vacant' in x) return `<div><strong>Room ${esc(x.room_number)}</strong> — ${x.vacant} free of ${x.total_beds}${x.residents && x.residents.length ? ' · ' + x.residents.map(z => z.name).join(', ') : ''}</div>`;
     if (x.category && x.description) return `<div><strong>${esc(x.category)}</strong> · ${x.priority || ''}${x.room_number ? ' · Room ' + x.room_number : ''} — ${esc(x.description)}${x.age_days != null ? ` (${x.age_days} d)` : ''}</div>`;
     return `<div>${x.name || x.title || JSON.stringify(x)}</div>`;
   }).join('')}${(r.evidence || []).length > 8 ? `<div class="text-muted">…and ${r.evidence.length - 8} more</div>` : ''}</div>` : '';
   const preview = r.proposal ? `<div class="copilot-preview"><div class="copilot-preview-h">Siri prepared — check before confirming</div>${previewRows(r.proposal.preview)}</div>` : '';
   const wizardBtn = r.openWizard ? `<button class="btn btn-success" onclick='openWizardFromCopilot(${JSON.stringify(r.openWizard).replace(/'/g, "&#39;")});copilotDismiss()'>${r.openWizard.kind === 'checkout' ? 'Open checkout' : 'Open move-in form'}</button>` : '';
   const catChips = (r.actions || []).filter(a => a.chip === 'category');
-  const catRow = catChips.length ? `<div class="copilot-cats"><span class="copilot-cats-l">${r.proposal && r.proposal.preview && r.proposal.preview.category === 'Other' ? 'Category?' : 'Not ' + (r.proposal && r.proposal.preview ? r.proposal.preview.category : 'this') + '?'}</span>${catChips.map(a => `<button class="chip-cat" onclick='copilotRetool(${JSON.stringify(a).replace(/'/g, "&#39;")})'>${a.label}</button>`).join('')}</div>` : '';
+  const catRow = catChips.length ? `<div class="copilot-cats"><span class="copilot-cats-l">${r.proposal && r.proposal.preview && r.proposal.preview.category === 'Other' ? 'Category?' : 'Not ' + (r.proposal && r.proposal.preview ? r.proposal.preview.category : 'this') + '?'}</span>${catChips.map(a => `<button class="chip-cat" onclick='copilotRetool(${JSON.stringify(a).replace(/'/g, "&#39;")})'>${esc(a.label)}</button>`).join('')}</div>` : '';
   const buttons = wizardBtn + (r.actions || []).filter(a => a.chip !== 'category').map(a => {
-    if (a.confirm) return `<button class="btn btn-success" onclick="copilotConfirm('${a.confirm}', this)">✓ ${a.label}</button>`;
-    if (a.navigate) return `<button class="btn btn-outline btn-sm" onclick="navigate('${a.navigate}')">${a.label}</button>`;
-    if (a.download) return `<button class="btn btn-outline btn-sm" onclick="API.downloadExport('${a.download}','${a.filename || 'file'}').catch(e=>toast(e.message))">📄 ${a.label}</button>`;
-    if (a.tool) return `<button class="btn btn-outline btn-sm" onclick='copilotRetool(${JSON.stringify(a).replace(/'/g, "&#39;")})'>${a.label}</button>`;
+    if (a.confirm) return `<button class="btn btn-success" onclick="copilotConfirm(${esc(JSON.stringify(a.confirm))}, this)">✓ ${esc(a.label)}</button>`;
+    if (a.navigate) return `<button class="btn btn-outline btn-sm" onclick="navigate(${esc(JSON.stringify(a.navigate))})">${esc(a.label)}</button>`;
+    if (a.download) return `<button class="btn btn-outline btn-sm" onclick="API.downloadExport(${esc(JSON.stringify(a.download))},'${a.filename || 'file'}').catch(e=>toast(e.message))">📄 ${esc(a.label)}</button>`;
+    if (a.tool) return `<button class="btn btn-outline btn-sm" onclick='copilotRetool(${JSON.stringify(a).replace(/'/g, "&#39;")})'>${esc(a.label)}</button>`;
     return '';
   }).join('');
   const conf = r.confidence === 'low' ? '<span class="copilot-conf">not sure</span>' : '';
   out.innerHTML = `<div class="copilot-answer ${r.clarify ? 'copilot-ask' : ''}">
-    <div class="copilot-text">${(r.answer || '').replace(/\n/g, '<br>')} ${conf}</div>${evidence}${preview}
+    <div class="copilot-text">${esc(r.answer || '').replace(/\n/g, '<br>')} ${conf}</div>${evidence}${preview}
     ${buttons ? `<div class="copilot-actions">${buttons}${r.proposal ? '<button class="btn btn-outline btn-sm" onclick="copilotDismiss()">✗ Cancel</button>' : ''}</div>` : ''}${catRow}
   </div>`;
   // Sprint 14: "What was ₹300 for?" leaves "300 " in the box, cursor at the
@@ -3872,7 +3873,7 @@ function renderCopilotResult(r) {
 function previewRows(p) {
   if (!p) return '';
   const label = { guest_name: 'Resident', amount: 'Amount', payment_mode: 'Mode', collection_type: 'Type', collection_date: 'Date', collection_month: 'For', category: 'Category', paid_to: 'Paid to', description: 'Details', purchase_date: 'Date', priority: 'Priority', title: 'Title', message: 'Message', effective_from: 'From', bed_number: 'Bed', id: 'Request', from: 'Currently', status: 'Change to', note: 'Note', room_number: 'Room' };
-  return Object.entries(p).filter(([k, v]) => label[k] && v !== null && v !== '' && v !== undefined).map(([k, v]) => `<div class="copilot-kv"><span>${label[k]}</span><strong>${k === 'amount' ? fmt(v) : v}</strong></div>`).join('');
+  return Object.entries(p).filter(([k, v]) => label[k] && v !== null && v !== '' && v !== undefined).map(([k, v]) => `<div class="copilot-kv"><span>${label[k]}</span><strong>${k === 'amount' ? fmt(v) : esc(v)}</strong></div>`).join('');
 }
 async function copilotConfirm(id, btn) {
   btn.disabled = true; btn.textContent = 'Saving…';
@@ -3910,8 +3911,8 @@ async function renderAdminCopilotTab() {
       ${rows.map(r => {
         const i = r.interpretation || {};
         const did = r.request_text === 'confirm' ? `Confirmed ${i.tool || r.proposal_tool || ''}` : (i.tool ? `${i.tool}${i.via ? ' · ' + i.via : ''}` : (i.clarify ? 'Asked: ' + i.clarify : '—'));
-        const outcome = r.error ? `<span class="badge badge-red">${r.error}</span>` : r.confirmed_at ? `<span class="badge badge-green">done</span>` : r.proposal_id && !r.proposal_confirmed_at ? `<span class="badge badge-amber">prepared, not confirmed</span>` : `<span class="badge badge-gray">answered</span>`;
-        return `<tr><td>${new Date(r.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td><td>${r.username || '—'}</td><td>${r.request_text === 'confirm' ? `<em>${r.preview_text || 'confirm'}</em>` : r.request_text}</td><td>${did}</td><td>${outcome}${r.result_text && r.request_text !== 'confirm' ? `<div class="text-muted" style="font-size:11px;margin-top:2px">${r.result_text.slice(0, 80)}</div>` : ''}</td></tr>`;
+        const outcome = r.error ? `<span class="badge badge-red">${esc(r.error)}</span>` : r.confirmed_at ? `<span class="badge badge-green">done</span>` : r.proposal_id && !r.proposal_confirmed_at ? `<span class="badge badge-amber">prepared, not confirmed</span>` : `<span class="badge badge-gray">answered</span>`;
+        return `<tr><td>${new Date(r.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td><td>${esc(r.username || '—')}</td><td>${r.request_text === 'confirm' ? `<em>${esc(r.preview_text || 'confirm')}</em>` : esc(r.request_text)}</td><td>${esc(did)}</td><td>${outcome}${r.result_text && r.request_text !== 'confirm' ? `<div class="text-muted" style="font-size:11px;margin-top:2px">${esc(r.result_text.slice(0, 80))}</div>` : ''}</td></tr>`;
       }).join('')}</tbody></table></div></div>`;
   } catch (e) { host.innerHTML = `<div class="alert alert-danger">${e.message}</div>`; }
 }
@@ -3960,7 +3961,7 @@ function renderSubtabs(group, active) {
   const def = NAV_GROUPS[group];
   if (!def) return '';
   return `<div class="subtabs">${def.tabs.filter(t => !t.admin || isAdmin())
-    .map(t => `<button class="subtab ${t.page === active ? 'active' : ''}" onclick="navigate('${t.page}')">${t.label}</button>`).join('')}</div>`;
+    .map(t => `<button class="subtab ${t.page === active ? 'active' : ''}" onclick="navigate(${esc(JSON.stringify(t.page))})">${esc(t.label)}</button>`).join('')}</div>`;
 }
 // Landing on a group opens its first tab; the strip then rides above it.
 async function pgFinance() { navigate(isAdmin() ? 'finance-overview' : 'collect'); }
@@ -4027,18 +4028,18 @@ async function runSearch() {
       parts.push(`<div class="search-group">${label}</div>`);
       rows.forEach(row => { const i = searchRows.length; searchRows.push({ go: () => go(row) }); parts.push(`<button class="search-item" data-i="${i}" onclick="searchRows[${i}].go()">${render(row)}</button>`); });
     };
-    add('Residents', r.residents, g => `${icon('users')}<span><span>${g.name}${g.is_active ? '' : ' <span class="s-sub">(past)</span>'}</span><div class="s-sub">${g.room_number ? 'Room ' + g.room_number : 'No room'}${g.phone ? ' · ' + g.phone : ''}</div></span>${g.amount_due > 0 ? `<span class="s-right text-red">${fmt(g.amount_due)}</span>` : ''}`,
+    add('Residents', r.residents, g => `${icon('users')}<span><span>${esc(g.name)}${g.is_active ? '' : ' <span class="s-sub">(past)</span>'}</span><div class="s-sub">${g.room_number ? 'Room ' + g.room_number : 'No room'}${g.phone ? ' · ' + g.phone : ''}</div></span>${g.amount_due > 0 ? `<span class="s-right text-red">${fmt(g.amount_due)}</span>` : ''}`,
       g => { closeSearch(); navigateThen('guests', () => viewGuest(g.id)); });
-    add('Rooms', r.rooms, x => `${icon('bed')}<span><span>Room ${x.room_number}</span><div class="s-sub">Floor ${x.floor} · ${x.occupied}/${x.total_beds} beds</div></span>${x.vacant ? `<span class="s-right text-green">${x.vacant} free</span>` : ''}`,
+    add('Rooms', r.rooms, x => `${icon('bed')}<span><span>Room ${esc(x.room_number)}</span><div class="s-sub">Floor ${x.floor} · ${x.occupied}/${x.total_beds} beds</div></span>${x.vacant ? `<span class="s-right text-green">${x.vacant} free</span>` : ''}`,
       () => { closeSearch(); navigate('rooms'); });
-    add('Payments', r.payments, p => `${icon('receipt')}<span><span>${p.guest_name} — ${fmt(p.amount)}</span><div class="s-sub">${p.receipt_number || ''} · ${fmtDate(p.collection_date)}${p.status !== 'confirmed' ? ' · ' + p.status : ''}</div></span>`,
+    add('Payments', r.payments, p => `${icon('receipt')}<span><span>${esc(p.guest_name)} — ${fmt(p.amount)}</span><div class="s-sub">${esc(p.receipt_number || '')} · ${fmtDate(p.collection_date)}${p.status !== 'confirmed' ? ' · ' + p.status : ''}</div></span>`,
       () => { closeSearch(); navigate('payments'); });
     add('Requests', r.requests, c => `${icon('wrench')}<span><span>${esc(c.category)}${c.room_number ? ' · Room ' + c.room_number : ''}</span><div class="s-sub">${esc(c.description.slice(0, 60))} · ${c.status}</div></span>`,
       () => { closeSearch(); navigate('complaints'); });
     // "Nothing matches" is about the SEARCH, so the Ask Siri row must not
     // stand in for a result — say it plainly, then still offer to ask Siri.
     const foundAny = parts.filter(Boolean).length > (renderedCommands ? 1 : 0);
-    if (!foundAny) parts.push(`<div class="search-group">Nothing matches “${q}”</div>`);
+    if (!foundAny) parts.push(`<div class="search-group">Nothing matches “${esc(q)}”</div>`);
     parts.push(renderPaletteAsk(q));
     host.innerHTML = parts.filter(Boolean).join('');
   } catch (e) { searchRows = []; host.innerHTML = (renderPaletteCommands(q) || '') + renderPaletteAsk(q) + `<div class="search-group">${e.message}</div>`; }
@@ -4071,7 +4072,7 @@ function openQuickActions() {
     </form>
     <div class="qe-or">or open a form</div>` +
     QUICK_ACTIONS.filter(a => !a.admin || isAdmin())
-    .map((a, i) => `<button class="qa-item" onclick="runQuickAction(${i})">${icon(a.icon, 'ic ic-lg')} ${a.label}</button>`).join('');
+    .map((a, i) => `<button class="qa-item" onclick="runQuickAction(${i})">${icon(a.icon, 'ic ic-lg')} ${esc(a.label)}</button>`).join('');
   document.body.appendChild(back); document.body.appendChild(sheet);
   setTimeout(() => { const i = document.getElementById('qe-input'); if (i) i.focus(); }, 30);
 }
@@ -4109,11 +4110,12 @@ async function pgHome(force) {
   const rec = h.recommendations || [];
   const level = (arr, dot) => arr.map(l => `<div class="today-row"><span>${dot}</span><span class="t-main">${l}</span></div>`).join('');
   const hasAttention = h.attention.high.length || h.attention.medium.length || h.attention.low.length;
-  const row = (ic, main, sub, action) => `<div class="today-row">${icon(ic)}<span class="t-main">${main}${sub ? `<div class="t-sub">${sub}</div>` : ''}</span>${action || ''}</div>`;
+  // main/sub are always plain text (names, categories, counts) — escaped here once (S15.2 review F-1)
+  const row = (ic, main, sub, action) => `<div class="today-row">${icon(ic)}<span class="t-main">${esc(main)}${sub ? `<div class="t-sub">${esc(sub)}</div>` : ''}</span>${action || ''}</div>`;
 
   setContent(`
-    <div class="home-greeting">${h.brief.greeting}, ${h.user.username}</div>
-    <div class="home-date">${h.brief.dateLabel}${h.brief.health ? ` · <span class="health-pill ${h.brief.health.overall >= 80 ? 'good' : h.brief.health.overall >= 60 ? 'ok' : 'low'}" onclick='showHealthDetail(homeCache.brief.health)'>Health ${h.brief.health.overall}</span>` : ''}</div>
+    <div class="home-greeting">${esc(h.brief.greeting)}, ${esc(h.user.username)}</div>
+    <div class="home-date">${esc(h.brief.dateLabel)}${h.brief.health ? ` · <span class="health-pill ${h.brief.health.overall >= 80 ? 'good' : h.brief.health.overall >= 60 ? 'ok' : 'low'}" onclick='showHealthDetail(homeCache.brief.health)'>Health ${h.brief.health.overall}</span>` : ''}</div>
 
     <div class="card mb-6" id="brief-card">
       <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
@@ -4139,8 +4141,8 @@ async function pgHome(force) {
 
     ${rec.length ? `<div class="home-section-h">Siri recommends</div>
     <div class="card"><div style="padding:4px 16px">
-      ${rec.map((r, i) => `<div class="today-row"><span class="t-main"><strong>${i + 1}.</strong> ${r.text}</span>
-        <button class="btn btn-primary btn-sm" onclick='${r.action.navigate ? `navigate("${r.action.navigate}")` : `copilotAsk(${JSON.stringify(r.action.ask)})`}'>${r.action.label}</button></div>`).join('')}
+      ${rec.map((r, i) => `<div class="today-row"><span class="t-main"><strong>${i + 1}.</strong> ${esc(r.text)}</span>
+        <button class="btn btn-primary btn-sm" onclick='${r.action.navigate ? `navigate("${r.action.navigate}")` : `copilotAsk(${JSON.stringify(r.action.ask)})`}'>${esc(r.action.label)}</button></div>`).join('')}
     </div></div>` : ''}
 
     <div class="home-section-h">Today</div>
@@ -4259,9 +4261,9 @@ function renderResident360() {
       ${!g.id_proof_type ? `<button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="guestModal(null, ${g.id})">Add ID proof</button>` : ''}`
   };
   openModal(`<div class="modal modal-lg">
-    <div class="modal-header"><h3>${g.name}${g.room_number ? ` · Room ${g.room_number}` : ''}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+    <div class="modal-header"><h3>${esc(g.name)}${g.room_number ? ` · Room ${esc(g.room_number)}` : ''}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
     <div class="modal-body">
-      <div class="subtabs">${R360_TABS.map(t => `<button class="subtab ${t.id === r360.tab ? 'active' : ''}" onclick="r360.tab='${t.id}';renderResident360()">${t.label}</button>`).join('')}</div>
+      <div class="subtabs">${R360_TABS.map(t => `<button class="subtab ${t.id === r360.tab ? 'active' : ''}" onclick="r360.tab='${t.id}';renderResident360()">${esc(t.label)}</button>`).join('')}</div>
       <div id="r360-body">${body[r360.tab]()}</div>
     </div></div>`);
   if (r360.tab === 'docs') loadResidentDocs(g.id);
@@ -4280,14 +4282,14 @@ function renderMoveIn() {
   const d = moveIn.data, free = moveIn.rooms.filter(r => (r.total_beds - (r.occupied_beds || 0)) > 0);
   const steps = [
     { t: 'Who is moving in?', html: `
-      <div class="form-group"><label>Full name *</label><input id="mi-name" value="${d.name || ''}" placeholder="As on her ID"/></div>
-      <div class="form-group"><label>Phone *</label><input id="mi-phone" inputmode="numeric" value="${d.phone || ''}" placeholder="10-digit mobile"/></div>` },
+      <div class="form-group"><label>Full name *</label><input id="mi-name" value="${esc(d.name || '')}" placeholder="As on her ID"/></div>
+      <div class="form-group"><label>Phone *</label><input id="mi-phone" inputmode="numeric" value="${esc(d.phone || '')}" placeholder="10-digit mobile"/></div>` },
     { t: 'Emergency contact', html: `
-      <div class="form-group"><label>Name</label><input id="mi-ec-name" value="${d.emergency_contact_name || ''}" placeholder="Parent or guardian"/></div>
-      <div class="form-group"><label>Phone</label><input id="mi-ec" inputmode="numeric" value="${d.emergency_contact || ''}"/></div>` },
+      <div class="form-group"><label>Name</label><input id="mi-ec-name" value="${esc(d.emergency_contact_name || '')}" placeholder="Parent or guardian"/></div>
+      <div class="form-group"><label>Phone</label><input id="mi-ec" inputmode="numeric" value="${esc(d.emergency_contact || '')}"/></div>` },
     { t: 'Room and bed', html: `
-      <div class="form-group"><label>Room *</label><select id="mi-room">${['<option value="">— choose —</option>'].concat(free.map(r => `<option value="${r.id}" ${String(d.room_id) === String(r.id) ? 'selected' : ''}>Room ${r.room_number} · ${r.total_beds - (r.occupied_beds || 0)} free · ${fmt(r.monthly_rent)}</option>`)).join('')}</select></div>
-      <div class="form-group"><label>Bed</label><input id="mi-bed" value="${d.bed_number || ''}" placeholder="e.g. 2"/></div>
+      <div class="form-group"><label>Room *</label><select id="mi-room">${['<option value="">— choose —</option>'].concat(free.map(r => `<option value="${r.id}" ${String(d.room_id) === String(r.id) ? 'selected' : ''}>Room ${esc(r.room_number)} · ${r.total_beds - (r.occupied_beds || 0)} free · ${fmt(r.monthly_rent)}</option>`)).join('')}</select></div>
+      <div class="form-group"><label>Bed</label><input id="mi-bed" value="${esc(d.bed_number || '')}" placeholder="e.g. 2"/></div>
       <div id="mi-ready" class="text-muted" style="font-size:12px"></div>` },
     { t: 'Rent and deposit', html: `
       <div class="form-group"><label>Monthly rent *</label><input id="mi-rent" type="number" inputmode="numeric" value="${d.monthly_rent != null ? d.monthly_rent : ''}"/></div>
@@ -4299,7 +4301,7 @@ function renderMoveIn() {
         <span id="mi-scan-status" class="voice-status">Photograph her Aadhaar / ID to fill these in. The photo is never stored.</span></div>
       <div class="form-row"><div class="form-group"><label>Type</label><select id="mi-idtype">${['', 'Aadhaar', 'PAN Card', 'Passport', 'Driving License', 'Voter ID'].map(t => `<option value="${t}" ${d.id_proof_type === t ? 'selected' : ''}>${t || '— select —'}</option>`).join('')}</select></div>
       <div class="form-group"><label>Number</label><input id="mi-idnum" value="${d.id_proof_number || ''}"/></div></div>
-      <div class="form-group"><label>Address</label><textarea id="mi-address" rows="2">${d.address || ''}</textarea></div>` },
+      <div class="form-group"><label>Address</label><textarea id="mi-address" rows="2">${esc(d.address || '')}</textarea></div>` },
     { t: 'First payment (optional)', html: `
       <p class="text-muted" style="font-size:13px;margin-bottom:10px">Record what she is paying today. Leave blank to skip.</p>
       <div class="form-row"><div class="form-group"><label>Deposit received</label><input id="mi-pay-dep" type="number" inputmode="numeric" value="${d.pay_deposit || ''}"/></div>
@@ -4410,8 +4412,27 @@ async function moveInSave() {
   if (+d.pay_deposit > 0) pays.push({ collection_type: 'deposit', amount: +d.pay_deposit });
   if (+d.pay_rent > 0) pays.push({ collection_type: 'rent', amount: +d.pay_rent });
   const failed = [];
+  // A failed request may still have reached the server (4G drops the reply,
+  // not the request). Before re-sending, look for the move-in record this
+  // wizard would have written — the server has no duplicate check of its own.
+  let existing = [];
+  if (moveIn.attempts) {
+    try {
+      const jd = new Date(d.join_date);
+      existing = (await apiFetch(`/collections?month=${jd.getMonth() + 1}&year=${jd.getFullYear()}`))
+        .filter(c => c.guest_id === g.id && c.description === 'At move-in');
+    } catch (e) {
+      unlock('↻ Retry saving the payment');
+      const msg = `${g.name} is added. Could not check which payments reached the server (${e.message}). Tap Retry when the connection is back — nothing will be recorded twice.`;
+      if (al) showAlert(al, msg); else toast(msg);
+      return;
+    }
+  }
+  moveIn.attempts = (moveIn.attempts || 0) + 1;
   for (const p of pays) {
     if (moveIn.paidDone[p.collection_type]) continue;   // already saved on an earlier tap
+    const already = existing.find(c => c.collection_type === p.collection_type && Number(c.amount) === p.amount);
+    if (already) { moveIn.paidDone[p.collection_type] = p.amount; continue; }   // it did save; the reply was lost
     try {
       await API.createCollection({ guest_id: g.id, guest_name: g.name, amount: p.amount, collection_date: d.join_date,
         collection_type: p.collection_type, payment_mode: d.pay_mode || 'Cash', collection_month: new Date(d.join_date).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }), description: 'At move-in' });
@@ -4463,7 +4484,7 @@ function renderCheckout() {
       ${due > 0 ? `<div class="alert alert-warning" style="display:block;margin-top:10px">She still owes ${fmt(due)}. Collect it first, or deduct it from the deposit on the next step.</div>` : ''}` },
     { t: 'Room inspection and deductions', html: `
       <div class="form-group"><label>Deductions from deposit</label><input id="co-ded" type="number" inputmode="numeric" value="${data.deductions}" placeholder="0"/></div>
-      <div class="form-group"><label>What for?</label><textarea id="co-notes" rows="2" placeholder="Damage, unpaid rent, cleaning…">${data.deduction_notes}</textarea></div>
+      <div class="form-group"><label>What for?</label><textarea id="co-notes" rows="2" placeholder="Damage, unpaid rent, cleaning…">${esc(data.deduction_notes)}</textarea></div>
       ${due > 0 ? `<button class="btn btn-outline btn-sm" onclick="document.getElementById('co-ded').value=${Math.min(due, deposit)};document.getElementById('co-notes').value='Unpaid rent at checkout'">Deduct the ${fmt(Math.min(due, deposit))} she owes</button>` : ''}` },
     { t: 'Refund', html: `
       <div class="copilot-preview">${[['Deposit agreed', fmt(deposit)], ['Deductions', ded ? '− ' + fmt(ded) : '—'], ['Refund due', fmt(refund)]].map(([k, v]) => `<div class="copilot-kv"><span>${k}</span><strong>${v}</strong></div>`).join('')}${depNote}</div>
@@ -4474,7 +4495,7 @@ function renderCheckout() {
   ];
   const st = steps[checkoutW.step - 1];
   openModal(`<div class="modal modal-lg">
-    <div class="modal-header"><h3>Checkout · ${g.name}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+    <div class="modal-header"><h3>Checkout · ${esc(g.name)}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
     <div class="modal-body">
       <div class="wiz-bar"><span style="width:${checkoutW.step * 100 / steps.length}%"></span></div>
       <h4 style="margin:12px 0 10px">${st.t}</h4>${st.html}
@@ -4545,9 +4566,9 @@ async function pgRoomMap() {
       <div class="home-section-h">Floor ${f.floor}</div>
       <div class="room-grid">
         ${f.rooms.map(r => `
-          <button class="room-tile ${r.status !== 'active' ? 'is-' + r.status : ''}" onclick="roomProfile(${r.id})" aria-label="Room ${r.room_number}">
-            <div class="rt-head"><strong>${r.room_number}</strong>${r.high_issues ? `<span class="badge badge-red">${r.high_issues}!</span>` : r.open_issues ? `<span class="badge badge-amber">${r.open_issues}</span>` : ''}</div>
-            <div class="rt-beds">${r.beds.map(b => `<i class="bed ${b.state}" title="${b.resident ? b.resident.name : b.state}"></i>`).join('')}${r.over_capacity ? `<i class="bed over" title="${r.over.map(o => o.name).join(', ')}"></i>`.repeat(r.over_capacity) : ''}</div>
+          <button class="room-tile ${r.status !== 'active' ? 'is-' + r.status : ''}" onclick="roomProfile(${r.id})" aria-label="Room ${esc(r.room_number)}">
+            <div class="rt-head"><strong>${esc(r.room_number)}</strong>${r.high_issues ? `<span class="badge badge-red">${r.high_issues}!</span>` : r.open_issues ? `<span class="badge badge-amber">${r.open_issues}</span>` : ''}</div>
+            <div class="rt-beds">${r.beds.map(b => `<i class="bed ${b.state}" title="${esc(b.resident ? b.resident.name : b.state)}"></i>`).join('')}${r.over_capacity ? `<i class="bed over" title="${esc(r.over.map(o => o.name).join(', '))}"></i>`.repeat(r.over_capacity) : ''}</div>
             <div class="rt-sub">${r.occupied}/${r.total_beds}${r.over_capacity ? ' <span class="text-red">+' + r.over_capacity + '</span>' : ''}${r.bed_fix_count ? ` <span class="text-amber" title="${r.bed_fix_count} bed number${r.bed_fix_count === 1 ? '' : 's'} to correct: ${(r.bed_fixes || []).map(f => f.name).join(', ')}">⚑${r.bed_fix_count > 1 ? r.bed_fix_count : ''}</span>` : ''} · ${fmt(r.monthly_rent)}</div>
           </button>`).join('')}
       </div>`).join('')}
@@ -4559,7 +4580,7 @@ function roomSheet(id) {
   if (!r) return;
   const staffCanEdit = isAdmin();
   openModal(`<div class="modal">
-    <div class="modal-header"><h3>Room ${r.room_number}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+    <div class="modal-header"><h3>Room ${esc(r.room_number)}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
     <div class="modal-body">
       <div class="r360-kv"><span>Floor</span><strong>${r.floor}</strong></div>
       <div class="r360-kv"><span>Beds</span><strong>${r.occupied} of ${r.total_beds} taken</strong></div>
@@ -4567,12 +4588,12 @@ function roomSheet(id) {
       <div class="r360-kv"><span>Condition</span><strong>${r.status}</strong></div>
       <div class="r360-kv"><span>Last inspected</span><strong>${r.last_inspected ? fmtDate(r.last_inspected) : 'Never'}</strong></div>
       <div class="r360-h">Beds</div>
-      ${(r.bed_fixes || []).map(o => `<div class="r360-row"><span class="text-amber">Bed number needs fixing${o.bed_number ? ` · recorded as “${o.bed_number}”` : ' · none recorded'}</span>
-        <button class="btn btn-outline btn-sm" onclick="closeModal();guestModal(null, ${o.id})">${o.name}</button></div>`).join('')}
+      ${(r.bed_fixes || []).map(o => `<div class="r360-row"><span class="text-amber">Bed number needs fixing${o.bed_number ? ` · recorded as “${esc(o.bed_number)}”` : ' · none recorded'}</span>
+        <button class="btn btn-outline btn-sm" onclick="closeModal();guestModal(null, ${o.id})">${esc(o.name)}</button></div>`).join('')}
       ${(r.over || []).map(o => `<div class="r360-row"><span class="text-red">Over capacity${o.bed_number ? ' · bed ' + o.bed_number : ' · no bed'}</span>
-        <button class="btn btn-outline btn-sm" onclick="closeModal();residentProfile(${o.id})">${o.name}</button></div>`).join('')}
+        <button class="btn btn-outline btn-sm" onclick="closeModal();residentProfile(${o.id})">${esc(o.name)}</button></div>`).join('')}
       ${r.beds.map(b => `<div class="r360-row"><span>Bed ${b.bed}</span>${b.resident
-        ? `<button class="btn btn-outline btn-sm" onclick="closeModal();residentProfile(${b.resident.id})">${b.resident.name}</button>`
+        ? `<button class="btn btn-outline btn-sm" onclick="closeModal();residentProfile(${b.resident.id})">${esc(b.resident.name)}</button>`
         : `<span class="badge badge-green">free</span>`}</div>`).join('')}
       ${r.open_issues ? `<div class="r360-h">Requests</div><button class="btn btn-outline btn-sm" onclick="closeModal();navigate('complaints')">${r.open_issues} open — open the register</button>` : ''}
       <div class="flex gap-2" style="flex-wrap:wrap;margin-top:14px">
@@ -4616,17 +4637,17 @@ function slaLabel(r) {
 function renderRequestSheet(d, staff) {
   const r = d.request;
   openModal(`<div class="modal modal-lg">
-    <div class="modal-header"><h3>${esc(r.category)}${r.room_number ? ` · Room ${r.room_number}` : ''}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+    <div class="modal-header"><h3>${esc(r.category)}${r.room_number ? ` · Room ${esc(r.room_number)}` : ''}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
     <div class="modal-body">
       <div class="r360-status">${slaLabel(r)}<span class="badge badge-${r.priority === 'high' ? 'red' : r.priority === 'low' ? 'gray' : 'amber'}">${r.priority}</span>
-        ${r.assigned_username ? `<span class="badge badge-blue">${r.assigned_username}</span>` : '<span class="badge badge-gray">unassigned</span>'}</div>
+        ${r.assigned_username ? `<span class="badge badge-blue">${esc(r.assigned_username)}</span>` : '<span class="badge badge-gray">unassigned</span>'}</div>
       <p style="font-size:15px;margin-bottom:6px">${esc(r.description)}</p>
-      ${r.likely_issue ? `<p class="text-muted" style="font-size:13px">Likely: ${r.likely_issue}</p>` : ''}
+      ${r.likely_issue ? `<p class="text-muted" style="font-size:13px">Likely: ${esc(r.likely_issue)}</p>` : ''}
       <div class="form-row" style="margin-top:12px">
         <div class="form-group"><label>Status</label><select id="rq-status">${['open', 'assigned', 'in_progress', 'resolved', 'closed'].map(x => `<option value="${x}" ${r.status === x ? 'selected' : ''}>${x.replace('_', ' ')}</option>`).join('')}</select></div>
         <div class="form-group"><label>Priority</label><select id="rq-priority">${['low', 'medium', 'high'].map(x => `<option value="${x}" ${r.priority === x ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
       </div>
-      ${staff.length ? `<div class="form-group"><label>Assigned to</label><select id="rq-assign"><option value="">— nobody —</option>${staff.map(u => `<option value="${u.id}" ${String(r.assigned_to) === String(u.id) ? 'selected' : ''}>${u.username}</option>`).join('')}</select></div>` : ''}
+      ${staff.length ? `<div class="form-group"><label>Assigned to</label><select id="rq-assign"><option value="">— nobody —</option>${staff.map(u => `<option value="${u.id}" ${String(r.assigned_to) === String(u.id) ? 'selected' : ''}>${esc(u.username)}</option>`).join('')}</select></div>` : ''}
       <div class="form-group"><label>Resolution note</label><textarea id="rq-note" rows="2" placeholder="What was done">${esc(r.resolution_notes || '')}</textarea></div>
       <button class="btn btn-primary" style="width:100%" onclick="saveRequest(${r.id})">Save</button>
 
@@ -4711,7 +4732,7 @@ async function loadMyTasks() {
         ${t.requests.map(r => `<div class="today-row">${icon('wrench')}<span class="t-main"><strong>${esc(r.category)}</strong>${r.room_number ? ' · Room ' + r.room_number : ''}
           <div class="t-sub">${esc(r.description.slice(0, 60))}</div></span>${r.overdue ? `<span class="badge badge-red">${Math.round(-r.hours_left)}h over</span>` : `<span class="badge badge-gray">${Math.round(r.hours_left)}h</span>`}
           <button class="btn btn-outline btn-sm" onclick="requestSheet(${r.id})">Open</button></div>`).join('')}
-        ${pending.slice(0, 6).map(i => `<div class="today-row">${icon('calendar')}<span class="t-main">${i.task}<div class="t-sub">${i.due_time || i.time_label || ''}${i.assigned_to ? ' · yours' : ''}</div></span></div>`).join('')}
+        ${pending.slice(0, 6).map(i => `<div class="today-row">${icon('calendar')}<span class="t-main">${esc(i.task)}<div class="t-sub">${i.due_time || i.time_label || ''}${i.assigned_to ? ' · yours' : ''}</div></span></div>`).join('')}
         ${pending.length > 6 ? `<div class="t-sub" style="padding:8px 0">…and ${pending.length - 6} more</div>` : ''}
       </div>`;
     host.classList.remove('hidden');
@@ -4753,8 +4774,8 @@ async function pgFinanceOverview() {
         <span>Target <strong>${fmt(f.target)}</strong></span>
       </div>
       ${f.shortfall ? `<p style="font-size:14px;margin-top:10px">Likely shortfall <strong class="text-amber">${fmt(f.shortfall)}</strong>. ${f.at_risk.length} resident${f.at_risk.length === 1 ? '' : 's'} usually pay late.</p>` : '<p style="font-size:14px;margin-top:10px">On track for the full month.</p>'}
-      <p class="t-sub">${f.basis}</p>
-      ${f.at_risk.length ? `<div style="margin-top:10px">${f.at_risk.slice(0, 5).map(g => `<div class="today-row"><span class="t-main"><strong>${g.name}</strong>${g.room_number ? ' · Room ' + g.room_number : ''}<div class="t-sub">${g.why}</div></span>
+      <p class="t-sub">${esc(f.basis)}</p>
+      ${f.at_risk.length ? `<div style="margin-top:10px">${f.at_risk.slice(0, 5).map(g => `<div class="today-row"><span class="t-main"><strong>${esc(g.name)}</strong>${g.room_number ? ' · Room ' + g.room_number : ''}<div class="t-sub">${esc(g.why)}</div></span>
         <button class="btn btn-outline btn-sm" onclick="collectFrom(${g.id})">Collect</button></div>`).join('')}
         <button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="navigate('reminders')">Draft reminders</button></div>` : ''}
     </div></div>
@@ -4765,7 +4786,7 @@ async function pgFinanceOverview() {
       <div class="r360-kv"><span>Next 7 days</span><strong>${o.next7.low}–${o.next7.high}</strong></div>
       <div class="r360-kv"><span>Next 30 days</span><strong>${o.next30.low}–${o.next30.high}</strong></div>
       ${o.avg_stay_days ? `<div class="r360-kv"><span>Average stay so far</span><strong>${Math.round(o.avg_stay_days / 30)} months</strong></div>` : ''}
-      <p class="t-sub" style="margin-top:8px">${o.basis}</p>
+      <p class="t-sub" style="margin-top:8px">${esc(o.basis)}</p>
     </div></div>
 
     ${(e.duplicates.length || e.spikes.length || e.changes.length) ? `<div class="home-section-h">Worth a look</div>
@@ -4799,15 +4820,15 @@ function renderClosing(t) {
       <div class="r360-status"><span class="badge badge-green">Closed</span><span class="t-sub">by ${t.closing.closed_by_username || 'someone'} · ${new Date(t.closing.closed_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span></div>
       ${row('cash', 'Cash')}${row('upi', 'UPI')}${row('bank', 'Bank')}
       ${diffs.length ? `<p style="font-size:13px;margin-top:8px" class="text-amber">${diffs.map(m => `${m.toUpperCase()} ${t.closing.difference[m] > 0 ? 'over' : 'short'} by ${fmt(Math.abs(t.closing.difference[m]))}`).join(' · ')} — recorded as a variance, nothing was changed.</p>` : '<p style="font-size:13px;margin-top:8px" class="text-green">Everything matched.</p>'}
-      ${t.closing.note ? `<p class="t-sub">"${t.closing.note}"</p>` : ''}
-      ${isAdmin() ? `<button class="btn btn-outline btn-sm" style="margin-top:10px" onclick="reopenDay('${t.date}')">Reopen the day</button>` : ''}`;
+      ${t.closing.note ? `<p class="t-sub">"${esc(t.closing.note)}"</p>` : ''}
+      ${isAdmin() ? `<button class="btn btn-outline btn-sm" style="margin-top:10px" onclick="reopenDay(${esc(JSON.stringify(t.date))})">Reopen the day</button>` : ''}`;
   }
   return `
     <p class="t-sub" style="margin-bottom:10px">Count what you actually hold and enter it. Nothing recorded today is changed — a difference is kept as a variance.</p>
     ${row('cash', 'Cash')}${row('upi', 'UPI')}${row('bank', 'Bank')}
     ${t.pending_not_counted.n ? `<p style="font-size:13px" class="text-amber">${t.pending_not_counted.n} payment${t.pending_not_counted.n === 1 ? '' : 's'} (${fmt(t.pending_not_counted.total)}) still waiting for confirmation — not included above.</p>` : ''}
     <div class="form-group" style="margin-top:8px"><label>Note (optional)</label><input id="close-note" placeholder="e.g. 200 short, checking with the cook"/></div>
-    <button class="btn btn-primary" style="width:100%" onclick="closeDay('${t.date}')">Close the day</button>
+    <button class="btn btn-primary" style="width:100%" onclick="closeDay(${esc(JSON.stringify(t.date))})">Close the day</button>
     <div id="close-alert" class="alert alert-danger hidden" style="margin-top:10px"></div>`;
 }
 async function closeDay(date) {
@@ -4834,7 +4855,7 @@ async function loadReliability() {
     if (!r) return;
     const label = { high: 'usually on time', medium: 'sometimes late', at_risk: 'often late', new: 'new resident' }[r.level];
     const cls = { high: 'badge-green', medium: 'badge-amber', at_risk: 'badge-red', new: 'badge-gray' }[r.level];
-    el.innerHTML = `<span class="badge ${cls}" title="${r.why}">${label}</span>`;
+    el.innerHTML = `<span class="badge ${cls}" title="${esc(r.why)}">${label}</span>`;
   });
 }
 
@@ -4857,7 +4878,7 @@ async function pgVisitors() {
       <thead><tr><th>VISITOR</th><th>FOR</th><th>EXPECTED</th><th>STATUS</th><th>ACTIONS</th></tr></thead>
       <tbody>${list.map(v => `<tr>
         <td><strong>${esc(v.visitor_name)}</strong>${v.relation ? `<div class="t-sub">${esc(v.relation)}</div>` : ''}</td>
-        <td>${v.resident_name}${v.room_number ? `<div class="t-sub">Room ${v.room_number}</div>` : ''}</td>
+        <td>${esc(v.resident_name)}${v.room_number ? `<div class="t-sub">Room ${esc(v.room_number)}</div>` : ''}</td>
         <td>${v.expected_at ? fmtDate(v.expected_at) : '—'}${v.checked_in_at ? `<div class="t-sub">in ${new Date(v.checked_in_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</div>` : ''}</td>
         <td><span class="badge ${badge[v.status]}">${label[v.status] || v.status}</span></td>
         <td><div class="flex gap-2">
@@ -4887,10 +4908,10 @@ async function pgFeedback() {
 
     <div class="home-section-h">Food</div>
     <div class="card"><div style="padding:14px 16px">
-      <p style="font-size:14px">${food.headline}</p>
-      ${food.favourites.length ? `<div class="r360-h">Best liked</div>${food.favourites.map(d => `<div class="r360-row"><span>${d.dish}<div class="t-sub">${d.meal_type} · ${d.votes} votes</div></span><strong>${stars(d.avg_stars)} ${d.avg_stars}</strong></div>`).join('')}` : ''}
-      ${food.needs_work.length ? `<div class="r360-h">Least liked</div>${food.needs_work.map(d => `<div class="r360-row"><span>${d.dish}<div class="t-sub">${d.meal_type} · ${d.votes} votes</div></span><strong class="text-amber">${stars(d.avg_stars)} ${d.avg_stars}</strong></div>`).join('')}` : ''}
-      ${food.comments.length ? `<div class="r360-h">In their words</div>${food.comments.map(c => `<div class="rq-comment">“${esc(c.comment)}” <span class="t-sub">· ${c.meal_type}, ${fmtDate(c.rating_date)}</span></div>`).join('')}` : ''}
+      <p style="font-size:14px">${esc(food.headline)}</p>
+      ${food.favourites.length ? `<div class="r360-h">Best liked</div>${food.favourites.map(d => `<div class="r360-row"><span>${esc(d.dish)}<div class="t-sub">${esc(d.meal_type)} · ${d.votes} votes</div></span><strong>${stars(d.avg_stars)} ${d.avg_stars}</strong></div>`).join('')}` : ''}
+      ${food.needs_work.length ? `<div class="r360-h">Least liked</div>${food.needs_work.map(d => `<div class="r360-row"><span>${esc(d.dish)}<div class="t-sub">${esc(d.meal_type)} · ${d.votes} votes</div></span><strong class="text-amber">${stars(d.avg_stars)} ${d.avg_stars}</strong></div>`).join('')}` : ''}
+      ${food.comments.length ? `<div class="r360-h">In their words</div>${food.comments.map(c => `<div class="rq-comment">“${esc(c.comment)}” <span class="t-sub">· ${esc(c.meal_type)}, ${fmtDate(c.rating_date)}</span></div>`).join('')}` : ''}
     </div></div>
 
     ${sat && sat.months.length ? `<div class="home-section-h">Monthly satisfaction</div>
@@ -4898,14 +4919,14 @@ async function pgFeedback() {
       ${sat.months.slice(0, 3).map(m => `<div class="r360-row"><span>${new Date(m.month + '-01T00:00:00Z').toLocaleDateString('en-IN', { month: 'long', year: 'numeric', timeZone: 'UTC' })}
         <div class="t-sub">${m.responses} answer${m.responses === 1 ? '' : 's'} · cleanliness ${m.cleanliness ?? '—'} · food ${m.food ?? '—'} · safety ${m.safety ?? '—'} · staff ${m.staff ?? '—'} · wifi ${m.wifi ?? '—'}</div></span>
         <strong>${m.overall ?? '—'}/5</strong></div>`).join('')}
-      <p class="t-sub" style="margin-top:8px">${sat.note}</p>
+      <p class="t-sub" style="margin-top:8px">${esc(sat.note)}</p>
     </div></div>` : ''}
 
     ${exp && exp.rooms.length ? `<div class="home-section-h">Rooms worth looking at</div>
     <div class="card"><div style="padding:4px 16px">
       ${exp.rooms.map(r => `<div class="today-row">${icon('wrench')}<span class="t-main">${esc(r.note)}</span>
         <button class="btn btn-outline btn-sm" onclick="navigate('rooms')">Open</button></div>`).join('')}
-      <p class="t-sub" style="padding:8px 0">${exp.note}</p>
+      <p class="t-sub" style="padding:8px 0">${esc(exp.note)}</p>
     </div></div>` : ''}
   `);
 }
@@ -4954,11 +4975,11 @@ async function openNotifications() {
         ${d.items.length ? d.items.map(n => `
           <div class="notif ${n.read_at ? 'is-read' : ''}">
             <div class="flex" style="justify-content:space-between;gap:8px;align-items:flex-start">
-              <span><span class="badge ${badge[n.level]}">${n.level}</span> <strong>${n.title}</strong>
-                ${n.detail ? `<div class="t-sub">${n.detail}</div>` : ''}
+              <span><span class="badge ${badge[n.level]}">${n.level}</span> <strong>${esc(n.title)}</strong>
+                ${n.detail ? `<div class="t-sub">${esc(n.detail)}</div>` : ''}
                 <div class="t-sub">${fmtDate(n.created_at)}</div></span>
               <span class="flex gap-2">
-                ${n.action_page ? `<button class="btn btn-outline btn-sm" onclick="closeModal();navigate('${n.action_page}')">Open</button>` : ''}
+                ${n.action_page ? `<button class="btn btn-outline btn-sm" onclick="closeModal();navigate(${esc(JSON.stringify(n.action_page))})">Open</button>` : ''}
                 ${!n.read_at ? `<button class="btn btn-outline btn-sm" onclick="readNotification(${n.id})">✓</button>` : ''}
               </span>
             </div>
@@ -4981,7 +5002,7 @@ async function pgOutbox() {
     ${drafts.length ? `<div class="card"><div style="padding:4px 16px">
       ${drafts.map(m => `<div class="outbox-row">
         <div class="outbox-pick">${bulkCb(m.id, m.guest_name + ' — ' + (kindLabel[m.kind] || m.kind))}</div>
-        <div><strong>${m.guest_name}</strong> <span class="badge badge-gray">${kindLabel[m.kind] || m.kind}</span>
+        <div><strong>${esc(m.guest_name)}</strong> <span class="badge badge-gray">${kindLabel[m.kind] || m.kind}</span>
           <div class="outbox-body">${esc(m.body)}</div></div>
         <div class="flex gap-2">
           <a class="btn btn-success btn-sm" target="_blank" rel="noopener" href="${m.wa_link}" onclick="markSent(${m.id})">${icon('whatsapp')} Send</a>
@@ -4989,7 +5010,7 @@ async function pgOutbox() {
         </div></div>`).join('')}
     </div></div>` : emptyState('whatsapp', 'Nothing to send', 'Reminders are drafted at the start of the month and again on the 7th.', `<button class="btn btn-primary btn-sm" onclick="draftOutbox()">Draft now</button>`)}
     ${sent.length ? `<div class="home-section-h">Sent</div><div class="card"><div style="padding:4px 16px">
-      ${sent.slice(0, 20).map(m => `<div class="today-row">${icon('whatsapp')}<span class="t-main">${m.guest_name} · ${kindLabel[m.kind] || m.kind}
+      ${sent.slice(0, 20).map(m => `<div class="today-row">${icon('whatsapp')}<span class="t-main">${esc(m.guest_name)} · ${kindLabel[m.kind] || m.kind}
         <div class="t-sub">${fmtDate(m.sent_at)} by ${m.sent_by_username || '—'}</div></span></div>`).join('')}
     </div></div>` : ''}
   `);
@@ -5014,7 +5035,7 @@ async function pgMaintenance() {
     <div class="page-header"><h1>Recurring maintenance</h1><p>Things that need doing every few months</p></div>
     ${list.length ? `<div class="card"><div style="padding:4px 16px">
       ${list.map(m => `<div class="today-row">${icon(m.due_now ? 'flag' : 'calendar')}
-        <span class="t-main"><strong>${m.task}</strong>${m.vendor ? ` · ${m.vendor}` : ''}
+        <span class="t-main"><strong>${esc(m.task)}</strong>${m.vendor ? ` · ${esc(m.vendor)}` : ''}
           <div class="t-sub">Every ${m.every_days} days · ${m.last_done ? `last done ${fmtDate(m.last_done)} · ` : ''}next ${fmtDate(m.next_due)}</div></span>
         ${m.due_now ? '<span class="badge badge-amber">due</span>' : ''}
         <button class="btn btn-outline btn-sm" onclick="markMaintenanceDone(${m.id})">Done today</button>
@@ -5055,9 +5076,9 @@ async function loadResidentDocs(guestId) {
     const docs = await apiFetch(`/guests/${guestId}/documents`);
     const cls = { verified: 'badge-green', pending: 'badge-amber', expired: 'badge-red' };
     host.innerHTML = docs.map(d => `
-      <div class="r360-row"><span>${d.doc_type}${d.expires_on ? `<div class="t-sub">expires ${fmtDate(d.expires_on)}</div>` : ''}</span>
+      <div class="r360-row"><span>${esc(d.doc_type)}${d.expires_on ? `<div class="t-sub">expires ${fmtDate(d.expires_on)}</div>` : ''}</span>
         <span class="flex gap-2"><span class="badge ${cls[d.status]}">${d.status}</span>
-          <select onchange="setDocStatus(${guestId}, '${d.doc_type}', this.value)" style="margin:0;min-height:36px;width:auto">
+          <select onchange="setDocStatus(${guestId}, ${esc(JSON.stringify(d.doc_type))}, this.value)" style="margin:0;min-height:36px;width:auto">
             ${['pending', 'verified', 'expired'].map(x => `<option value="${x}" ${d.status === x ? 'selected' : ''}>${x}</option>`).join('')}
           </select></span></div>`).join('');
   } catch (e) { host.innerHTML = `<p class="text-muted">${e.message}</p>`; }
@@ -5108,7 +5129,7 @@ async function complaintScanFault() {
       <div class="card" style="padding:12px;border:2px solid var(--primary);background:var(--accent-soft);margin-bottom:12px">
         <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted)">Read from the photo (${f.confidence} confidence) — please check</div>
         <div style="font-size:14px;margin:6px 0"><strong>${esc(f.category)}</strong> · ${f.priority} priority<br>${esc(f.description || '')}
-          ${f.likely_issue ? `<div class="t-sub">Likely: ${f.likely_issue}</div>` : ''}</div>
+          ${f.likely_issue ? `<div class="t-sub">Likely: ${esc(f.likely_issue)}</div>` : ''}</div>
         <div class="flex gap-2">
           <button class="btn btn-primary btn-sm" onclick='complaintUseFault(${JSON.stringify(f).replace(/'/g, "&#39;")})'>✓ Use this</button>
           <button class="btn btn-outline btn-sm" onclick="document.getElementById('cp-preview').classList.add('hidden')">✗ Ignore</button>
@@ -5159,7 +5180,7 @@ async function bulkSetup(scope, actions) {
 }
 function bulkCb(id, label) {
   const checked = bulkSel.ids.has(Number(id)) ? 'checked' : '';
-  return `<input type="checkbox" class="bulk-cb" data-id="${id}" ${checked} aria-label="Select ${String(label).replace(/"/g, '&quot;')}" onchange="bulkToggle(${id}, this.checked, this.getAttribute('aria-label').slice(7))"/>`;
+  return `<input type="checkbox" class="bulk-cb" data-id="${id}" ${checked} aria-label="Select ${esc(label)}" onchange="bulkToggle(${id}, this.checked, this.getAttribute('aria-label').slice(7))"/>`;
 }
 function bulkToggle(id, on, label) {
   id = Number(id);
@@ -5207,7 +5228,7 @@ function bulkRenderBar() {
     <div class="bulk-count"><strong id="bulk-count-n">Selected: ${n}</strong>${bulkLimits ? `<span class="t-sub"> of ${bulkLimits.cap} max</span>` : ''}</div>
     <div class="bulk-actions">
       <button class="btn btn-outline btn-sm" onclick="bulkSelectVisible()">Select all shown</button>
-      ${bulkSel.actions.map(a => `<button class="btn btn-primary btn-sm" ${n ? '' : 'disabled'} onclick="bulkStart('${a.action}')">${a.icon ? icon(a.icon) : ''}${a.label}</button>`).join('')}
+      ${bulkSel.actions.map(a => `<button class="btn btn-primary btn-sm" ${n ? '' : 'disabled'} onclick="bulkStart('${a.action}')">${a.icon ? icon(a.icon) : ''}${esc(a.label)}</button>`).join('')}
       ${n ? `<button class="btn btn-outline btn-sm" onclick="bulkClear()" aria-label="Clear selection">✕ Clear</button>` : ''}
     </div>`;
 }
@@ -5234,7 +5255,7 @@ async function bulkStart(action) {
     try { staff = await apiFetch('/staff-list'); } catch (e) { return toast(e.message); }
     return openModal(`<div class="modal"><div class="modal-header"><h3>Assign ${ids.length} request${ids.length === 1 ? '' : 's'}</h3><button class="modal-close" aria-label="Close" onclick="closeModal()">×</button></div>
       <div class="modal-body">
-        <div class="form-group"><label for="bk-assign-to">Assign to</label><select id="bk-assign-to">${staff.map(u => `<option value="${u.id}">${u.username}${u.role === 'admin' ? ' (owner)' : ''}</option>`).join('')}</select></div>
+        <div class="form-group"><label for="bk-assign-to">Assign to</label><select id="bk-assign-to">${staff.map(u => `<option value="${u.id}">${esc(u.username)}${u.role === 'admin' ? ' (owner)' : ''}</option>`).join('')}</select></div>
         <button class="btn btn-primary" style="width:100%" onclick="bulkPreview('assign', [${ids}], { assigned_to: document.getElementById('bk-assign-to').value })">Preview</button>
       </div></div>`);
   }
@@ -5259,15 +5280,15 @@ async function bulkPreview(action, ids, args) {
 }
 function bulkPreviewHtml(p) {
   return `
-    <div class="bulk-lines">${p.lines.map((l, i) => `<div class="bulk-line ${i === 0 ? 'bulk-line-h' : ''}">${l}</div>`).join('')}</div>
+    <div class="bulk-lines">${p.lines.map((l, i) => `<div class="bulk-line ${i === 0 ? 'bulk-line-h' : ''}">${esc(l)}</div>`).join('')}</div>
     ${p.eligible.length ? `<details class="bulk-list"><summary>Review list (${p.eligible.length})</summary>
-      ${p.eligible.map(r => `<div class="r360-row"><span>${r.name}${r.room_number ? ` · Room ${r.room_number}` : ''}${r.kind ? ` <span class="badge badge-gray">${r.kind === 'rent_overdue' ? 'overdue' : 'due'}</span>` : ''}</span>${r.amount_due != null && r.amount_due !== undefined && r.amount_due > 0 ? `<strong>${fmt(r.amount_due)}</strong>` : ''}</div>`).join('')}</details>` : ''}
+      ${p.eligible.map(r => `<div class="r360-row"><span>${esc(r.name)}${r.room_number ? ` · Room ${esc(r.room_number)}` : ''}${r.kind ? ` <span class="badge badge-gray">${r.kind === 'rent_overdue' ? 'overdue' : 'due'}</span>` : ''}</span>${r.amount_due != null && r.amount_due !== undefined && r.amount_due > 0 ? `<strong>${fmt(r.amount_due)}</strong>` : ''}</div>`).join('')}</details>` : ''}
     ${p.skipped.length ? `<details class="bulk-list bulk-skipped"><summary>Skipped (${p.skipped.length})</summary>
-      ${p.skipped.map(r => `<div class="r360-row"><span>${r.name}${r.room_number ? ` · Room ${r.room_number}` : ''}</span><span class="t-sub">${r.reason}</span></div>`).join('')}</details>` : ''}`;
+      ${p.skipped.map(r => `<div class="r360-row"><span>${esc(r.name)}${r.room_number ? ` · Room ${esc(r.room_number)}` : ''}</span><span class="t-sub">${esc(r.reason)}</span></div>`).join('')}</details>` : ''}`;
 }
 function renderBulkPreview(p) {
   const n = p.eligible.length;
-  openModal(`<div class="modal"><div class="modal-header"><h3>${p.label}</h3><button class="modal-close" aria-label="Close" onclick="closeModal()">×</button></div>
+  openModal(`<div class="modal"><div class="modal-header"><h3>${esc(p.label)}</h3><button class="modal-close" aria-label="Close" onclick="closeModal()">×</button></div>
     <div class="modal-body">
       ${bulkPreviewHtml(p)}
       ${p.drafts_only ? `<p class="bulk-note">${icon('whatsapp')} Drafts go to the Outbox. Sending stays one tap per message — nothing is sent from here.</p>` : ''}
@@ -5326,7 +5347,7 @@ function renderPaletteCommands(q) {
   const cmds = commandsFor(q);
   if (!cmds.length) return '';
   const parts = ['<div class="search-group">Commands</div>'];
-  cmds.forEach(c => { const i = searchRows.length; searchRows.push({ go: () => paletteRunCommand(c.id) }); parts.push(`<button class="search-item search-cmd" data-cmd="${c.id}" data-i="${i}" onclick="searchRows[${i}].go()">${icon(c.icon)}<span>${c.label}</span></button>`); });
+  cmds.forEach(c => { const i = searchRows.length; searchRows.push({ go: () => paletteRunCommand(c.id) }); parts.push(`<button class="search-item search-cmd" data-cmd="${c.id}" data-i="${i}" onclick="searchRows[${i}].go()">${icon(c.icon)}<span>${esc(c.label)}</span></button>`); });
   return parts.join('');
 }
 function renderPaletteAsk(q) {
@@ -5358,9 +5379,9 @@ function renderRoom360() {
         <span class="badge ${r.status === 'active' ? 'badge-green' : 'badge-amber'}">${r.status}</span></div>
       <div class="room-health">${Object.entries(h.components).map(([k, c]) => `<div class="rh-row"><span class="rh-label">${k}</span><span class="rh-bar"><i style="width:${c.score}%" class="${cls(c.score)}"></i></span><strong>${c.score}</strong>${whyBtn(c.why, 'Why ' + k + '?')}</div>`).join('')}</div>
       ${kv([['Floor', r.floor], ['Beds', `${d.residents.length} of ${r.total_beds} taken`], ['Rent', fmt(r.monthly_rent)], ['Type', r.room_type], ['Open requests', d.maintenance.open], ['Last inspected', r.last_inspected ? fmtDate(r.last_inspected) : 'Never']])}
-      ${(tile && tile.bed_fixes && tile.bed_fixes.length) ? tile.bed_fixes.map(o => `<div class="r360-row"><span class="text-amber">Bed number needs fixing${o.bed_number ? ` · recorded as “${o.bed_number}”` : ' · none recorded'}</span><button class="btn btn-outline btn-sm" onclick="closeModal();guestModal(null,${o.id})">${o.name}</button></div>`).join('') : ''}
+      ${(tile && tile.bed_fixes && tile.bed_fixes.length) ? tile.bed_fixes.map(o => `<div class="r360-row"><span class="text-amber">Bed number needs fixing${o.bed_number ? ` · recorded as “${esc(o.bed_number)}”` : ' · none recorded'}</span><button class="btn btn-outline btn-sm" onclick="closeModal();guestModal(null,${o.id})">${esc(o.name)}</button></div>`).join('') : ''}
       <div class="r360-h">Inspections</div>
-      ${d.inspections.length ? d.inspections.map(i => `<div class="r360-row"><span><span class="badge ${i.condition === 'good' ? 'badge-green' : i.condition === 'poor' ? 'badge-red' : 'badge-gray'}">${i.condition}</span> ${fmtDate(i.inspected_on)}${i.note ? `<div class="t-sub">${i.note}</div>` : ''}</span><span class="t-sub">${i.username || ''}</span></div>`).join('') : '<p class="t-sub">No inspection recorded yet.</p>'}
+      ${d.inspections.length ? d.inspections.map(i => `<div class="r360-row"><span><span class="badge ${i.condition === 'good' ? 'badge-green' : i.condition === 'poor' ? 'badge-red' : 'badge-gray'}">${i.condition}</span> ${fmtDate(i.inspected_on)}${i.note ? `<div class="t-sub">${esc(i.note)}</div>` : ''}</span><span class="t-sub">${esc(i.username || '')}</span></div>`).join('') : '<p class="t-sub">No inspection recorded yet.</p>'}
       <div class="flex gap-2" style="flex-wrap:wrap;margin-top:14px">
         <button class="btn btn-primary btn-sm" onclick="inspectionForm(${r.id})">Record inspection</button>
         ${d.residents.length < r.total_beds && r.status === 'active' ? `<button class="btn btn-outline btn-sm" onclick="closeModal();moveInWizard({ room_id: ${r.id} })">Move someone in</button>` : ''}
@@ -5381,11 +5402,11 @@ function renderRoom360() {
       const rows = [];
       for (let n = 1; n <= r.total_beds; n++) {
         const g = byBed.get(n);
-        rows.push(`<div class="r360-row"><span>Bed ${n}${g ? `<div class="t-sub"><strong>${g.name}</strong> · since ${fmtDate(g.join_date)}${g.expected_checkout ? ' · leaving ' + fmtDate(g.expected_checkout) : ''}</div>` : ''}</span>${g
+        rows.push(`<div class="r360-row"><span>Bed ${n}${g ? `<div class="t-sub"><strong>${esc(g.name)}</strong> · since ${fmtDate(g.join_date)}${g.expected_checkout ? ' · leaving ' + fmtDate(g.expected_checkout) : ''}</div>` : ''}</span>${g
           ? `<button class="btn btn-outline btn-sm" onclick="closeModal();residentProfile(${g.id})">Open</button>`
           : `<span class="badge badge-green">free</span>`}</div>`);
       }
-      for (const g of odd) rows.push(`<div class="r360-row"><span class="text-amber">Bed number needs fixing${g.bed_number ? ` · recorded as “${g.bed_number}”` : ' · none recorded'}<div class="t-sub"><strong>${g.name}</strong></div></span>
+      for (const g of odd) rows.push(`<div class="r360-row"><span class="text-amber">Bed number needs fixing${g.bed_number ? ` · recorded as “${esc(g.bed_number)}”` : ' · none recorded'}<div class="t-sub"><strong>${esc(g.name)}</strong></div></span>
         <button class="btn btn-outline btn-sm" onclick="closeModal();residentProfile(${g.id})">Open</button></div>`);
       return rows.join('');
     },
@@ -5394,16 +5415,16 @@ function renderRoom360() {
         : emptyState('wrench', 'No requests ever', 'Nothing has been raised for this room.', '')}`,
     history: () => {
       const rows = [
-        ...d.history.lived.map(x => ({ at: x.from, html: `<strong>${x.name}</strong> ${x.kind === 'living' ? 'lives here' : 'lived here'}<div class="t-sub">${fmtDate(x.from)} → ${x.to ? fmtDate(x.to) : 'now'}</div>` })),
-        ...d.history.moves.map(x => ({ at: x.on, html: `<strong>${x.name}</strong> ${x.kind === 'moved_in' ? `moved in${x.from_room ? ' from Room ' + x.from_room : ''}` : `moved out to Room ${x.to_room}`}${x.bed ? ' · bed ' + x.bed : ''}<div class="t-sub">${fmtDate(x.on)}${esc(x.note ? ' · ' + x.note : '')}</div>` }))
+        ...d.history.lived.map(x => ({ at: x.from, html: `<strong>${esc(x.name)}</strong> ${x.kind === 'living' ? 'lives here' : 'lived here'}<div class="t-sub">${fmtDate(x.from)} → ${x.to ? fmtDate(x.to) : 'now'}</div>` })),
+        ...d.history.moves.map(x => ({ at: x.on, html: `<strong>${esc(x.name)}</strong> ${x.kind === 'moved_in' ? `moved in${x.from_room ? ' from Room ' + x.from_room : ''}` : `moved out to Room ${x.to_room}`}${x.bed ? ' · bed ' + x.bed : ''}<div class="t-sub">${fmtDate(x.on)}${esc(x.note ? ' · ' + x.note : '')}</div>` }))
       ].sort((a, b) => new Date(b.at) - new Date(a.at));
       return rows.length ? `<ul class="r360-timeline">${rows.map(x => `<li><div class="tl-date">${fmtDate(x.at)}</div><div>${x.html}</div></li>`).join('')}</ul>` : emptyState('bed', 'No history yet', 'Moves and stays will appear here.', '');
     }
   };
   openModal(`<div class="modal modal-lg">
-    <div class="modal-header"><h3>Room ${r.room_number}</h3><button class="modal-close" aria-label="Close" onclick="closeModal()">×</button></div>
+    <div class="modal-header"><h3>Room ${esc(r.room_number)}</h3><button class="modal-close" aria-label="Close" onclick="closeModal()">×</button></div>
     <div class="modal-body">
-      <div class="subtabs" role="tablist">${ROOM360_TABS.map(t => `<button class="subtab ${t.id === room360.tab ? 'active' : ''}" role="tab" aria-selected="${t.id === room360.tab}" onclick="room360.tab='${t.id}';renderRoom360()">${t.label}</button>`).join('')}</div>
+      <div class="subtabs" role="tablist">${ROOM360_TABS.map(t => `<button class="subtab ${t.id === room360.tab ? 'active' : ''}" role="tab" aria-selected="${t.id === room360.tab}" onclick="room360.tab='${t.id}';renderRoom360()">${esc(t.label)}</button>`).join('')}</div>
       <div id="room360-body">${body[room360.tab]()}</div>
     </div></div>`);
 }
@@ -5437,7 +5458,7 @@ function showWhy(btn) {
   if (pop) pop.remove();
   pop = document.createElement('div');
   pop.id = 'why-pop'; pop.className = 'why-pop'; pop.setAttribute('role', 'dialog'); pop.setAttribute('aria-label', label);
-  pop.innerHTML = `<div class="why-pop-h">${label}</div><div class="why-pop-t">${text.replace(/\n/g, '<br>')}</div><button class="btn btn-outline btn-sm" onclick="closeWhy()">Got it</button>`;
+  pop.innerHTML = `<div class="why-pop-h">${esc(label)}</div><div class="why-pop-t">${esc(text).replace(/\n/g, '<br>')}</div><button class="btn btn-outline btn-sm" onclick="closeWhy()">Got it</button>`;
   document.body.appendChild(pop);
   // Anchor under the button on wide screens; a bottom sheet on phones.
   const rect = btn.getBoundingClientRect();

@@ -818,7 +818,7 @@ async function runAtWidth(browser, BASE, width) {
   {
     await page.evaluate(() => moveInWizard());
     await page.waitForSelector('#mi-name', { timeout: 8000 });
-    await page.type('#mi-name', 'Retry Tester');
+    await page.type('#mi-name', `Retry Tester ${width}`);
     await page.type('#mi-phone', '8' + String(Date.now()).slice(-9));
     await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-ec-name', { timeout: 5000 });
     await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-room', { timeout: 5000 });
@@ -840,7 +840,7 @@ async function runAtWidth(browser, BASE, width) {
     await page.evaluate(() => { moveInSave(); moveInSave(); });   // double tap
     await page.waitForFunction(() => { const a = document.getElementById('mi-alert'); return a && !a.classList.contains('hidden') && /NOT recorded/.test(a.textContent); }, { timeout: 10000 });
     eq((await page.evaluate(() => API.getGuests())).length, s152Before + 1, `${tag} S15.2-1 DATA: a double tap created exactly one resident`);
-    const s152Made = (await page.evaluate(() => API.getGuests())).find(g => g.name === 'Retry Tester');
+    const s152Made = (await page.evaluate(() => API.getGuests())).find(g => g.name === `Retry Tester ${width}`);
     let s152Rows = (await page.evaluate(() => apiFetch('/collections'))).filter(c => c.guest_id === s152Made.id);
     eq(s152Rows.filter(c => c.collection_type === 'deposit').length, 1, `${tag} S15.2-1 MONEY: the deposit that went through is recorded once`);
     eq(s152Rows.filter(c => c.collection_type === 'rent').length, 0, `${tag} S15.2-1 the rent that failed is not recorded`);
@@ -855,6 +855,38 @@ async function runAtWidth(browser, BASE, width) {
     eq(s152Rows.filter(c => c.collection_type === 'deposit').length, 1, `${tag} S15.2-1 MONEY: still exactly one deposit after the retry`);
     eq(s152Rows.filter(c => c.collection_type === 'rent').length, 1, `${tag} S15.2-1 MONEY: the retry recorded the missing rent once`);
     await page.evaluate(() => { API.createCollection = window.__s152Orig; delete window.__s152Failed; });
+  }
+  // S15.2-1 (review): the payment REACHED the server but the reply was lost → Retry must not record it twice
+  {
+    await page.evaluate(() => moveInWizard());
+    await page.waitForSelector('#mi-name', { timeout: 8000 });
+    await page.type('#mi-name', `Lost Reply ${width}`);
+    await page.type('#mi-phone', '6' + String(Date.now()).slice(-9));
+    await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-ec-name', { timeout: 5000 });
+    await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-room', { timeout: 5000 });
+    const s152bOpts = await page.$$eval('#mi-room option', els => els.map(e => e.value).filter(Boolean));
+    await page.select('#mi-room', s152bOpts[s152bOpts.length - 1]);
+    await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-rent', { timeout: 5000 });
+    await page.evaluate(() => { document.getElementById('mi-rent').value = 4000; document.getElementById('mi-dep').value = 4000; });
+    await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-idtype', { timeout: 5000 });
+    await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-pay-dep', { timeout: 5000 });
+    await page.evaluate(() => { document.getElementById('mi-pay-dep').value = 4000; document.getElementById('mi-pay-rent').value = 4000; });
+    await page.evaluate(() => moveInStep(1));
+    await page.waitForSelector('#mi-save', { timeout: 5000 });
+    await page.evaluate(() => {
+      window.__s152bOrig = API.createCollection;
+      API.createCollection = async (body) => { const r = await window.__s152bOrig(body); if (body.collection_type === 'deposit' && !window.__s152bLost) { window.__s152bLost = true; throw new Error('Network error — check your connection'); } return r; };
+    });
+    await page.evaluate(() => moveInSave());
+    await page.waitForFunction(() => { const a = document.getElementById('mi-alert'); return a && !a.classList.contains('hidden') && /NOT recorded/.test(a.textContent); }, { timeout: 10000 });
+    await page.evaluate(() => moveInSave());   // retry
+    await page.waitForFunction(() => !document.querySelector('#mi-save'), { timeout: 10000 });
+    const s152bMade = (await page.evaluate(() => API.getGuests())).filter(g => g.name === `Lost Reply ${width}`);
+    eq(s152bMade.length, 1, `${tag} S15.2-1 DATA: one resident after a lost reply + retry`);
+    const s152bRows = (await page.evaluate(() => apiFetch('/collections'))).filter(c => c.guest_id === s152bMade[0].id);
+    eq(s152bRows.filter(c => c.collection_type === 'deposit').length, 1, `${tag} S15.2-1 MONEY: a deposit whose reply was lost is NOT recorded again on retry`);
+    eq(s152bRows.filter(c => c.collection_type === 'rent').length, 1, `${tag} S15.2-1 MONEY: rent recorded once`);
+    await page.evaluate(() => { API.createCollection = window.__s152bOrig; delete window.__s152bLost; });
   }
 
   // Checkout wizard: refund = deposit − deductions, and it is the server's number

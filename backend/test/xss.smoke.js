@@ -57,6 +57,13 @@ const SH = (t) => `<b data-xss=${t}>`;
   const c1 = await post('/guest-complaint', { category: `"'><b data-xss=cat>`, description: P('complaint-description') }, GH);
   ok(c1.status === 201, `resident complaint stored (${c1.status})`);
   const complaint = await j(c1);
+  // Same category 3× → the owner "flagged" card on admin Home is built from it (review F-1)
+  for (let k = 0; k < 2; k++) await post('/guest-complaint', { category: `"'><b data-xss=cat>`, description: P('complaint-repeat') }, GH);
+  // Staff-writable door (staff → admin): a payment with crafted type/mode/month/description, and a crafted resident name
+  ok((await post('/collections', { guest_id: guest.id, guest_name: guest.name, amount: 100, collection_date: new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10), collection_type: SH('ctype'), payment_mode: SH('mode'), collection_month: `<b data-xss=month>`, description: P('pay-desc') })).status === 201, 'crafted payment stored');
+  const room2 = await j(await post('/rooms', { room_number: 'X2', floor: 1, total_beds: 2, monthly_rent: 6000 }));
+  const crafted = await j(await post('/guests', { name: `Q"'><img src=x data-xss=gname onerror=window.__xss=[\'gname\']>`, phone: '8' + String(Date.now()).slice(-9), room_id: room2.id, bed_number: 1, join_date: '2026-06-01', monthly_rent: 6000, deposit_amount: 1000 }));
+  ok(crafted.id, 'crafted-name resident stored');
   ok((await post('/guest-visitor', { visitor_name: SH('visitor-name'), relation: SH('relation') }, GH)).status === 201, 'resident visitor stored');
   const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
   ok((await post('/guest-meal-rating', { meal_type: 'Lunch', stars: 2, comment: P('meal-comment'), date: today }, GH)).status < 300, 'resident meal comment stored');
@@ -77,7 +84,7 @@ const SH = (t) => `<b data-xss=${t}>`;
     const settle = () => page.waitForNetworkIdle({ idleTime: 300, timeout: 8000 }).catch(() => {});
     const check = async (where) => {
       await settle();
-      const r = await page.evaluate(() => ({ ran: window.__xss || [], els: [...document.querySelectorAll('[data-xss]')].map(e => e.getAttribute('data-xss')) }));
+      const r = await page.evaluate(() => ({ ran: [].concat(window.__xss || []), els: [...document.querySelectorAll('[data-xss]')].map(e => e.getAttribute('data-xss')) }));
       const clean = r.ran.length === 0 && r.els.length === 0;
       if (clean) count++;
       else failures.push(`${where} (ran: ${[...new Set(r.ran)].join(',') || 'none'}; injected: ${[...new Set(r.els)].join(',') || 'none'})`);
@@ -133,10 +140,38 @@ const SH = (t) => `<b data-xss=${t}>`;
     await new Promise(r => setTimeout(r, 900));
     await check('search results');
     await page.evaluate(() => closeSearch());
-    // Copilot answers that list requests
-    await page.evaluate(() => navigate('dashboard')); await settle();
-    await page.evaluate(() => copilotAsk('show open requests')).catch(() => {});
-    await check('Copilot answer');
+    // Copilot answers and a Copilot action preview (review F-2)
+    for (const q of ['show open requests', 'any problems?', `mark request ${complaint.id} resolved`, `remind ${crafted.name.slice(0, 3)}`]) {
+      await page.evaluate(() => navigate('dashboard')); await settle();
+      await page.evaluate(t => copilotAsk(t), q).catch(() => {});
+      await check(`Copilot: "${q.slice(0, 30)}"`);
+    }
+    // Every "Why?" button on the screens that carry resident text (review F-3)
+    for (const [where, open] of [['complaints', () => navigate('complaints')], ['dashboard', () => navigate('dashboard')]]) {
+      await page.evaluate(open); await settle();
+      const nWhy = await page.$$eval('.why-btn', b => b.length);
+      for (let k = 0; k < nWhy; k++) { await page.evaluate(i => { const b = document.querySelectorAll('.why-btn')[i]; if (b) b.click(); }, k); await check(`${where} Why? #${k + 1}`); await page.evaluate(() => typeof closeWhy === 'function' && closeWhy()); }
+    }
+    await page.evaluate(id => roomProfile(id), room.id); await settle();
+    for (const t of await page.evaluate(() => ROOM360_TABS.map(x => x.id))) {
+      await page.evaluate(id => { room360.tab = id; renderRoom360(); }, t); await settle();
+      const nWhy = await page.$$eval('.why-btn', b => b.length);
+      for (let k = 0; k < nWhy; k++) { await page.evaluate(i => document.querySelectorAll('.why-btn')[i].click(), k); await check(`Room 360 ${t} Why? #${k + 1}`); await page.evaluate(() => closeWhy()); }
+    }
+    await page.evaluate(() => closeModal());
+    // Bulk preview with the crafted resident in the list (review F-4)
+    await page.evaluate(ids => bulkPreview('reminders', ids, {}), [guest.id, crafted.id]);
+    await settle();
+    await page.evaluate(() => document.querySelectorAll('details').forEach(d => d.open = true));
+    await check('bulk preview');
+    await page.evaluate(() => closeModal());
+    // Activity log after a resident complaint is deleted, and the Copilot log (review F-5)
+    await page.evaluate(id => apiFetch(`/complaints/${id}`, { method: 'DELETE' }), complaint.id).catch(() => {});
+    await page.evaluate(() => navigate('admin')); await settle();
+    for (const b of await page.$$eval('#page-content .subtab, #page-content button', els => els.map((e, i) => [i, e.textContent.trim()]).filter(([, t]) => /activity|copilot|log|ai/i.test(t)))) {
+      await page.evaluate(i => document.querySelectorAll('#page-content .subtab, #page-content button')[i].click(), b[0]);
+      await check(`admin › ${b[1].slice(0, 30)}`);
+    }
     ok(failures.length === 0, `SECURITY: untrusted text became HTML on ${failures.length} screen(s):\n  - ${failures.join('\n  - ')}`);
     ok(dialogs.length === 0, `no alert/confirm dialogs were triggered (${dialogs.join(' | ')})`);
     console.log(`\n✅ XSS gate passed — ${count} assertions`);
