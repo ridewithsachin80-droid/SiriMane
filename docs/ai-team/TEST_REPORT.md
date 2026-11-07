@@ -164,3 +164,7 @@ New backlog (not fixed):
 - **D-15-7 (Medium):** a slow screen's late render can overwrite the screen the user moved to (Home content shown on Rooms with delayed data). ~25 screens; own sprint item.
 - **D-15-8 (High, hardening):** admin token lives in localStorage and CSP is off, so any future missed escape = admin takeover. Defence in depth: httpOnly cookie session and/or a CSP once inline handlers are removed.
 - **G-1 (Low, test hygiene):** reviewer saw `quick` fail when run after other gates on a shared DB (learned data). The runner rebuilds per sweep; per-gate isolation recommended.
+
+### Sprint 15.2 — review round 2 (same independent agent) of 13e64cf: **APPROVE FOR TEST DEPLOYMENT**
+Re-ran 12/12 on fresh DBs (2,436; xss 67 vs 68 — one-assertion gap, recorded). Every resident/public attack from round 1 re-run clean. navigate()/navigateThen() no regression; retry never wrongly skips another resident's or a hand-recorded payment.
+**Before production (Sprint 15.3):** R-1 (Med) staff→admin XSS: Resident 360 kv() Address/Emergency/ID type, viewGuest grid, rentHistoryModal name `"`, evening summary `<pre>`, Reports expense category · R-4 (Med, money) retry message tells the warden to "record it later in Collect" → hand double-entry risk · R-6 (Med) resident save with lost reply → retry creates a second resident · R-2 (Low) onclick JSON vs literal `&quot;` in data · R-5 (Low, introduced) inbox search double-escaped · R-3 (Low) raw error messages; guest.html shows staff text raw.
