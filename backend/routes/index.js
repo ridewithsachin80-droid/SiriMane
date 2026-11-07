@@ -306,7 +306,12 @@ router.post('/guests', auth, async (req, res) => {
     // on the guest's profile with no matching transaction — this is what
     // keeps the balance sheet's deposit reconciliation accurate without
     // needing a separate manual entry every time.
-    if (parseFloat(deposit_amount) > 0) {
+    // Sprint 15.1 (D-15-5): the move-in wizard records the deposit it ACTUALLY
+    // received (amount + mode) itself, so it asks us to skip this automatic
+    // entry — otherwise every wizard move-in counted the deposit twice. The
+    // older Add Resident form doesn't send the flag and keeps this behaviour.
+    const depositRecordedByClient = req.body.deposit_recorded_by_client === true;
+    if (parseFloat(deposit_amount) > 0 && !depositRecordedByClient) {
       const depositStatus = req.user.role === 'admin' ? 'confirmed' : 'pending_approval';
       await pool.query(
         `INSERT INTO collections(guest_id,guest_name,amount,collection_date,collection_type,payment_mode,description,created_by,status) VALUES($1,$2,$3,$4,'deposit','cash','Security deposit at check-in',$5,$6)`,

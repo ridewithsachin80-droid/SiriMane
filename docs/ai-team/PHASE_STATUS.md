@@ -53,3 +53,18 @@ Execution mode for this phase: **LIMITED MULTI-AGENT** — main agent implements
 
 
 Owner's standing rule: pick it from evidence (Admin → AI impact, `source` column). Candidates from the backlog: "Select all shown" discoverability in the bulk bar; the unexplained `outline-width: 0` on `.nav-item`; four residents with bad bed numbers (data fix, not code); Gemini audio transcription if Copilot-log `heard/understood` pairs show repairs failing.
+
+## Sprint 15.1 — move-in double deposit (owner-approved 7 Nov 20:40)
+
+Found by the owner's phone test on the Test site. Defect **D-15-5 (High, money)**: the move-in wizard posts "Deposit received" as a collection, AND `POST /guests` auto-logs `deposit_amount` as a cash collection → every wizard move-in with a deposit is counted twice. On `main` since 17 Sep. Production check (owner, read-only, 7 Nov 20:39): **0 affected residents** — no cleanup needed.
+Why the gate missed it: the ui test asserted `some` deposit row, not exactly one.
+
+| ID | Acceptance criterion | Review |
+|---|---|---|
+| S15.1-1 | Wizard move-in with deposit ₹X received → exactly ONE deposit collection, amount X, the mode chosen in the wizard. Deposit not received (blank) → no deposit collection | **DATA/SEC REQUIRED** (money) |
+| S15.1-2 | The older Add Resident form keeps today's behaviour (one auto-logged deposit) | DATA |
+| S15.1-3 | After move-in the confirmation states what was recorded (e.g. "₹14,000 recorded — deposit ₹7,000 + rent ₹7,000, UPI") | UX |
+| S15.1-4 | Management payment cards show the type (Rent / Deposit …); month reads "November 2026" whether or not a month was stored | UX |
+| S15.1-5 | Gate: wizard move-in asserts exactly one deposit row and exactly one rent row; API test for both POST /guests paths. All 11 gates green, fresh DB, TZ=UTC | QA |
+
+Before/after (sample: deposit ₹7,000 + rent ₹7,000 at move-in, UPI): before 3 rows / ₹21,000 collected / deposit ₹14,000 → after 2 rows / ₹14,000 / ₹7,000.

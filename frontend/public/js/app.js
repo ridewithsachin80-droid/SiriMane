@@ -1139,7 +1139,7 @@ async function pgPayments(month, year) {
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>GUEST</th><th>MONTH</th><th>AMOUNT</th><th>DATE</th><th>MODE</th><th>STATUS</th><th>ACTIONS</th></tr></thead>
+            <thead><tr><th>GUEST</th><th>TYPE</th><th>MONTH</th><th>AMOUNT</th><th>DATE</th><th>MODE</th><th>STATUS</th><th>ACTIONS</th></tr></thead>
             <tbody id="payments-tb">${renderPaymentRows(list)}</tbody>
           </table>
         </div>
@@ -1147,14 +1147,27 @@ async function pgPayments(month, year) {
   } catch(e) { setContent(`<div class="alert alert-danger">${e.message}</div>`); }
 }
 
+// Sprint 15.1: one way to show type, month and mode on payment cards — the
+// server's automatic deposit stores no month and a lower-case mode, which made
+// the same kind of payment read "Nov 2026 · cash" on one card and
+// "November 2026 · Cash" on the next.
+function payTypeLabel(t) { const x = String(t || 'rent'); return x.charAt(0).toUpperCase() + x.slice(1).replace(/_/g, ' '); }
+function payModeLabel(m) { const x = String(m || '—'); return /^upi$/i.test(x) ? 'UPI' : x.charAt(0).toUpperCase() + x.slice(1); }
+function payMonthLabel(c) {
+  const m = c.collection_month;
+  if (m && /^\d{4}-\d{2}$/.test(m)) { const [y, mo] = m.split('-').map(Number); return new Date(y, mo - 1, 1).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }); }
+  if (m) return m;
+  return c.collection_date ? new Date(c.collection_date).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }) : '—';
+}
 function renderPaymentRows(list) {
-  if (list.length === 0) return `<tr class="empty-row"><td colspan="7">No payments match.</td></tr>`;
+  if (list.length === 0) return `<tr class="empty-row"><td colspan="8">No payments match.</td></tr>`;
   return list.map(c=>`<tr data-search="${(c.guest_name||'').toLowerCase()}">
       <td><strong>${c.guest_name||'—'}</strong></td>
-      <td>${c.collection_month||fmtMonth(c.collection_date)}</td>
+      <td class="pay-type">${payTypeLabel(c.collection_type)}</td>
+      <td class="pay-month">${payMonthLabel(c)}</td>
       <td class="text-green fw-600">${fmt(c.amount)}</td>
       <td>${fmtDate(c.collection_date)}</td>
-      <td><span class="badge badge-blue">${c.payment_mode}</span></td>
+      <td><span class="badge badge-blue">${payModeLabel(c.payment_mode)}</span></td>
       <td><span class="badge ${c.status&&c.status.startsWith('pending')?'badge-amber':'badge-green'}">${c.status==='pending_verification'?'Pending Verification':c.status==='pending_approval'?'Pending Approval':'Received'}</span></td>
       <td>
         <div class="flex gap-2">
@@ -4349,7 +4362,8 @@ async function moveInSave() {
       name: d.name, phone: d.phone, emergency_contact: d.emergency_contact || null, emergency_contact_name: d.emergency_contact_name || null,
       room_id: d.room_id, bed_number: d.bed_number || null, join_date: d.join_date, expected_checkout: d.expected_checkout || null,
       monthly_rent: d.monthly_rent, deposit_amount: d.deposit_amount, address: d.address || null,
-      id_proof_type: d.id_proof_type || null, id_proof_number: d.id_proof_number || null, notes: null
+      id_proof_type: d.id_proof_type || null, id_proof_number: d.id_proof_number || null, notes: null,
+      deposit_recorded_by_client: true   // Sprint 15.1: the deposit below is the only deposit record
     });
     const pays = [];
     if (+d.pay_deposit > 0) pays.push({ collection_type: 'deposit', amount: +d.pay_deposit });
@@ -4360,7 +4374,12 @@ async function moveInSave() {
     }
     closeModal();
     const room = moveIn.rooms.find(r => String(r.id) === String(d.room_id));
-    toast(`${g.name} is in${room ? ` Room ${room.room_number}` : ''}${d.bed_number ? ` bed ${d.bed_number}` : ''} — ready`, 'ok');
+    // Say what money was recorded, so nobody records the same rent again on Collect.
+    const paidTotal = pays.reduce((t, p) => t + p.amount, 0);
+    const paidLine = paidTotal > 0
+      ? ` · ${fmt(paidTotal)} recorded — ${pays.map(p => `${p.collection_type} ${fmt(p.amount)}`).join(' + ')} (${d.pay_mode || 'Cash'})`
+      : ' · no payment recorded';
+    toast(`${g.name} is in${room ? ` Room ${room.room_number}` : ''}${d.bed_number ? ` bed ${d.bed_number}` : ''}${paidLine}`, 'ok');
     moveIn = null;
     navigate('guests');
   } catch (e) { if (al) showAlert(al, e.message); else toast(e.message); }
