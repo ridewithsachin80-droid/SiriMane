@@ -56,7 +56,7 @@
     .idcard-kv { flex:1; min-width:160px; }
     .idcard-kv div { display:flex; justify-content:space-between; gap:10px; padding:6px 0; font-size:13px; border-bottom:1px solid var(--p-border); }
     .idcard-kv div span { color: var(--p-text-muted); }
-    .p-bottomnav { position: fixed; left:0; right:0; bottom:0; z-index:80; display:grid; grid-template-columns:repeat(5,1fr);
+    .p-bottomnav { position: fixed; left:0; right:0; bottom:0; z-index:80; display:grid; grid-template-columns:repeat(4,1fr);
       background: var(--p-card); border-top:1px solid var(--p-border); padding-bottom: env(safe-area-inset-bottom); box-shadow:0 -2px 12px rgba(0,0,0,.06); }
     .p-bottomnav button { background:none; border:none; font-family:inherit; font-size:10.5px; font-weight:600; color:var(--p-text-muted);
       display:flex; flex-direction:column; align-items:center; gap:2px; padding:8px 2px 10px; min-height:56px; cursor:pointer; }
@@ -80,10 +80,11 @@
     .ub-logo { height:36px; width:auto; border-radius:6px; flex:0 0 auto; }
     .sos-btn { flex:0 0 auto; min-width:52px; min-height:44px; border:none; border-radius:10px; background:#DC2626; color:#fff; font-weight:800; font-size:13px; letter-spacing:.06em; cursor:pointer; font-family:inherit; }
     body.p-in .header { display:none; }
+    body:not(.p-in) .p-bottomnav { display:none; }
     .p-bottomnav button small { font-size:9.5px; font-weight:500; opacity:.75; }
     select { width:100%; padding:11px 14px; border:1.5px solid var(--p-border); border-radius:10px; font-family:inherit; background:var(--p-card); color:var(--p-text); min-height:44px; }
     .form-row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-    #p-theme { background:none; border:none; cursor:pointer; font-size:18px; padding:6px 8px; border-radius:8px; line-height:1; }
+    #p-theme { background:none; border:none; cursor:pointer; font-size:18px; padding:6px 8px; border-radius:8px; line-height:1; min-width:44px; min-height:44px; }
 
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -248,7 +249,7 @@
         <div class="name" id="p-name"></div>
         <div class="room" id="p-room"></div>
       </div>
-      <button class="sos-btn" id="sos-btn" type="button" onclick="showTab('emergency')" aria-label="Emergency contacts">SOS</button>
+      <button class="sos-btn" id="sos-btn" type="button" onclick="showTab('emergency')" aria-label="SOS – emergency contacts">SOS</button>
     </div>
 
     <!-- Add to home screen -->
@@ -394,6 +395,8 @@
         <div class="card-h">⚙️ App</div>
         <div class="card-b">
           <div class="info-row"><span class="lbl">Light / dark</span><button id="p-theme" type="button" onclick="togglePortalTheme()" aria-label="Switch light or dark">🌙</button></div>
+          <div class="info-row"><span class="lbl">Notices</span><button class="btn btn-outline btn-sm" style="width:auto;margin:0" onclick="showTab('notices')">Open</button></div>
+          <div class="info-row"><span class="lbl">This week's menu</span><button class="btn btn-outline btn-sm" style="width:auto;margin:0" onclick="showTab('menu')">Open</button></div>
           <div class="info-row"><span class="lbl">Emergency numbers</span><button class="btn btn-outline btn-sm" style="width:auto;margin:0" onclick="showTab('emergency')">Open</button></div>
           <button class="btn btn-outline" style="margin-top:12px" onclick="guestLogout()">Log out</button>
         </div>
@@ -604,7 +607,7 @@ async function loadPortalHome() {
         <div class="h-row"><span>Visitors expected</span><strong>${h.visitors.length || 'None'}</strong></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
           <button class="btn btn-outline" style="margin:0" onclick="showTab('notices')">Read notices</button>
-          <button class="btn btn-outline" style="margin:0" onclick="showTab('help')">Register a visitor</button>
+          <button class="btn btn-outline" style="margin:0" onclick="showTab('visitors')">Register a visitor</button>
         </div>
       </div>
 
@@ -612,7 +615,7 @@ async function loadPortalHome() {
         <div style="font-weight:700;margin-bottom:4px">How is this month going?</div>
         <p style="font-size:12px;color:var(--p-text-muted);margin-bottom:8px">One rating per line. Answers are anonymous — the warden sees the averages, never who said what.</p>
         ${['cleanliness','food','safety','staff','wifi'].map(k => `
-          <div class="h-row"><span style="text-transform:capitalize">${k === 'wifi' ? 'WiFi' : k}</span>
+          <div class="h-row" style="flex-direction:column;align-items:flex-start;gap:2px"><span style="text-transform:capitalize">${k === 'wifi' ? 'WiFi' : k}</span>
             <span class="stars" data-sat="${k}">${[1,2,3,4,5].map(n => `<button onclick="setSat('${k}',${n})" aria-label="${n}">★</button>`).join('')}</span></div>`).join('')}
         <button class="btn btn-amber" style="margin-top:10px" onclick="sendSatisfaction()">Send</button>
         <div id="sat-alert" class="alert alert-danger hidden" style="margin-top:8px"></div>
@@ -800,7 +803,7 @@ function renderPayTab(g) {
     ? `<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--p-surface-2)">
          <div class="receipt-line">
            <span>
-             <strong style="font-size:13px">${fmt(lastConfirmed.amount)}</strong> <span style="font-size:12px;text-transform:capitalize">${lastConfirmed.collection_type || 'payment'}</span>
+             <strong style="font-size:13px">${fmt(lastConfirmed.amount)}</strong> <span style="font-size:12px;text-transform:capitalize">${escH(lastConfirmed.collection_type || 'payment')}</span>
              <span style="font-size:11px;color:var(--p-text-light)"> · ${fmtDate(lastConfirmed.collection_date)}${lastConfirmed.collection_month ? ' · ' + lastConfirmed.collection_month : ''}</span>
            </span>
            <button class="btn btn-outline btn-sm" style="width:auto;margin:0" onclick="downloadGuestReceipt(${lastConfirmed.id})">🧾 Receipt</button>
@@ -870,7 +873,7 @@ function renderDetails(g) {
     : pays.map(p => `
       <div class="pay-item">
         <div>
-          <div style="font-weight:600;text-transform:capitalize">${p.collection_type}</div>
+          <div style="font-weight:600;text-transform:capitalize">${escH(p.collection_type)}</div>
           <div style="color:var(--p-text-muted);font-size:11px">${fmtDate(p.collection_date)} · ${p.payment_mode}</div>
           ${p.collection_month ? `<div style="color:var(--p-text-light);font-size:11px">${p.collection_month}</div>` : ''}
         </div>
@@ -1080,7 +1083,7 @@ function showTab(tab) {
   if (show.includes('emergency')) loadEmergency();
   if (show.includes('complaint')) loadComplaintHistory();
   const nav = PORTAL_NAV[tab] || tab;
-  document.querySelectorAll('.p-bottomnav button').forEach(b => b.classList.toggle('active', b.dataset.nav === nav));
+  document.querySelectorAll('.p-bottomnav button').forEach(b => { const on = b.dataset.nav === nav; b.classList.toggle('active', on); if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
   window.scrollTo(0, 0);
 }
 
@@ -1092,6 +1095,7 @@ function showAl(el, msg, type) {
   if (type === 'success') setTimeout(() => el.classList.add('hidden'), 3000);
 }
 function fmt(n) { return '₹' + parseFloat(n||0).toLocaleString('en-IN'); }
+function escH(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); }
 function fmtDate(d) { if(!d) return '—'; return new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}); }
 </script>
 

@@ -444,7 +444,12 @@ function filterTable(q, containerId) {
 
 async function guestModal(gData=null, id=null) {
   let g = gData || {};
-  if(id) { try { g = await API.getGuest(id); } catch {} }
+  // Review F-09: a failed load used to leave g = {} → "Add New Guest" → Save
+  // created a second copy of her. If we were asked to edit, we edit or stop.
+  if(id) {
+    try { g = await API.getGuest(id); } catch (e) { toast(`Could not load this resident — ${e.message || 'check your connection'} — try again`); return; }
+    if (!g || !g.id) { toast('Could not load this resident — try again'); return; }
+  }
   let rooms = [];
   try { rooms = await API.getRooms(); } catch {}
   openModal(`
@@ -739,7 +744,7 @@ async function submitCheckout(id) {
 // ── DAILY MENU ────────────────────────────────────
 async function pgMenu() {
   loading();
-  document.getElementById('topbar-actions').innerHTML = `<button class="btn btn-primary btn-sm" onclick="menuModal()">+ Add Menu</button>`;
+  document.getElementById('topbar-actions').innerHTML = '';   // Sprint 15: the button lives on the page itself
   try {
     const items = await API.getMenu();
     const days = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
@@ -1374,7 +1379,7 @@ let purchasesToDate = null;
 
 async function pgPurchases(month, year, from, to) {
   loading();
-  document.getElementById('topbar-actions').innerHTML = `<button class="btn btn-primary btn-sm" onclick="purchaseModal()">+ Add Purchase</button>`;
+  document.getElementById('topbar-actions').innerHTML = '';   // Sprint 15: the button lives on the page itself
   try {
     const useRange = !!(from && to);
     let m = null, y = null;

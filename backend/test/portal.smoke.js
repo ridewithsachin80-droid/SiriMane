@@ -53,6 +53,7 @@ async function runAtWidth(browser, BASE, width, fixtures) {
   }
   ok(manifest.icons.some(i => i.purpose === 'maskable'), `${tag} has a maskable icon for Android`);
   ok(manifest.start_url.startsWith('/guest'), `${tag} start_url opens the portal`);
+  ok(await page.$eval('.p-bottomnav', e => getComputedStyle(e).display === 'none'), `${tag} S15 (review F-13) no bottom bar on the login screen`);
   await page.type('#login-mobile', PHONE);
   await page.type('#login-password', PHONE);
   await page.click('#login-btn');
@@ -248,6 +249,14 @@ async function runAtWidth(browser, BASE, width, fixtures) {
   await page.evaluate(() => showTab('idcard'));
   await page.waitForSelector('.idcard-qr svg', { timeout: 10000 });
   eq(await page.$eval('.p-bottomnav button.active', e => e.dataset.nav), 'me', `${tag} the ID card lights the Me tab`);
+  // Review fixes F-06/F-07/F-08/F-12/F-17
+  const navBox = await page.$$eval('.p-bottomnav button', els => els.map(e => e.getBoundingClientRect().right));
+  ok(Math.max(...navBox) >= width - 4, `${tag} S15-1 (F-06) the four tabs fill the bar, no empty slot (${Math.round(Math.max(...navBox))}/${width})`);
+  ok(await page.$eval('#tab-settings', e => [...e.querySelectorAll('button')].some(b => /notices/i.test(b.getAttribute('onclick') || '')) && [...e.querySelectorAll('button')].some(b => /'menu'/.test(b.getAttribute('onclick') || ''))), `${tag} S15-1 (F-07) Notices and the weekly menu are reachable from Me, not only Home`);
+  await page.evaluate(() => showTab('me'));
+  const s15Theme = await page.$eval('#p-theme', e => { const r = e.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; });
+  ok(s15Theme[0] >= 44 && s15Theme[1] >= 44, `${tag} S15-2 (F-12) theme toggle is a 44px target (${s15Theme.join('×')})`);
+  eq(await page.$eval('.p-bottomnav button.active', e => e.getAttribute('aria-current')), 'page', `${tag} (F-17) the active tab is announced as the current page`);
   const idTxt = await page.$eval('#idcard-body', e => e.textContent);
   ok(/SM\d{4}/.test(idTxt), `${tag} ID card shows her resident number`);
   ok(idTxt.includes('Rakshitha') || idTxt.includes('Portal Resident'), `${tag} ID card names her`);

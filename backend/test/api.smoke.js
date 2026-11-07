@@ -143,8 +143,12 @@ async function main() {
       ok(payload.env, 'S15-7 tokens carry the issuing environment');
       const foreign = jwt.sign({ guestId: payload.guestId, type: 'guest', env: 'some-other-environment' }, process.env.JWT_SECRET, { expiresIn: '1h' });
       r = await api('GET', '/guest-portal', null, foreign); eq(r.status, 401, 'S15-7 SECURITY: a token from another environment is refused');
-      const legacy = jwt.sign({ guestId: payload.guestId, type: 'guest' }, process.env.JWT_SECRET, { expiresIn: '1h' });
-      r = await api('GET', '/guest-portal', null, legacy); eq(r.status, 200, 'S15-7 a pre-release token (no env) still works until it expires');
+      const cut = require('../middleware/auth').LEGACY_CUTOFF;
+      const legacy = jwt.sign({ guestId: payload.guestId, type: 'guest', iat: cut - 3600, exp: Math.floor(Date.now() / 1000) + 3600 }, process.env.JWT_SECRET);
+      r = await api('GET', '/guest-portal', null, legacy); eq(r.status, 200, 'S15-7 a token issued before the cut-off (no env) still works until it expires');
+      const lateLegacy = jwt.sign({ guestId: payload.guestId, type: 'guest', iat: cut + 60, exp: cut + 7200 > Date.now() / 1000 ? cut + 7200 : Math.floor(Date.now() / 1000) + 3600 }, process.env.JWT_SECRET);
+      r = await api('GET', '/guest-portal', null, lateLegacy); eq(r.status, 401, 'S15-7 SECURITY (review F-03): a token with no env issued AFTER the cut-off is refused');
+      ok(require('../middleware/auth').ENV_ID.includes('#'), 'S15-7 (review F-04) the environment id includes the database identity');
       const adminPayload = JSON.parse(Buffer.from(adminTok.split('.')[1], 'base64url').toString());
       const foreignAdmin = jwt.sign({ userId: adminPayload.userId, env: 'some-other-environment' }, process.env.JWT_SECRET, { expiresIn: '1h' });
       r = await api('GET', '/rooms', null, foreignAdmin); eq(r.status, 401, 'S15-7 SECURITY: another environment\'s ADMIN token is refused');
@@ -236,6 +240,13 @@ async function main() {
   eq(r.status, 200, 'staff verify by resident number'); eq(r.data.valid, true, 'active resident verifies'); eq(r.data.resident.name, guest.name, 'verify names her');
   ok(!('phone' in r.data.resident) && !('id_proof_number' in r.data.resident), 'PRIVACY: verify returns no phone or ID number');
   r = await api('POST', '/resident-id/verify', { token: 'not-a-token' }, staffTok); eq(r.status, 400, 'garbage code refused'); eq(r.data.valid, false, 'and reported invalid');
+  { // S15-7 (review F-05): a gate QR minted by another environment is not valid here
+    const jwt = require('jsonwebtoken');
+    const g0 = JSON.parse(Buffer.from(guestTok.split('.')[1], 'base64url').toString());
+    const foreignQr = jwt.sign({ type: 'resident-id', guestId: g0.guestId, env: 'other#000000000000' }, process.env.JWT_SECRET, { expiresIn: '1h' });
+    r = await api('POST', '/resident-id/verify', { token: foreignQr }, staffTok);
+    ok(r.status >= 400 && r.data.valid === false, `S15-7 SECURITY: a gate QR from another environment is refused (${r.status})`);
+  }
   r = await api('POST', '/resident-id/verify', { resident_no: 'SM9999' }, staffTok); eq(r.status, 404, 'unknown resident number → 404');
   r = await api('POST', '/resident-id/verify', { resident_no: idToken.resident_no }); eq(r.status, 401, 'verify needs a staff login');
 

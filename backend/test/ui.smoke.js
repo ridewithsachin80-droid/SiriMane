@@ -745,6 +745,14 @@ async function runAtWidth(browser, BASE, width) {
   ok(true, `${tag} S15-3 Edit opens "Edit Guest" for her`);
   await page.evaluate(() => closeModal());
   eq((await page.evaluate(() => API.getGuests())).length, guestsBeforeEdit, `${tag} S15-3 opening Edit creates nobody`);
+  // Review F-09: if her record cannot be loaded, no blank "Add New Guest" form opens.
+  const s15NoForm = await page.evaluate(async id => {
+    const real = API.getGuest; API.getGuest = () => Promise.reject(new Error('offline'));
+    try { await guestModal(null, id); } finally { API.getGuest = real; }
+    const h = document.querySelector('.modal-header'); const t = h ? h.textContent : '';
+    closeModal(); return t;
+  }, target.id);
+  ok(!/Add New Guest/.test(s15NoForm), `${tag} S15-3 (review F-09) a failed load never opens a blank Add form`);
 
   // Move-in wizard: nothing is written until the final step
   const guestsBefore = (await page.evaluate(() => API.getGuests())).length;
@@ -1235,14 +1243,15 @@ async function runAtWidth(browser, BASE, width) {
   }), `${tag} Tab from the last element stays inside the modal`);
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => !document.getElementById('modal-overlay'), { timeout: 5000 });
-  ok(await page.evaluate(() => document.activeElement && document.activeElement.classList.contains('room-tile')), `${tag} focus returns to what opened the modal`);
+  const s15Focus = await page.evaluate(() => { const a = document.activeElement; return { ok: !!a && a.classList.contains('room-tile'), on: a ? a.tagName + '.' + String(a.className).split(' ')[0] : 'none', tiles: document.querySelectorAll('.room-tile').length, page: typeof currentPage !== 'undefined' ? currentPage : '?' }; });
+  ok(s15Focus.ok, `${tag} focus returns to what opened the modal (focus on ${s15Focus.on}; page ${s15Focus.page}; ${s15Focus.tiles} tiles)`);
   eq(await page.$$eval('#page-content input:not([type=hidden]):not([type=checkbox]), #page-content select, #page-content textarea',
     els => els.filter(el => !el.getAttribute('aria-label') && !(el.id && document.querySelector(`label[for="${el.id}"]`))).length), 0,
     `${tag} every input has a label or a name`);
 
   // ═══════════════ Sprint 15 ═══════════════
   // S15-5: one button per job per screen; hamburger hidden on phones
-  for (const pg of ['payments', 'collections', 'guests', 'complaints', 'guest-messages', 'rooms-table']) {
+  for (const pg of ['payments', 'collections', 'guests', 'complaints', 'guest-messages', 'rooms-table', 'daily-menu', 'purchases']) {
     await page.evaluate(x => navigate(x), pg);
     await page.waitForFunction(() => !document.querySelector('#page-content .sm-skel'), { timeout: 10000 });
     await sleep(150);
