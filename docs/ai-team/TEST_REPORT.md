@@ -146,3 +146,21 @@ On production (`main`) since at least 17 Sep. Release is the owner's decision.
 | G152tz-before | 73d2159, TZ=Asia/Kolkata | copilot FAIL (D-15-1 reproduced) |
 
 Gate list is now TWELVE (adds `xss`).
+
+### Sprint 15.2 — review round 1: BLOCK (separate agent) → fixed
+Reviewer reproduced in headless Chrome: F-1 Critical admin Home "flagged" card (no click) · F-2 Copilot answer + proposal preview · F-3 Why? popover · F-4 bulk preview · F-5 audit log + Copilot log · S15.2-3 payment fields (staff → admin) · Money (Medium): move-in retry could double-post when the server saved but the 4G reply was lost.
+Fix 13e64cf: broad escaping pass (every DB text field in HTML; JSON-encoded onclick string args), lost-reply check on retry. xss gate extended with every reviewer door: **against 82e250a → FAIL on 21 screens; 13e64cf → PASS 68**.
+
+### D-15-4 — CLOSED (root cause by QA specialist agent, isolated worktree + DB)
+Not the dashboard: navigate-then-`setTimeout` openers ("Add expense" → form after 350 ms) fired on whatever screen was showing. Reproduced 5/26 before, 0/41 after. Real user impact: a form popping up on the next screen; a slow "Generate owner report" silently doing nothing. Fix 4794995: `navigate()` resolves true only if the screen is still current; `navigateThen()` replaces timers.
+
+| Run | Source | Result |
+|---|---|---|
+| G152c | 13e64cf | **12/12 PASS, 2,437** |
+| G152d | 13e64cf | **12/12 PASS, 2,437** |
+| ui ×3 more | 13e64cf | PASS 791 ×3 (5 consecutive incl. G152c/d) |
+
+New backlog (not fixed):
+- **D-15-7 (Medium):** a slow screen's late render can overwrite the screen the user moved to (Home content shown on Rooms with delayed data). ~25 screens; own sprint item.
+- **D-15-8 (High, hardening):** admin token lives in localStorage and CSP is off, so any future missed escape = admin takeover. Defence in depth: httpOnly cookie session and/or a CSP once inline handlers are removed.
+- **G-1 (Low, test hygiene):** reviewer saw `quick` fail when run after other gates on a shared DB (learned data). The runner rebuilds per sweep; per-gate isolation recommended.
