@@ -14,14 +14,14 @@ Updated: 7 November 2026 · Framework 2.0 · Execution mode: SINGLE-AGENT SEQUEN
 These are the G0 findings. Neither can be done from an AI session — both are deliberately yours.
 
 1. **Protect `main`.** GitHub → Settings → Rules → Rulesets → New branch ruleset: target `main`, enable *Restrict updates*, *Require a pull request before merging*, and leave bypass empty. Today `main` has **no protection and no rulesets** (verified via API on 7 Nov). Until this exists, the only thing stopping an AI session from deploying to production is instruction — which the framework says is not a control.
-2. **Give the Claude GitHub App write access** so the test branch can be pushed from a session: https://github.com/apps/claude/installations/select_target → select `SiriMane`. Do step 1 *first*, so the app's write access is already fenced off `main` when it arrives.
+2. **Know that AI sessions already have unrestricted write access.** The tooling *claimed* pushes would be refused; the push to `ai/test` succeeded anyway. That means a session could equally push to `main`. Step 1 is therefore not optional hygiene — it is the only real control, and it should happen before the next AI session that touches this repo.
 
-If you prefer not to do step 2, the alternative is unchanged from before: I produce the branch as a bundle/zip and you push it. That keeps "never push without permission" literal.
+The standing rule "never push without Sachin's explicit permission" still applies to every session; this push was explicitly requested in this one.
 
 ## Permitted next action for the next session
 
 1. Verify these facts are still true (`git fetch`, re-check rulesets) — never trust this file blindly.
-2. If push access now exists: `git push origin ai/test` **from `ai/test`, with explicit refs**, then open nothing against `main`.
+2. Work on `ai/test` (or an `ai/<task>` branch cut from it); open PRs with base `ai/test`; never target `main`.
 3. Scope Sprint 15 from evidence (Admin → AI impact, `source` column) — owner's standing rule.
 
 ## Open defects / known gaps (carried over)

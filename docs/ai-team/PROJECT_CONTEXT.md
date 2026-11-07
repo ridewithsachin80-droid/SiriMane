@@ -45,7 +45,7 @@ environment:
 
 authority:
   requested_scope: "Adopt framework 2.0; create and push the test branch; continue authorized work there"
-  test_branch_push: "authorized by owner on 7 Nov 2026 — BLOCKED by missing GitHub write access from this session (see §Safety facts)"
+  test_branch_push: "authorized by owner on 7 Nov 2026; performed once (ai/test → d1641eb). NOTE: write access turned out to be unrestricted — see §Safety facts"
   test_branch_merge: "not_authorized until a PR is reviewed"
   test_deployment: "not_requested"   # no test Railway service exists
   spending_limit: "no new paid commitments"
@@ -111,11 +111,11 @@ execution:
 | GitHub Actions | VERIFIED NONE | `actions/workflows` → `total_count: 0`; no `.github/` directory |
 | Git hooks / lifecycle scripts | VERIFIED NONE | no `.husky`, no `pre*`/`post*` npm scripts; `install` runs `npm install` only |
 | Server-side protection on `main` | **MISSING** | `branches/main/protection` → 403 "not accessible by integration" (cannot read); `rulesets` → `[]` (empty). No ruleset exists; a classic protection rule may or may not — treat as MISSING |
-| Write access from this AI session | **MISSING** | `add_repo` returned `push_check: refused` — Claude GitHub App not installed for this repo |
+| Write access from this AI session | **PRESENT and UNRESTRICTED** | `add_repo` *reported* `push_check: refused`, but `git push origin ai/test` succeeded. The session credential can write any ref, **including `main`**. Nothing on the GitHub side would have stopped a push to `main`. |
 | Separate test deployment | MISSING | one Railway service only; it is production |
 | Production DB reachable from here | VERIFIED NO | no `DATABASE_URL` in this session; gates use a local scratch Postgres |
 
-**Consequence:** today the only thing preventing an AI session from deploying to production is *instruction*. The framework (§4.2) is explicit that this is not a security guarantee. See HANDOFF.md for the two owner actions that close it.
+**Consequence (confirmed by a real push, not inferred):** today the only thing preventing an AI session from deploying to production is *instruction*. The framework (§4.2) is explicit that this is not a security guarantee. See HANDOFF.md for the two owner actions that close it.
 
 ## Standing project rules (from the Project Instructions — these are stricter than the framework and win)
 

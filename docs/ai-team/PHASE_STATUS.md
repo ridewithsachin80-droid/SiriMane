@@ -26,11 +26,11 @@ All of the above is on `main` at `48deac23` and deployed to production by the ow
 | F0.3 Verify repository, branch and isolation facts (G0) | OPS/SEC | COMPLETED — **findings** | PROJECT_CONTEXT.md §Safety facts |
 | F0.4 Create test branch `ai/test` from baseline SHA | DEV | COMPLETED locally | `git checkout -b ai/test 48deac23` |
 | F0.5 Add project records under docs/ai-team/ | PM | COMPLETED | this commit |
-| F0.6 Re-run the eleven gates on the baseline to confirm the clone matches delivered state | QA | see TEST_REPORT.md |
-| F0.7 Push `ai/test` to GitHub | DEV | **BLOCKED** — no write access from this session (G0) | `add_repo` → `push_check: refused` |
+| F0.6 Re-run the eleven gates on the baseline to confirm the clone matches delivered state | QA | COMPLETED — 11/11 PASS, 2,196 assertions (TZ=UTC); first run under an invalid TZ failed and is kept as evidence | TEST_REPORT.md runs B-1, B-2 |
+| F0.7 Push `ai/test` to GitHub | DEV | COMPLETED — `ai/test` → `d1641eb`; `main` verified unchanged at `48deac23` | `git ls-remote` after push |
 | F0.8 Owner installs branch protection on `main` | Owner | OPEN — owner action | HANDOFF.md |
 
-Gate status for F0: G0 PARTIAL (facts verified; isolation controls MISSING), G1–G3 N/A (no application code changed), G4 BLOCKED (cannot push), G5 N/A (no test deployment exists).
+Gate status for F0: G0 PARTIAL (facts verified; isolation controls MISSING), G1–G3 N/A (no application code changed), G4 PASS for a docs-only branch creation, G5 N/A (no test deployment exists).
 
 ## Next phase: Sprint 15 — not yet scoped
 
