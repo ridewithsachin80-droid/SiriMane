@@ -775,7 +775,7 @@ async function runAtWidth(browser, BASE, width) {
   await page.waitForSelector('#mi-idtype', { timeout: 5000 });
   await page.evaluate(() => moveInStep(1));
   await page.waitForSelector('#mi-pay-dep', { timeout: 5000 });
-  await page.evaluate(() => { document.getElementById('mi-pay-dep').value = 12000; });
+  await page.evaluate(() => { document.getElementById('mi-pay-dep').value = 12000; document.getElementById('mi-pay-rent').value = 6000; document.getElementById('mi-pay-mode').value = 'UPI'; });
   await page.evaluate(() => moveInStep(1));
   await page.waitForFunction(() => /Nothing is saved until/.test(document.querySelector('.modal-body')?.textContent || ''), { timeout: 5000 });
   eq((await page.evaluate(() => API.getGuests())).length, guestsBefore, `${tag} DATA: six steps in, still nobody created`);
@@ -789,6 +789,24 @@ async function runAtWidth(browser, BASE, width) {
   ok(!made.id_proof_type, `${tag} S15-4 no ID type chosen → stored empty, not "— select —" (got ${JSON.stringify(made.id_proof_type)})`);
   const herPays = await page.evaluate(id => apiFetch(`/guests/${id}/timeline`), made.id);
   ok(herPays.items.some(i => i.kind === 'payment' && /12,000/.test(i.title)), `${tag} the deposit taken at move-in is recorded`);
+  // Sprint 15.1 (D-15-5): EXACTLY one deposit and one rent row — the old check
+  // ("some deposit") passed while every wizard move-in counted the deposit twice.
+  const s151Rows = (await page.evaluate(() => apiFetch('/collections'))).filter(c => c.guest_id === made.id);
+  const s151Dep = s151Rows.filter(c => c.collection_type === 'deposit'), s151Rent = s151Rows.filter(c => c.collection_type === 'rent');
+  eq(s151Dep.length, 1, `${tag} S15.1-1 MONEY: exactly one deposit record after a wizard move-in (got ${s151Dep.length})`);
+  eq(Number(s151Dep[0] && s151Dep[0].amount), 12000, `${tag} S15.1-1 the deposit record is the amount received`);
+  eq(String(s151Dep[0] && s151Dep[0].payment_mode), 'UPI', `${tag} S15.1-1 the deposit record has the mode chosen in the wizard`);
+  eq(s151Rent.length, 1, `${tag} S15.1-1 MONEY: exactly one rent record after a wizard move-in`);
+  eq(s151Rows.length, 2, `${tag} S15.1-1 MONEY: two records in all — ₹18,000 for ₹18,000 received`);
+  const s151Toast = await page.evaluate(() => (document.getElementById('sm-toast') || {}).textContent || '');
+  ok(/18,000 recorded/.test(s151Toast) && /deposit/.test(s151Toast) && /rent/.test(s151Toast) && /UPI/.test(s151Toast), `${tag} S15.1-3 the move-in confirmation says what was recorded ("${s151Toast}")`);
+  // S15.1-4: the Payments card names the type, and months read the same way
+  await page.evaluate(() => navigate('payments'));
+  await page.waitForSelector('#payments-tb', { timeout: 8000 });
+  const s151Cells = await page.evaluate(() => [...document.querySelectorAll('#payments-tb tr')].map(tr => [(tr.querySelector('.pay-type') || {}).textContent, (tr.querySelector('.pay-month') || {}).textContent]).filter(x => x[0]));
+  ok(s151Cells.length > 0 && s151Cells.every(([t]) => /^[A-Z]/.test(t)), `${tag} S15.1-4 every payment row shows its type (${[...new Set(s151Cells.map(x => x[0]))].join(', ')})`);
+  ok(s151Cells.some(([t]) => t === 'Deposit') && s151Cells.some(([t]) => t === 'Rent'), `${tag} S15.1-4 Rent and Deposit are told apart`);
+  ok(s151Cells.every(([, m]) => !/^[A-Z][a-z]{2} \d{4}$/.test(m)), `${tag} S15.1-4 no short "Nov 2026" month next to "November 2026"`);
   // Abandoning the wizard writes nothing
   await page.evaluate(() => moveInWizard());
   await page.waitForSelector('#mi-name', { timeout: 8000 });

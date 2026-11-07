@@ -167,6 +167,22 @@ async function main() {
     r = await G('POST', '/guest-complaint', { category: 'Wifi/Internet', description: 'Smoke: wifi down' }); eq(r.status, 201, 'guest raises issue'); eq(r.data.status, 'open', 'open');
     r = await G('GET', '/guest-complaints'); eq(r.status, 200, 'guest lists own'); eq(r.data.length, 1, 'sees exactly own issue'); eq(r.data[0].category, 'Wifi/Internet', 'category');
     r = await S('GET', '/complaints'); const gc = r.data.find(x => x.raised_by === 'guest'); ok(gc, 'staff sees guest issue'); eq(gc.guest_id, guest.id, 'linked'); eq(gc.room_number, 'S1', 'room set');
+        { // Sprint 15.1 (D-15-5): POST /guests deposit auto-log — both paths
+      const s151Rooms = (await A('GET', '/rooms')).data;
+      const s151Room = s151Rooms[0];
+      const s151Count = async id => (await A('GET', '/collections')).data.filter(c => c.guest_id === id && c.collection_type === 'deposit');
+      let s151 = await A('POST', '/guests', { name: 'S151 Old Form', phone: '9' + String(Date.now()).slice(-9), join_date: today, room_id: s151Room && s151Room.id, monthly_rent: 5000, deposit_amount: 9000 });
+      eq(s151.status, 201, 'S15.1-2 old Add form still creates the resident');
+      let s151Deps = await s151Count(s151.data.id);
+      eq(s151Deps.length, 1, 'S15.1-2 MONEY: old Add form → exactly one automatic deposit record');
+      eq(Number(s151Deps[0].amount), 9000, 'S15.1-2 the automatic deposit is the agreed amount');
+      s151 = await A('POST', '/guests', { name: 'S151 Wizard', phone: '8' + String(Date.now()).slice(-9), join_date: today, room_id: s151Room && s151Room.id, monthly_rent: 5000, deposit_amount: 9000, deposit_recorded_by_client: true });
+      eq(s151.status, 201, 'S15.1-1 wizard-style add creates the resident');
+      eq((await s151Count(s151.data.id)).length, 0, 'S15.1-1 MONEY: with deposit_recorded_by_client the server records NO deposit itself');
+      s151 = await A('POST', '/guests', { name: 'S151 Truthy', phone: '7' + String(Date.now()).slice(-9), join_date: today, room_id: s151Room && s151Room.id, monthly_rent: 5000, deposit_amount: 9000, deposit_recorded_by_client: 'yes' });
+      eq((await s151Count(s151.data.id)).length, 1, 'S15.1-1 only a real true skips the record (a string does not)');
+      for (const n of ['S151 Old Form', 'S151 Wizard', 'S151 Truthy']) { const g = (await A('GET', '/guests')).data.find(x => x.name === n); if (g) await A('DELETE', `/guests/${g.id}`); }
+    }
     console.log('✓ resident complaints');
 
     // ── Room shift ────────────────────────────────────────────────────────
