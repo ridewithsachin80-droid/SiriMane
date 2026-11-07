@@ -129,3 +129,20 @@ N-6d (test weakness) fixed: the post-boot legacy token is now dated after boot b
 
 Gate gap closed: the wizard test previously asserted `some` deposit row; it now asserts exactly one deposit and one rent row, the amount and the mode.
 D-15-4 now 2 occurrences in 13 ui runs.
+
+## Sprint 15.2
+
+**D-15-6 (Critical, SEC) — stored XSS into staff screens.** Found while scoping S15.2-3. The management app had no HTML escaping; `helmet` runs with `contentSecurityPolicy: false`. Untrusted writers: the PUBLIC `POST /api/guest-message` (no login) and residents (complaint category/description, visitor name/relation, meal comment, survey comment). New gate `backend/test/xss.smoke.js` (new file) plants payloads through every untrusted door and opens every router page, every inbox message, the request sheet, every Resident 360 / Room 360 tab, search and a Copilot answer.
+- Before fix (73d2159): FAIL on 12 screens; the payload's code RAN on Requests, Inbox (list + opened message), request sheet and a Copilot answer.
+- After fix (82e250a): PASS, 50 assertions.
+On production (`main`) since at least 17 Sep. Release is the owner's decision.
+
+**D-15-1 closed** — proposal expiry now decided by Postgres. Evidence: `GATE_TZ=Asia/Kolkata` copilot FAIL "owner confirms (got 409)" before; copilot 250 / bulk 116 / quick 195 PASS after.
+
+| Run | Source | Result |
+|---|---|---|
+| G152a | 82e250a (uncommitted at run, same content) | **12/12 PASS, 2,409** (api 276 · ai 213 · assistant 82 · owner 94 · copilot 250 · finance 71 · notify 64 · bulk 116 · quick 195 · ui 781 · portal 217 · xss 50) |
+| G152tz | same, TZ=Asia/Kolkata | copilot/bulk/quick PASS |
+| G152tz-before | 73d2159, TZ=Asia/Kolkata | copilot FAIL (D-15-1 reproduced) |
+
+Gate list is now TWELVE (adds `xss`).

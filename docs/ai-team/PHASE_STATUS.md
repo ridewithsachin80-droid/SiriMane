@@ -80,4 +80,5 @@ Scope chosen by the team from open review findings and the defect ledger. Nothin
 | S15.2-3 | Payment type/mode/month are HTML-escaped wherever the management Payments table renders them | SEC |
 | S15.2-4 | D-15-1: AI proposal expiry decided by Postgres (`expires_at < NOW()`), not by JS Date parsing. Evidence: copilot, bulk, quick gates pass with the process at TZ=Asia/Kolkata | SEC/QA |
 | S15.2-5 | D-15-4: flaky modal-focus assertion — root cause found and fixed (app or test), evidence by repeated runs | QA |
+| S15.2-7 | **D-15-6 (Critical, SEC, added during the sprint):** no text written by residents or by the public inbox form becomes HTML on any staff screen; proven by a new gate `xss.smoke.js` that fails before the fix | **SEC REQUIRED** |
 | S15.2-6 | All 11 gates green on a fresh DB, TZ=UTC; new assertions for each item; independent review before merge to ai/test | QA |
