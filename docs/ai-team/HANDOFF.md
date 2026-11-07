@@ -28,6 +28,7 @@ The standing rule "never push without Sachin's explicit permission" still applie
 
 | ID | Severity | Item | Owner |
 |---|---|---|---|
+| D-15-3 | Medium | bcrypt 5.x pulls a vulnerable install-time `tar`; fix is bcrypt 6 (major) | DEV, Sprint 15 — with gate + phone login test |
 | D-13-1 | Low | "Select all shown" scrolls out of the bulk bar when three buttons are present | DEV, next layout sprint |
 | D-13-2 | Low | `outline-width` computes to 0 on `.nav-item` despite `:focus-visible` matching; worked around with a box-shadow ring; root cause unknown | ARCH |
 | D-DATA-1 | Low | Four residents have wrong/duplicated bed numbers (106 ×2, 206, 207); map flags them ⚑ — data fix in the app, not code | Owner/warden |
