@@ -34,6 +34,22 @@ All of the above is on `main` at `48deac23` and deployed to production by the ow
 
 Gate status for F0: G0 **PASS** (direct push to `main` blocked server-side; separate test env + DB), G1–G3 N/A (no application code changed), G4 PASS for a docs-only branch creation, G5 **PASS** — first verified test deployment, Railway `Test` env on `ai/test` (TEST_REPORT.md §G5).
 
-## Next phase: Sprint 15 — not yet scoped
+## Current phase: Sprint 15 — UX Sprint A (owner-approved 7 Nov 18:28)
+
+Source: UX/UI specialist review (separate agent, advisory) → owner approved "Sprint A as Sprint 15" + Payments-total fix.
+
+| ID | Acceptance criterion | Specialist review |
+|---|---|---|
+| S15-1 | Resident app: exactly 4 bottom tabs (Home · Pay · Help · Me); no top tab strip; every one of the 29 resident functions still reachable; SOS in header opens Emergency | UX (advisory) |
+| S15-2 | Resident header is one line; Logout + theme live under Me; `.h-due` buttons padded; `select` full width; rating stars ≥44px; payment lines show their type (Rent/Deposit) | UX |
+| S15-3 | Edit / Add ID proof / bed-fix open the EDIT form for that resident; saving never creates a second guest | QA |
+| S15-4 | Move-in with no ID type saves `null`, never "— select —" | QA, DATA (no backfill — existing rows need a separately approved UPDATE) |
+| S15-5 | Finance/Operations sub-tabs stay after any in-page action; "Generate owner report" opens Reports; "Owner & Assets" → "Balance sheet"; Requests has one name; no button appears twice on one screen; one Ctrl+K binding; dead code removed | QA |
+| S15-6 | Payments header = confirmed only, plus a separate "waiting for confirmation" line. Before/after: ₹6,000 confirmed + ₹100 pending → was "₹6,100 total", now "₹6,000 received · ₹100 waiting" | **SEC/DATA REQUIRED** (money display) |
+| S15-7 | A token issued in one environment is rejected in another; tokens without the claim accepted only if issued before the server started (the old release's tokens, ≤24 h) — no mass logout on any later deploy (review N-1) | **SEC REQUIRED** (auth) — independent agent review before push |
+| S15-8 | All 11 gates green on a fresh DB, TZ=UTC; new assertions for S15-1…7; changed screens at 360/390 | QA |
+
+Execution mode for this phase: **LIMITED MULTI-AGENT** — main agent implements; a separate agent reviews the diff (G3). The UX review was a separate agent.
+
 
 Owner's standing rule: pick it from evidence (Admin → AI impact, `source` column). Candidates from the backlog: "Select all shown" discoverability in the bulk bar; the unexplained `outline-width: 0` on `.nav-item`; four residents with bad bed numbers (data fix, not code); Gemini audio transcription if Copilot-log `heard/understood` pairs show repairs failing.

@@ -92,3 +92,28 @@ Tools: Node v22.23.4 · PostgreSQL 16 (local, SSL on, trust auth, port 5435) · 
 Limitations: performed by the owner in a desktop browser; the AI session cannot reach `*.up.railway.app` (egress allowlist). Not a physical-phone test. `/health` still read `schema: missing` for up to 10 min after migrating — it caches its check (see `schemaCheckedAt`); expected, not a defect.
 
 **Lesson recorded:** Railway copies variables into a new environment. After creating one, check `DATABASE_URL` and clear any pre-deploy command *before* the first deploy.
+
+## Sprint 15 — gate runs (fresh scratch DB, `TZ=UTC`, headless Chromium 360/390)
+
+| Run | Source | Result | Notes |
+|---|---|---|---|
+| G15a–d | 59b33be + work in progress | FAIL | auth recursion bug (verifyToken called itself → every authed request 401); fixed |
+| G15e | 59b33be + review fixes | 10/11 | portal: theme-toggle size measured while its page was hidden (test fault, 0×0); fixed in the test |
+| G15f | same + test fix | 10/11 | ui: "@390 focus returns to what opened the modal" — **intermittent**: then 7 consecutive ui passes. Assertion now reports where focus landed so the next occurrence is diagnosable |
+| **G15g** | **7089aed** | **11/11 PASS, 2,291 assertions** | api 257 · ai 213 · assistant 82 · owner 94 · copilot 250 · finance 71 · notify 64 · bulk 116 · quick 195 · ui 732 · portal 217 |
+
+New defect: **D-15-4** (Low) — ui focus-return assertion failed 1 time in 9 runs. Cause not established. Room 360 / modal focus code was not changed in Sprint 15; `setContent` was (sub-tab re-injection). OPEN — diagnostics added.
+
+### Independent re-review (separate agent) of 7089aed — APPROVE FOR TEST DEPLOYMENT
+Re-ran 11/11 gates itself (2,291). S15-6 money PASS; S15-7 security sound. New findings, fixed in the next commit:
+N-1 (Med) fixed calendar cut-off would log everyone out on a later production deploy → cut-off is now server boot time ·
+N-2 (Low) non-numeric `iat` passed the cut-off → now must be a finite number; test verified by mutation (old check fails it) ·
+N-4 (Low) `payment_mode`/`collection_month` unescaped in the portal → escaped · N-5 (Info) unused `jwt` import in routes → removed.
+Not fixed, recorded: N-3 (Low) if Railway's environment id were missing, Test and production could share an id — owner check: boot log must say `source: railway`. F-15, F-16, F-20 open (F-20 needs an approved data update).
+
+G15h — fix commit: **11/11 PASS, 2,296 assertions** (api 262 = +5 malformed-iat cases).
+
+### Re-check of 01c8083 (same independent agent) — APPROVE FOR TEST DEPLOYMENT
+Re-ran 11/11 itself (2,296); N-2/N-4/N-5 confirmed fixed, N-2 mutation check reproduced.
+**N-6 (Medium, PRODUCTION BLOCKER until resolved):** while Test shares production's `JWT_SECRET`, a Test token minted by pre-S15 code is accepted by production after any production restart (boot-time cut-off). Resolution chosen: owner gives Test its own `JWT_SECRET` before Sprint 15 goes to production — this removes cross-environment token acceptance entirely. Fallback if not done: keep Test on S15 for >24 h before production.
+N-6d (test weakness) fixed: the post-boot legacy token is now dated after boot but in the past; mutation-checked — a per-request cut-off fails the gate.

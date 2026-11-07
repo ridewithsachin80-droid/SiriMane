@@ -35,5 +35,10 @@ The standing rule "never push without Sachin's explicit permission" still applie
 | G0-1 | ~~High~~ | ~~No server-side protection on `main`~~ — CLOSED 7 Nov: ruleset requires a PR, blocks force-push/deletion | Owner |
 | G0-2 | ~~Medium~~ | ~~No separate test deployment~~ — CLOSED 7 Nov: https://sirimane-test.up.railway.app on its own Postgres | Owner |
 
+## Sprint 15 — production blockers (owner)
+1. Railway **Test** → Variables → set a NEW `JWT_SECRET` (any long random string), redeploy Test. Closes N-6.
+2. Change the Test admin password from the seeded default (F0.10).
+3. Test boot log must say `🔐 login tokens bound to environment … (source: railway)` (N-3).
+
 ## Owner's new deploy workflow (since the ruleset)
 GitHub upload → choose **Create a new branch and start a pull request** → **Merge pull request** → Railway deploys `main`. AI sessions push to `ai/test` only; Railway deploys it to the Test environment for checking first.

@@ -103,6 +103,8 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 if (require.main === module) {
   app.listen(PORT, () => console.log(`✅ Siri Mane server running on port ${PORT}`));
+  // Review F-04: say at boot which environment tokens are bound to.
+  { const a = require('./middleware/auth'); console.log(`🔐 login tokens bound to environment ${a.ENV_ID.split('#')[0]} (source: ${a.ENV_SOURCE})`); }
   // Sprint 4: compute the morning brief once a day at the time in Settings
   // (default 07:00 IST). Runs inside this process — no extra Railway service.
   require('./services/assistant').startScheduler();

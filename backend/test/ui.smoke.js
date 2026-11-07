@@ -86,6 +86,7 @@ async function runAtWidth(browser, BASE, width) {
   await page.waitForFunction(b => { const t = document.querySelector('#cl-date + span')?.textContent; return t && !t.includes(b); }, { timeout: 8000 }, before);
   const after = await page.$eval('#cl-date + span', e => e.textContent);
   ok(/1 \/ \d+ done/.test(after) || /\d+ \/ \d+ done/.test(after), `${tag} tick updates summary (${after.trim()})`);
+  ok(await page.$('#page-content .subtabs'), `${tag} S15-5 the Operations sub-tabs are still there after ticking`);
   await page.screenshot({ path: path.join(SHOTS, `checklist-${width}.png`) });
   await noHScroll('checklist');
   // untick so the other width starts clean
@@ -94,7 +95,7 @@ async function runAtWidth(browser, BASE, width) {
 
   // ── Complaints ────────────────────────────────────────────────────────
   await page.evaluate(() => navigate('complaints'));
-  await page.waitForFunction(() => document.querySelector('#page-content h1')?.textContent.includes('Complaint'), { timeout: 8000 });
+  await page.waitForFunction(() => document.querySelector('#page-content h1')?.textContent.includes('Requests'), { timeout: 8000 });
   await page.evaluate(() => complaintModal());
   await page.waitForSelector('#cp-desc');
   await page.select('#cp-category', 'Water');
@@ -258,7 +259,7 @@ async function runAtWidth(browser, BASE, width) {
 
   // ── Sprint 3: complaint by voice ──────────────────────────────────────
   await page.evaluate(() => navigate('complaints'));
-  await page.waitForFunction(() => document.querySelector('#page-content h1')?.textContent.includes('Complaint'), { timeout: 8000 });
+  await page.waitForFunction(() => document.querySelector('#page-content h1')?.textContent.includes('Requests'), { timeout: 8000 });
   await page.evaluate(() => complaintModal());
   await page.waitForSelector('#cp-mic', { timeout: 5000 });
   await page.evaluate(() => complaintApplyVoice('geyser leaking in bathroom room 2'));
@@ -354,7 +355,7 @@ async function runAtWidth(browser, BASE, width) {
   await noHScroll('reminders');
 
   await page.evaluate(() => navigate('complaints'));
-  await page.waitForFunction(() => document.querySelector('#page-content h1')?.textContent.includes('Complaint'), { timeout: 8000 });
+  await page.waitForFunction(() => document.querySelector('#page-content h1')?.textContent.includes('Requests'), { timeout: 8000 });
   const hasPriority = await page.$$eval('#complaints-tb td[data-label="PRIORITY"] .badge', els => els.length);
   ok(hasPriority >= 1, `${tag} complaints show a priority badge`);
   ok(await page.evaluate(() => document.body.innerText.includes('🔴 High')), `${tag} the geyser/water issue is marked High`);
@@ -697,7 +698,7 @@ async function runAtWidth(browser, BASE, width) {
   ok(!/Guest Messages|Guest Inbox|All Guests|Add Guest/.test(Object.values(wording).join(' ')), `${tag} no legacy "Guest…" screen wording left`);
   ok(/Announcements/.test(wording['guest-messages']), `${tag} Announcements screen renamed`);
   ok(/Messages/.test(wording['inbox']), `${tag} Messages screen renamed`);
-  eq(await page.evaluate(() => { navigate('balance-sheet'); return document.getElementById('page-title').textContent; }), 'Owner & Assets', `${tag} Balance Sheet is "Owner & Assets"`);
+  eq(await page.evaluate(() => { navigate('balance-sheet'); return document.getElementById('page-title').textContent; }), 'Balance sheet', `${tag} S15-5 Balance Sheet has one name`);
   await page.waitForFunction(() => !document.querySelector('#page-content .sm-skel'), { timeout: 12000 });
   const emptyStates = await page.$$eval('.sm-empty-state', els => els.map(e => ({ h: !!e.querySelector('h4'), icon: !!e.querySelector('svg.ic') })));
   ok(emptyStates.every(e => e.h && e.icon), `${tag} empty states have a heading and an icon (${emptyStates.length} on screen)`);
@@ -733,6 +734,25 @@ async function runAtWidth(browser, BASE, width) {
   ok(await page.$eval('#r360-body', e => /Payments/.test(e.textContent)), `${tag} money tab lists payments`);
   await page.screenshot({ path: path.join(SHOTS, `resident360-${width}.png`) });
   await page.evaluate(() => closeModal());
+  // S15-3: every Edit on a resident must open HER edit form. Before Sprint 15
+  // three buttons passed the id as the data argument, opened "Add New Guest"
+  // and saving created a second copy of her.
+  const appSrc = await page.evaluate(() => fetch('/js/app.js').then(r => r.text()));
+  eq((appSrc.match(/guestModal\(\$\{[^}]+\}\)/g) || []).length, 0, `${tag} S15-3 no guestModal(id) call with the id in the data slot`);
+  const guestsBeforeEdit = (await page.evaluate(() => API.getGuests())).length;
+  await page.evaluate(id => guestModal(null, id), target.id);
+  await page.waitForFunction(() => /Edit Guest/.test(document.querySelector('.modal-header')?.textContent || ''), { timeout: 8000 });
+  ok(true, `${tag} S15-3 Edit opens "Edit Guest" for her`);
+  await page.evaluate(() => closeModal());
+  eq((await page.evaluate(() => API.getGuests())).length, guestsBeforeEdit, `${tag} S15-3 opening Edit creates nobody`);
+  // Review F-09: if her record cannot be loaded, no blank "Add New Guest" form opens.
+  const s15NoForm = await page.evaluate(async id => {
+    const real = API.getGuest; API.getGuest = () => Promise.reject(new Error('offline'));
+    try { await guestModal(null, id); } finally { API.getGuest = real; }
+    const h = document.querySelector('.modal-header'); const t = h ? h.textContent : '';
+    closeModal(); return t;
+  }, target.id);
+  ok(!/Add New Guest/.test(s15NoForm), `${tag} S15-3 (review F-09) a failed load never opens a blank Add form`);
 
   // Move-in wizard: nothing is written until the final step
   const guestsBefore = (await page.evaluate(() => API.getGuests())).length;
@@ -766,6 +786,7 @@ async function runAtWidth(browser, BASE, width) {
   eq(afterMoveIn.length, guestsBefore + 1, `${tag} resident created on confirm`);
   const made = afterMoveIn.find(g => g.name === 'Wizard Tester');
   ok(made, `${tag} she is in the list`);
+  ok(!made.id_proof_type, `${tag} S15-4 no ID type chosen → stored empty, not "— select —" (got ${JSON.stringify(made.id_proof_type)})`);
   const herPays = await page.evaluate(id => apiFetch(`/guests/${id}/timeline`), made.id);
   ok(herPays.items.some(i => i.kind === 'payment' && /12,000/.test(i.title)), `${tag} the deposit taken at move-in is recorded`);
   // Abandoning the wizard writes nothing
@@ -1222,11 +1243,43 @@ async function runAtWidth(browser, BASE, width) {
   }), `${tag} Tab from the last element stays inside the modal`);
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => !document.getElementById('modal-overlay'), { timeout: 5000 });
-  ok(await page.evaluate(() => document.activeElement && document.activeElement.classList.contains('room-tile')), `${tag} focus returns to what opened the modal`);
+  const s15Focus = await page.evaluate(() => { const a = document.activeElement; return { ok: !!a && a.classList.contains('room-tile'), on: a ? a.tagName + '.' + String(a.className).split(' ')[0] : 'none', tiles: document.querySelectorAll('.room-tile').length, page: typeof currentPage !== 'undefined' ? currentPage : '?' }; });
+  ok(s15Focus.ok, `${tag} focus returns to what opened the modal (focus on ${s15Focus.on}; page ${s15Focus.page}; ${s15Focus.tiles} tiles)`);
   eq(await page.$$eval('#page-content input:not([type=hidden]):not([type=checkbox]), #page-content select, #page-content textarea',
     els => els.filter(el => !el.getAttribute('aria-label') && !(el.id && document.querySelector(`label[for="${el.id}"]`))).length), 0,
     `${tag} every input has a label or a name`);
 
+  // ═══════════════ Sprint 15 ═══════════════
+  // S15-5: one button per job per screen; hamburger hidden on phones
+  for (const pg of ['payments', 'collections', 'guests', 'complaints', 'guest-messages', 'rooms-table', 'daily-menu', 'purchases']) {
+    await page.evaluate(x => navigate(x), pg);
+    await page.waitForFunction(() => !document.querySelector('#page-content .sm-skel'), { timeout: 10000 });
+    await sleep(150);
+    eq(await page.$eval('#topbar-actions', e => e.children.length), 0, `${tag} S15-5 ${pg}: no duplicate button in the top bar`);
+  }
+  ok(await page.$eval('#menu-toggle', e => getComputedStyle(e).display === 'none'), `${tag} S15-5 phone: hamburger hidden (More opens the same menu)`);
+  // S15-5: "Generate owner report" lands on Reports with the report card
+  await page.evaluate(() => { closeModal(); COMMANDS.find(c => c.id === 'owner-report').run(); });
+  await page.waitForFunction(() => currentPage === 'reports' && document.getElementById('owner-summary'), { timeout: 10000 });
+  ok(true, `${tag} S15-5 owner-report shortcut opens Reports with the report`);
+  // S15-6: the Payments header counts confirmed money only
+  const s15Gid = (await page.evaluate(() => API.getGuests()))[0].id;
+  const s15YmNow = new Date(Date.now() + 5.5 * 3600 * 1000);
+  await pool.query(`INSERT INTO collections(guest_id, guest_name, amount, collection_date, collection_month, collection_type, payment_mode, status, receipt_number)
+                    VALUES($1,'UI Guest',100,$2,'claim','rent','UPI','pending_verification',$3)`, [s15Gid, s15YmNow.toISOString().slice(0, 10), 'S15-' + width + '-' + Date.now()]);
+  await page.evaluate(() => navigate('payments'));
+  await page.waitForSelector('#pay-received', { timeout: 10000 });
+  const s15Rows = await page.evaluate(() => paymentsListCache);
+  const s15Confirmed = s15Rows.filter(c => c.status === 'confirmed' || !c.status).reduce((t, c) => t + Number(c.amount), 0);
+  const s15Pending = s15Rows.filter(c => /^pending/.test(c.status || '')).reduce((t, c) => t + Number(c.amount), 0);
+  ok(s15Pending >= 100, `${tag} S15-6 fixture: a pending claim exists (${s15Pending})`);
+  const s15Head = await page.$eval('#pay-received', e => e.textContent);
+  const s15Shown = Number(s15Head.replace(/[^0-9]/g, ''));
+  eq(s15Shown, s15Confirmed, `${tag} S15-6 MONEY: header shows confirmed only (${s15Head.trim()})`);
+  ok(/received/.test(s15Head), `${tag} S15-6 header says "received", not "total"`);
+  ok(await page.$eval('#pay-waiting', e => /waiting for confirmation/.test(e.textContent)), `${tag} S15-6 pending money shown separately as "waiting"`);
+  eq(Number((await page.$eval('#pay-waiting', e => e.textContent)).split('waiting')[0].replace(/[^0-9]/g, '')), s15Pending, `${tag} S15-6 the waiting line equals the s15Pending s15Rows`);
+  await pool.query(`DELETE FROM collections WHERE receipt_number LIKE 'S15-${width}-%'`);
   eq(jsErrors.length, 0, `${tag} no uncaught JS errors (${jsErrors.join('; ')})`);
   await page.close(); await ctx.close();
 }
@@ -1235,7 +1288,7 @@ async function runAtWidth(browser, BASE, width) {
   await pool.query(`TRUNCATE complaints, guest_room_history, checklist_log, collections, guest_rent_history, deposit_refunds, guests, rooms, day_closings, collection_variances RESTART IDENTITY CASCADE`);
   const server = app.listen(0);
   const BASE = `http://127.0.0.1:${server.address().port}`;
-  // Fixtures via API: two rooms, one guest, one confirmed collection
+  // Fixtures via API: two rooms, one guest, one s15Confirmed collection
   const login = await (await fetch(BASE + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'admin', password: process.env.ADMIN_PASSWORD || 'SiriMane@2024' }) })).json();
   const H = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + login.token };
   const post = (p, b) => fetch(BASE + '/api' + p, { method: 'POST', headers: H, body: JSON.stringify(b) }).then(r => r.json());

@@ -29,7 +29,7 @@ repository:
   test_branch: "ai/test"
   baseline_sha: "48deac233fcafe667b4977d344106fff62b301a5"   # main, 17 Sep 2026, "Add files via upload" — contains Sprints 0–14.4
   work_branch_prefix: "ai/"
-  registered_work_branches: ["ai/test"]
+  registered_work_branches: ["ai/test", "ai/sprint-15"]   # ai/sprint-15: candidate branch for Sprint 15, not deployed; merged into ai/test only after G3
   forbidden_refs: ["main"]                                       # Railway deploys main → production
   integration_method: "pull-request (base: ai/test)"
   integrator: "DEV (single integrator; preserved)"
@@ -69,7 +69,7 @@ verification:
   full_regression_at_phase_completion: true
 
 execution:
-  mode: "SINGLE-AGENT SEQUENTIAL ROLES"
+  mode: "LIMITED MULTI-AGENT (from Sprint 15): one implementing agent; separate subagents for UX review and independent code review. Earlier phases: SINGLE-AGENT SEQUENTIAL ROLES"
   agent_roster:
     - "One Claude session performs PM, ARCH, DEV and QA as visibly separated passes. Review is SELF-REVIEW and is labelled as such. Subagents are available for read-only exploration but are not independent reviewers of this agent's code."
   specialist_assignments:

@@ -1,7 +1,6 @@
 // routes/index.js — All API routes
 const router = require('express').Router();
 const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
 const PDFDocument = require('pdfkit');
 const pool = require('../db');
 const auth = require('../middleware/auth');
@@ -147,7 +146,7 @@ router.post('/auth/login', async (req, res) => {
     const user = r.rows[0];
     if (!user || !(await bcrypt.compare(password, user.password_hash)))
       return res.status(401).json({ error: 'Invalid credentials' });
-    const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: '8h' });
+    const token = auth.signToken({ userId: user.id }, { expiresIn: '8h' });
     await pool.query(`INSERT INTO activity_log(user_id,action,ip_address) VALUES($1,'login',$2)`, [user.id, req.ip]);
     res.json({ token, user: { id: user.id, username: user.username, role: user.role } });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1323,7 +1322,7 @@ router.post('/guest-login', async (req, res) => {
 
     if (!valid) return res.status(401).json({ error: 'Incorrect password. Default password is your mobile number.' });
 
-    const token = jwt.sign({ guestId: guest.id, type: 'guest' }, process.env.JWT_SECRET, { expiresIn: '24h' });
+    const token = auth.signToken({ guestId: guest.id, type: 'guest' }, { expiresIn: '24h' });
     res.json({
       token,
       guest: {
@@ -1339,7 +1338,7 @@ const guestAuth = async (req, res, next) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
     if (!token) return res.status(401).json({ error: 'No token' });
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = auth.verifyToken(token);
     if (decoded.type !== 'guest') return res.status(401).json({ error: 'Invalid token type' });
     const r = await pool.query('SELECT * FROM guests WHERE id=$1', [decoded.guestId]);
     if (!r.rows[0]) return res.status(401).json({ error: 'Guest not found' });
@@ -1839,7 +1838,7 @@ router.get('/guest-id', guestAuth, async (req, res) => {
          FROM guests g LEFT JOIN rooms r ON r.id=g.room_id WHERE g.id=$1`, [req.guest.id]);
     const x = g.rows[0];
     if (!x) return res.status(404).json({ error: 'Resident not found' });
-    const token = jwt.sign({ type: 'resident-id', guestId: x.id }, process.env.JWT_SECRET, { expiresIn: '24h' });
+    const token = auth.signToken({ type: 'resident-id', guestId: x.id }, { expiresIn: '24h' });
     const settings = await pool.query(`SELECT key, value FROM app_settings WHERE key IN ('pg_name','pg_phone')`);
     const st = Object.fromEntries(settings.rows.map(r => [r.key, r.value]));
     const qr = await QRCode.toString(token, { type: 'svg', margin: 0, errorCorrectionLevel: 'M', width: 220 });
@@ -1859,7 +1858,7 @@ router.post('/resident-id/verify', auth, async (req, res) => {
     let guestId = null;
     if (token) {
       let decoded;
-      try { decoded = jwt.verify(String(token), process.env.JWT_SECRET); }
+      try { decoded = auth.verifyToken(String(token)); }
       catch (e) { return res.status(400).json({ valid: false, error: /expired/i.test(e.message) ? 'That ID has expired — ask her to reopen the portal' : 'That code is not valid' }); }
       if (decoded.type !== 'resident-id') return res.status(400).json({ valid: false, error: 'That code is not a resident ID' });
       guestId = decoded.guestId;

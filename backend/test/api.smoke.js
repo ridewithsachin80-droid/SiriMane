@@ -136,6 +136,34 @@ async function main() {
     r = await api('POST', '/guest-complaint', { category: 'Wifi/Internet', description: 'Smoke: wifi down' }); eq(r.status, 401, 'guest-complaint needs guest token');
     r = await S('POST', '/guest-complaint', { category: 'Wifi/Internet', description: 'x' }); eq(r.status, 401, 'staff token is not a guest token');
     r = await G('POST', '/guest-complaint', { category: 'Wifi/Internet', description: '' }); eq(r.status, 400, 'blank guest complaint');
+    // S15-7: a token names the environment that issued it; another environment's token is refused.
+    {
+      const jwt = require('jsonwebtoken');
+      const payload = JSON.parse(Buffer.from(guestTok.split('.')[1], 'base64url').toString());
+      ok(payload.env, 'S15-7 tokens carry the issuing environment');
+      const foreign = jwt.sign({ guestId: payload.guestId, type: 'guest', env: 'some-other-environment' }, process.env.JWT_SECRET, { expiresIn: '1h' });
+      r = await api('GET', '/guest-portal', null, foreign); eq(r.status, 401, 'S15-7 SECURITY: a token from another environment is refused');
+      const cut = require('../middleware/auth').LEGACY_CUTOFF;
+      const legacy = jwt.sign({ guestId: payload.guestId, type: 'guest', iat: cut - 3600, exp: Math.floor(Date.now() / 1000) + 3600 }, process.env.JWT_SECRET);
+      r = await api('GET', '/guest-portal', null, legacy); eq(r.status, 200, 'S15-7 a token issued before the cut-off (no env) still works until it expires');
+      // iat must be AFTER boot but already in the PAST, so a cut-off computed
+      // per request (now) would wrongly accept it — only a boot-time cut-off refuses. (Review N-6d)
+      while (Date.now() / 1000 < cut + 3) await new Promise(res => setTimeout(res, 200));
+      const lateLegacy = jwt.sign({ guestId: payload.guestId, type: 'guest', iat: cut + 1, exp: Math.floor(Date.now() / 1000) + 3600 }, process.env.JWT_SECRET);
+      ok(lateLegacy && (cut + 1) < Date.now() / 1000, 'S15-7 the late legacy token is dated after boot and before now');
+      r = await api('GET', '/guest-portal', null, lateLegacy); eq(r.status, 401, 'S15-7 SECURITY (review F-03): a token with no env issued AFTER the cut-off is refused');
+      for (const badIat of [null, '', true, [], '1']) {
+        // jsonwebtoken refuses to SIGN a non-numeric iat, so build the token by hand
+        const b64 = o => Buffer.from(JSON.stringify(o)).toString('base64url');
+        const body = b64({ alg: 'HS256', typ: 'JWT' }) + '.' + b64({ guestId: payload.guestId, type: 'guest', iat: badIat, exp: Math.floor(Date.now() / 1000) + 3600 });
+        const odd = body + '.' + require('crypto').createHmac('sha256', process.env.JWT_SECRET).update(body).digest('base64url');
+        r = await api('GET', '/guest-portal', null, odd); eq(r.status, 401, `S15-7 SECURITY (review N-2): an env-less token with iat=${JSON.stringify(badIat)} is refused`);
+      }
+      ok(require('../middleware/auth').ENV_ID.includes('#'), 'S15-7 (review F-04) the environment id includes the database identity');
+      const adminPayload = JSON.parse(Buffer.from(adminTok.split('.')[1], 'base64url').toString());
+      const foreignAdmin = jwt.sign({ userId: adminPayload.userId, env: 'some-other-environment' }, process.env.JWT_SECRET, { expiresIn: '1h' });
+      r = await api('GET', '/rooms', null, foreignAdmin); eq(r.status, 401, 'S15-7 SECURITY: another environment\'s ADMIN token is refused');
+    }
     r = await G('POST', '/guest-complaint', { category: 'Wifi/Internet', description: 'Smoke: wifi down' }); eq(r.status, 201, 'guest raises issue'); eq(r.data.status, 'open', 'open');
     r = await G('GET', '/guest-complaints'); eq(r.status, 200, 'guest lists own'); eq(r.data.length, 1, 'sees exactly own issue'); eq(r.data[0].category, 'Wifi/Internet', 'category');
     r = await S('GET', '/complaints'); const gc = r.data.find(x => x.raised_by === 'guest'); ok(gc, 'staff sees guest issue'); eq(gc.guest_id, guest.id, 'linked'); eq(gc.room_number, 'S1', 'room set');
@@ -223,6 +251,13 @@ async function main() {
   eq(r.status, 200, 'staff verify by resident number'); eq(r.data.valid, true, 'active resident verifies'); eq(r.data.resident.name, guest.name, 'verify names her');
   ok(!('phone' in r.data.resident) && !('id_proof_number' in r.data.resident), 'PRIVACY: verify returns no phone or ID number');
   r = await api('POST', '/resident-id/verify', { token: 'not-a-token' }, staffTok); eq(r.status, 400, 'garbage code refused'); eq(r.data.valid, false, 'and reported invalid');
+  { // S15-7 (review F-05): a gate QR minted by another environment is not valid here
+    const jwt = require('jsonwebtoken');
+    const g0 = JSON.parse(Buffer.from(guestTok.split('.')[1], 'base64url').toString());
+    const foreignQr = jwt.sign({ type: 'resident-id', guestId: g0.guestId, env: 'other#000000000000' }, process.env.JWT_SECRET, { expiresIn: '1h' });
+    r = await api('POST', '/resident-id/verify', { token: foreignQr }, staffTok);
+    ok(r.status >= 400 && r.data.valid === false, `S15-7 SECURITY: a gate QR from another environment is refused (${r.status})`);
+  }
   r = await api('POST', '/resident-id/verify', { resident_no: 'SM9999' }, staffTok); eq(r.status, 404, 'unknown resident number → 404');
   r = await api('POST', '/resident-id/verify', { resident_no: idToken.resident_no }); eq(r.status, 401, 'verify needs a staff login');
 

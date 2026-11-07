@@ -53,6 +53,7 @@ async function runAtWidth(browser, BASE, width, fixtures) {
   }
   ok(manifest.icons.some(i => i.purpose === 'maskable'), `${tag} has a maskable icon for Android`);
   ok(manifest.start_url.startsWith('/guest'), `${tag} start_url opens the portal`);
+  ok(await page.$eval('.p-bottomnav', e => getComputedStyle(e).display === 'none'), `${tag} S15 (review F-13) no bottom bar on the login screen`);
   await page.type('#login-mobile', PHONE);
   await page.type('#login-password', PHONE);
   await page.click('#login-btn');
@@ -225,12 +226,37 @@ async function runAtWidth(browser, BASE, width, fixtures) {
     await page.evaluate(() => document.getElementById('login-btn').click());
     await page.waitForFunction(() => !document.getElementById('portal-section').classList.contains('hidden'), { timeout: 8000 });
   }
-  const tabLabels = await page.$$eval('.tab', els => els.map(e => ({ label: e.textContent.trim(), tab: e.dataset.tab })));
-  ok(tabLabels.some(t => t.tab === 'idcard'), `${tag} portal has a My ID tab`);
-  ok(tabLabels.every(t => t.tab), `${tag} every tab declares which panel it opens`);
+  // ── Sprint 15: four bottom tabs, no top strip, nothing lost ────────────
+  eq((await page.$$('.tab')).length, 0, `${tag} S15-1 the 11-tab top strip is gone`);
+  const navs = await page.$$eval('.p-bottomnav button', els => els.map(e => e.dataset.nav));
+  eq(navs.join(','), 'home,pay,help,me', `${tag} S15-1 exactly four bottom tabs: Home · Pay · Help · Me`);
+  ok(await page.$eval('.p-bottomnav', n => [...n.querySelectorAll('button')].every(b => b.getBoundingClientRect().height >= 44)), `${tag} bottom tabs are at least 44px tall`);
+  // Every old section is still reachable and lights the tab it now lives under.
+  const homes = { home: 'home', pay: 'pay', menu: 'home', notices: 'home', complaint: 'help', message: 'help', visitors: 'help', idcard: 'me', details: 'me', settings: 'me', emergency: 'me' };
+  for (const [sec, nav] of Object.entries(homes)) {
+    const r = await page.evaluate(x => { showTab(x); return { shown: !document.getElementById('tab-' + x).classList.contains('hidden'), lit: (document.querySelector('.p-bottomnav button.active') || {}).dataset?.nav }; }, sec);
+    ok(r.shown && r.lit === nav, `${tag} S15-1 "${sec}" still reachable, under ${nav} (lit: ${r.lit})`);
+  }
+  const help = await page.evaluate(() => { showTab('help'); return ['complaint', 'message', 'visitors'].map(t => !document.getElementById('tab-' + t).classList.contains('hidden')); });
+  ok(help.every(Boolean), `${tag} S15-1 Help shows Report issue + Message + Visitors together`);
+  const me = await page.evaluate(() => { showTab('me'); return ['idcard', 'details', 'settings'].map(t => !document.getElementById('tab-' + t).classList.contains('hidden')); });
+  ok(me.every(Boolean), `${tag} S15-1 Me shows ID card + My details + Settings together`);
+  ok(await page.$eval('#tab-settings', e => /Log out/.test(e.textContent) && !!e.querySelector('#p-theme')), `${tag} S15-2 Log out and theme live under Me`);
+  ok(!(await page.$eval('.user-bar', e => /Logout|Log out/.test(e.textContent))), `${tag} S15-2 no Logout button in the header`);
+  ok(await page.$eval('.header', e => getComputedStyle(e).display === 'none'), `${tag} S15-2 the big login header is hidden once logged in`);
+  await page.evaluate(() => document.getElementById('sos-btn').click());
+  ok(await page.$eval('#tab-emergency', e => !e.classList.contains('hidden')), `${tag} S15-1 SOS in the header opens Emergency`);
   await page.evaluate(() => showTab('idcard'));
   await page.waitForSelector('.idcard-qr svg', { timeout: 10000 });
-  eq(await page.$eval('.tab.active', e => e.dataset.tab), 'idcard', `${tag} the ID tab is the one highlighted`);
+  eq(await page.$eval('.p-bottomnav button.active', e => e.dataset.nav), 'me', `${tag} the ID card lights the Me tab`);
+  // Review fixes F-06/F-07/F-08/F-12/F-17
+  const navBox = await page.$$eval('.p-bottomnav button', els => els.map(e => e.getBoundingClientRect().right));
+  ok(Math.max(...navBox) >= width - 4, `${tag} S15-1 (F-06) the four tabs fill the bar, no empty slot (${Math.round(Math.max(...navBox))}/${width})`);
+  ok(await page.$eval('#tab-settings', e => [...e.querySelectorAll('button')].some(b => /notices/i.test(b.getAttribute('onclick') || '')) && [...e.querySelectorAll('button')].some(b => /'menu'/.test(b.getAttribute('onclick') || ''))), `${tag} S15-1 (F-07) Notices and the weekly menu are reachable from Me, not only Home`);
+  await page.evaluate(() => showTab('me'));
+  const s15Theme = await page.$eval('#p-theme', e => { const r = e.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; });
+  ok(s15Theme[0] >= 44 && s15Theme[1] >= 44, `${tag} S15-2 (F-12) theme toggle is a 44px target (${s15Theme.join('×')})`);
+  eq(await page.$eval('.p-bottomnav button.active', e => e.getAttribute('aria-current')), 'page', `${tag} (F-17) the active tab is announced as the current page`);
   const idTxt = await page.$eval('#idcard-body', e => e.textContent);
   ok(/SM\d{4}/.test(idTxt), `${tag} ID card shows her resident number`);
   ok(idTxt.includes('Rakshitha') || idTxt.includes('Portal Resident'), `${tag} ID card names her`);
@@ -253,7 +279,7 @@ async function runAtWidth(browser, BASE, width, fixtures) {
   ok(/Good (morning|afternoon|evening)/.test(homeTxt), `${tag} portal home greets her`);
   ok(/Today's meals/.test(homeTxt), `${tag} today's meals on home`);
   ok(await page.$('.p-bottomnav'), `${tag} bottom navigation present`);
-  eq(await page.$$eval('.p-bottomnav button', els => els.length), 5, `${tag} five bottom-nav items`);
+  eq(await page.$$eval('.p-bottomnav button', els => els.length), 4, `${tag} S15-1 four bottom-nav items`);
   eq(await page.$eval('.p-bottomnav button.active', e => e.dataset.nav), 'home', `${tag} Home highlighted`);
   const navH = await page.$eval('.p-bottomnav button', e => e.getBoundingClientRect().height);
   ok(navH >= 44, `${tag} bottom-nav targets are thumb-sized (${Math.round(navH)}px)`);
