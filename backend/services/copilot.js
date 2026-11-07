@@ -235,7 +235,10 @@ async function ask({ user, text, context, tap, voice, alternatives, authorizatio
 async function confirm({ user, proposal_id, authorization, port }) {
   const t0 = Date.now();
   if (!/^[0-9a-f-]{36}$/i.test(String(proposal_id))) { const e = new Error('That proposal does not exist.'); e.status = 404; throw e; }
-  const r = await pool.query(`SELECT * FROM ai_proposals WHERE id=$1`, [proposal_id]);
+  // D-15-1: Postgres decides expiry. expires_at is `timestamp` (no zone); reading
+  // it into a JS Date depends on the server process's TZ, which made every
+  // proposal "expired" on creation under a mismatched zone.
+  const r = await pool.query(`SELECT *, (expires_at IS NOT NULL AND expires_at < NOW()) AS expired_in_db FROM ai_proposals WHERE id=$1`, [proposal_id]);
   const p = r.rows[0];
   const fail = async (msg, code) => {
     await pool.query(`INSERT INTO ai_actions(user_id, request_text, interpretation, proposal_id, error, ms) VALUES($1,$2,$3,$4,$5,$6)`, [user.id, 'confirm', { tool: p?.tool || null }, proposal_id, code, Date.now() - t0]).catch(() => {});
@@ -244,7 +247,7 @@ async function confirm({ user, proposal_id, authorization, port }) {
   if (!p) return fail('That proposal does not exist.', 'not-found');
   if (String(p.user_id) !== String(user.id)) return fail('That proposal belongs to another user.', 'forbidden');
   if (p.confirmed_at) return fail('That was already confirmed.', 'already-confirmed');
-  if (new Date(p.expires_at) < new Date()) return fail('That proposal has expired — ask again.', 'expired');
+  if (p.expired_in_db) return fail('That proposal has expired — ask again.', 'expired');
   const tool = tools.TOOLS[p.tool];
   if (!tool || tool.level !== 'execute') return fail('Not an executable action.', 'invalid');
   if (!tools.allowed(tool, user)) return fail('That needs an admin login.', 'forbidden');

@@ -1155,6 +1155,24 @@ router.get('/rent-due/export/pdf', auth, requireAdmin, async (req, res) => {
 });
 
 // ── PER-GUEST LEDGER ───────────────────────────────
+// Sprint 15.2 (S15.2-2): what deposit was actually COLLECTED, for the
+// checkout screen. Read-only; changes no money computation. Received counts
+// confirmed rows only — pending_verification / pending_approval are shown
+// separately and never as received.
+router.get('/guests/:id/deposit-status', auth, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Bad resident id' });
+  try {
+    const g = await pool.query('SELECT deposit_amount FROM guests WHERE id=$1', [id]);
+    if (!g.rows[0]) return res.status(404).json({ error: 'Resident not found' });
+    const c = await pool.query(`SELECT
+        COALESCE(SUM(amount) FILTER (WHERE status IS NULL OR status='confirmed'),0) AS received,
+        COALESCE(SUM(amount) FILTER (WHERE status LIKE 'pending%'),0) AS pending
+      FROM collections WHERE guest_id=$1 AND collection_type='deposit' AND is_deleted=false`, [id]);
+    res.json({ agreed: Number(g.rows[0].deposit_amount) || 0, received: Number(c.rows[0].received), pending: Number(c.rows[0].pending) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 router.get('/guests/:id/ledger', auth, async (req, res) => {
   try {
     const g = await pool.query('SELECT * FROM guests WHERE id=$1', [req.params.id]);

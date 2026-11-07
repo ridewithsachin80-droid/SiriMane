@@ -68,3 +68,17 @@ Why the gate missed it: the ui test asserted `some` deposit row, not exactly one
 | S15.1-5 | Gate: wizard move-in asserts exactly one deposit row and exactly one rent row; API test for both POST /guests paths. All 11 gates green, fresh DB, TZ=UTC | QA |
 
 Before/after (sample: deposit ₹7,000 + rent ₹7,000 at move-in, UPI): before 3 rows / ₹21,000 collected / deposit ₹14,000 → after 2 rows / ₹14,000 / ₹7,000.
+
+## Sprint 15.2 — hardening from the 15.1 review (owner: "keep working till you require my permission", 7 Nov 21:11)
+
+Scope chosen by the team from open review findings and the defect ledger. Nothing here changes how money is computed; refund maths stays as is (owner decision if it should change).
+
+| ID | Acceptance criterion | Review |
+|---|---|---|
+| S15.2-1 | Move-in Save: the button is disabled while saving (no second resident from a double tap). If the resident is saved but a payment is refused (closed day, network), the wizard does NOT re-create the resident on retry, keeps the form, and says plainly which payment did not save; retry posts only the missing payments | DATA (money path) |
+| S15.2-2 | Checkout wizard shows deposit **received ₹A of agreed ₹B** next to the refund, with a warning when A < B. Refund number unchanged (display only) | DATA — no money computation change |
+| S15.2-3 | Payment type/mode/month are HTML-escaped wherever the management Payments table renders them | SEC |
+| S15.2-4 | D-15-1: AI proposal expiry decided by Postgres (`expires_at < NOW()`), not by JS Date parsing. Evidence: copilot, bulk, quick gates pass with the process at TZ=Asia/Kolkata | SEC/QA |
+| S15.2-5 | D-15-4: flaky modal-focus assertion — root cause found and fixed (app or test), evidence by repeated runs | QA |
+| S15.2-7 | **D-15-6 (Critical, SEC, added during the sprint):** no text written by residents or by the public inbox form becomes HTML on any staff screen; proven by a new gate `xss.smoke.js` that fails before the fix | **SEC REQUIRED** |
+| S15.2-6 | All 11 gates green on a fresh DB, TZ=UTC; new assertions for each item; independent review before merge to ai/test | QA |

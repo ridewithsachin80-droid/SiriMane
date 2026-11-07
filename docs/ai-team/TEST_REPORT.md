@@ -129,3 +129,42 @@ N-6d (test weakness) fixed: the post-boot legacy token is now dated after boot b
 
 Gate gap closed: the wizard test previously asserted `some` deposit row; it now asserts exactly one deposit and one rent row, the amount and the mode.
 D-15-4 now 2 occurrences in 13 ui runs.
+
+## Sprint 15.2
+
+**D-15-6 (Critical, SEC) — stored XSS into staff screens.** Found while scoping S15.2-3. The management app had no HTML escaping; `helmet` runs with `contentSecurityPolicy: false`. Untrusted writers: the PUBLIC `POST /api/guest-message` (no login) and residents (complaint category/description, visitor name/relation, meal comment, survey comment). New gate `backend/test/xss.smoke.js` (new file) plants payloads through every untrusted door and opens every router page, every inbox message, the request sheet, every Resident 360 / Room 360 tab, search and a Copilot answer.
+- Before fix (73d2159): FAIL on 12 screens; the payload's code RAN on Requests, Inbox (list + opened message), request sheet and a Copilot answer.
+- After fix (82e250a): PASS, 50 assertions.
+On production (`main`) since at least 17 Sep. Release is the owner's decision.
+
+**D-15-1 closed** — proposal expiry now decided by Postgres. Evidence: `GATE_TZ=Asia/Kolkata` copilot FAIL "owner confirms (got 409)" before; copilot 250 / bulk 116 / quick 195 PASS after.
+
+| Run | Source | Result |
+|---|---|---|
+| G152a | 82e250a (uncommitted at run, same content) | **12/12 PASS, 2,409** (api 276 · ai 213 · assistant 82 · owner 94 · copilot 250 · finance 71 · notify 64 · bulk 116 · quick 195 · ui 781 · portal 217 · xss 50) |
+| G152tz | same, TZ=Asia/Kolkata | copilot/bulk/quick PASS |
+| G152tz-before | 73d2159, TZ=Asia/Kolkata | copilot FAIL (D-15-1 reproduced) |
+
+Gate list is now TWELVE (adds `xss`).
+
+### Sprint 15.2 — review round 1: BLOCK (separate agent) → fixed
+Reviewer reproduced in headless Chrome: F-1 Critical admin Home "flagged" card (no click) · F-2 Copilot answer + proposal preview · F-3 Why? popover · F-4 bulk preview · F-5 audit log + Copilot log · S15.2-3 payment fields (staff → admin) · Money (Medium): move-in retry could double-post when the server saved but the 4G reply was lost.
+Fix 13e64cf: broad escaping pass (every DB text field in HTML; JSON-encoded onclick string args), lost-reply check on retry. xss gate extended with every reviewer door: **against 82e250a → FAIL on 21 screens; 13e64cf → PASS 68**.
+
+### D-15-4 — CLOSED (root cause by QA specialist agent, isolated worktree + DB)
+Not the dashboard: navigate-then-`setTimeout` openers ("Add expense" → form after 350 ms) fired on whatever screen was showing. Reproduced 5/26 before, 0/41 after. Real user impact: a form popping up on the next screen; a slow "Generate owner report" silently doing nothing. Fix 4794995: `navigate()` resolves true only if the screen is still current; `navigateThen()` replaces timers.
+
+| Run | Source | Result |
+|---|---|---|
+| G152c | 13e64cf | **12/12 PASS, 2,437** |
+| G152d | 13e64cf | **12/12 PASS, 2,437** |
+| ui ×3 more | 13e64cf | PASS 791 ×3 (5 consecutive incl. G152c/d) |
+
+New backlog (not fixed):
+- **D-15-7 (Medium):** a slow screen's late render can overwrite the screen the user moved to (Home content shown on Rooms with delayed data). ~25 screens; own sprint item.
+- **D-15-8 (High, hardening):** admin token lives in localStorage and CSP is off, so any future missed escape = admin takeover. Defence in depth: httpOnly cookie session and/or a CSP once inline handlers are removed.
+- **G-1 (Low, test hygiene):** reviewer saw `quick` fail when run after other gates on a shared DB (learned data). The runner rebuilds per sweep; per-gate isolation recommended.
+
+### Sprint 15.2 — review round 2 (same independent agent) of 13e64cf: **APPROVE FOR TEST DEPLOYMENT**
+Re-ran 12/12 on fresh DBs (2,436; xss 67 vs 68 — one-assertion gap, recorded). Every resident/public attack from round 1 re-run clean. navigate()/navigateThen() no regression; retry never wrongly skips another resident's or a hand-recorded payment.
+**Before production (Sprint 15.3):** R-1 (Med) staff→admin XSS: Resident 360 kv() Address/Emergency/ID type, viewGuest grid, rentHistoryModal name `"`, evening summary `<pre>`, Reports expense category · R-4 (Med, money) retry message tells the warden to "record it later in Collect" → hand double-entry risk · R-6 (Med) resident save with lost reply → retry creates a second resident · R-2 (Low) onclick JSON vs literal `&quot;` in data · R-5 (Low, introduced) inbox search double-escaped · R-3 (Low) raw error messages; guest.html shows staff text raw.
