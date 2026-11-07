@@ -36,9 +36,9 @@ repository:
 
 environment:
   local_test_workspace: "/home/claude/sirimane (clone of the baseline) + a throwaway Postgres 16 on a private socket"
-  test_service_id: "NOT_CONFIGURED"        # Railway has one service and it is production
-  test_environment_id: "NOT_CONFIGURED"
-  test_url: "NOT_CONFIGURED"
+  test_service_id: "Railway project f4e6997d…, service c2930e96…, environment Test (ae09e94e…)"
+  test_environment_id: "ae09e94e-0f95-4220-be97-ca98d39565c6"
+  test_url: "https://sirimane-test.up.railway.app"
   test_database_identity: "local scratch DB only, rebuilt per run from backend/scripts/migrate-all.js; NEVER the Railway DATABASE_URL"
   integrations: "Gemini/Groq disabled in gates (keyless) or stubbed via ai.providers._stub; WhatsApp is wa.me links only — nothing sends itself"
   production_access: "PROHIBITED"
@@ -47,7 +47,7 @@ authority:
   requested_scope: "Adopt framework 2.0; create and push the test branch; continue authorized work there"
   test_branch_push: "authorized by owner on 7 Nov 2026; performed once (ai/test → d1641eb). NOTE: write access turned out to be unrestricted — see §Safety facts"
   test_branch_merge: "not_authorized until a PR is reviewed"
-  test_deployment: "not_requested"   # no test Railway service exists
+  test_deployment: "authorized — Railway auto-deploys ai/test to the Test environment"
   spending_limit: "no new paid commitments"
   phase_progression: "automatic within authorized scope after required gates"
   owner_decisions_reserved:
@@ -112,7 +112,7 @@ execution:
 | Git hooks / lifecycle scripts | VERIFIED NONE | no `.husky`, no `pre*`/`post*` npm scripts; `install` runs `npm install` only |
 | Server-side protection on `main` | **MISSING** | `branches/main/protection` → 403 "not accessible by integration" (cannot read); `rulesets` → `[]` (empty). No ruleset exists; a classic protection rule may or may not — treat as MISSING |
 | Write access from this AI session | **PRESENT and UNRESTRICTED** | `add_repo` *reported* `push_check: refused`, but `git push origin ai/test` succeeded. The session credential can write any ref, **including `main`**. Nothing on the GitHub side would have stopped a push to `main`. |
-| Separate test deployment | MISSING | one Railway service only; it is production |
+| Separate test deployment | VERIFIED | Railway `Test` environment deploys `ai/test` to its own Postgres (empty on first boot) |
 | Production DB reachable from here | VERIFIED NO | no `DATABASE_URL` in this session; gates use a local scratch Postgres |
 
 **Consequence (confirmed by a real push, not inferred):** today the only thing preventing an AI session from deploying to production is *instruction*. The framework (§4.2) is explicit that this is not a security guarantee. See HANDOFF.md for the two owner actions that close it.

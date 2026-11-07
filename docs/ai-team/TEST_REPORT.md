@@ -76,3 +76,19 @@ _Results appended below by the run script; see `## Run B-2 results`._
 Tools: Node v22.23.4 · PostgreSQL 16 (local, SSL on, trust auth, port 5435) · Chromium (Playwright build 1243) via puppeteer-core · exit code 0 on every suite.
 
 **Verdict (QA, self-review):** the GitHub baseline is what was delivered and is green in a UTC environment. D-15-1/D-15-2 remain OPEN as latent fragilities and are the first recommended item for Sprint 15, since they would bite anyone running the app outside UTC.
+
+## G5 — first verified test deployment · 2026-11-07 (owner-run, evidence by screenshot)
+
+| Step | Result | Evidence |
+|---|---|---|
+| Railway environment `Test` (id `ae09e94e…`), service SiriMane, source branch `ai/test` | VERIFIED | Railway deployment panel: "ridewithsachin80-droid/SiriMane · ai/test", commit "docs: record D-15-3 …" = `669ccef` |
+| Separate database | VERIFIED | `/health` on a fresh deploy listed **every** table missing — an empty Test Postgres, not production's |
+| Build | PASS | Nixpacks, Node 20.19.5, `npm install` honoured the lockfile (242 packages) |
+| Start | PASS (after fix) | First two deploys failed: a pre-deploy command `node backend/scripts/migrate-accountability.js` ran against an empty DB before Railway's private network was up. Cleared → service Online |
+| Migrations | PASS | Console: `node backend/scripts/migrate-all.js` → all 18 → "🎉 All migrations are up to date"; `seed.js` → admin created |
+| Smoke: login + Quick Entry write | PASS | `/management` login as admin; "onion 100" → Confirm → Expenses shows ₹100 Groceries, November 2026 |
+| Serverless | OFF | required — the 15-min notification sweep and 07:00/15:00/20:00 jobs run in-process |
+
+Limitations: performed by the owner in a desktop browser; the AI session cannot reach `*.up.railway.app` (egress allowlist). Not a physical-phone test. `/health` still read `schema: missing` for up to 10 min after migrating — it caches its check (see `schemaCheckedAt`); expected, not a defect.
+
+**Lesson recorded:** Railway copies variables into a new environment. After creating one, check `DATABASE_URL` and clear any pre-deploy command *before* the first deploy.
