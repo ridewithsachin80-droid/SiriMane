@@ -1,8 +1,41 @@
 # Siri Mane — Session Handoff
 
-Updated: 7 November 2026 · Framework 2.0 · Execution mode: SINGLE-AGENT SEQUENTIAL ROLES (self-review, labelled as such)
+Updated: 7 November 2026 · Framework 2.0 · Execution mode: LIMITED MULTI-AGENT from Sprint 15 (implementer + independent reviewer/QA agents)
 
-## Where things stand
+## Status at 7 Nov 2026, 23:00 IST — Sprints 15 → 15.5 on Test, NOT on production
+
+| Branch | State |
+|---|---|
+| `main` (production, sirimane.in) | `48deac23` — unchanged all session |
+| `ai/test` (Test site) | Sprints 15, 15.1, 15.2, 15.3, 15.4, 15.5 merged via PRs #1–#6, each after independent review |
+
+Gates on the last code: 12/12 PASS twice, 2,552 assertions (the 12th gate, `xss`, was added this session).
+
+### Why production should follow soon
+**D-15-6 (Critical):** on sirimane.in today, text typed by residents — and by anyone on the internet via the public "message the PG" form — runs as code on the warden's/admin's screens (reproduced in a browser). Fixed on Test only. The repo is public, so the fix is visible there.
+
+### Owner actions, in order
+1. **Railway Test → Variables → `JWT_SECRET`**: set a new value (generated one was given in chat) and redeploy. Required before production (N-6).
+2. Change the Test admin password.
+3. Phone test on sirimane-test.up.railway.app: resident 4-tab app, move-in (deposit recorded once, message says what was recorded), Payments (Type column, received vs waiting), checkout (deposit received of agreed), Inbox/Requests look normal.
+4. On Railway (production, after release): confirm the login limiter still blocks when `X-Forwarded-For` changes (reviewer note).
+5. Release: GitHub PR `ai/test` → `main`, merge. Users with sessions from before the release keep working (no mass logout).
+
+### Decisions only the owner can make
+- **P-2:** allow or block two active residents on one phone number (today: safe — each logs in with her own password; identical password → refused).
+- Backfill: tidy existing phone numbers saved with spaces (login already works without it).
+- Forced password change after the first resident login (default password = phone number).
+- Separate login limiters for staff and residents (shared Wi-Fi typos can lock out the warden).
+- D-15-3: bcrypt 5 → 6 (major dependency upgrade).
+- F-20: existing residents with ID type "— select —" (data update).
+- Refund maths: refund is computed from the agreed deposit even if less was collected (now shown as a warning only).
+
+### Next engineering items (no permission needed)
+- D-15-7 (Med): a slow screen's late render can overwrite the screen you moved to (~25 screens).
+- D-15-8 (High, hardening): admin token in localStorage + CSP off → move to httpOnly cookie and/or enable CSP.
+- LIMIT 5 on shared numbers → return the 409 message above 5 (Low). G-1/G-2 test hygiene. D-15-2 date columns under non-UTC TZ.
+
+## Where things stand (F0, kept for history)
 
 - **Repository:** `ridewithsachin80-droid/SiriMane` · **production branch:** `main` (Railway auto-deploys it) · **test branch:** `ai/test`
 - **Baseline SHA:** `48deac233fcafe667b4977d344106fff62b301a5` — this is `main`, and it already contains Sprints 0–14.4. The GitHub tree matches what was delivered and deployed; nothing is missing.
