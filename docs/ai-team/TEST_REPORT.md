@@ -168,3 +168,8 @@ New backlog (not fixed):
 ### Sprint 15.2 — review round 2 (same independent agent) of 13e64cf: **APPROVE FOR TEST DEPLOYMENT**
 Re-ran 12/12 on fresh DBs (2,436; xss 67 vs 68 — one-assertion gap, recorded). Every resident/public attack from round 1 re-run clean. navigate()/navigateThen() no regression; retry never wrongly skips another resident's or a hand-recorded payment.
 **Before production (Sprint 15.3):** R-1 (Med) staff→admin XSS: Resident 360 kv() Address/Emergency/ID type, viewGuest grid, rentHistoryModal name `"`, evening summary `<pre>`, Reports expense category · R-4 (Med, money) retry message tells the warden to "record it later in Collect" → hand double-entry risk · R-6 (Med) resident save with lost reply → retry creates a second resident · R-2 (Low) onclick JSON vs literal `&quot;` in data · R-5 (Low, introduced) inbox search double-escaped · R-3 (Low) raw error messages; guest.html shows staff text raw.
+
+### Sprint 15.3 — independent review of 913a44a: **APPROVE FOR TEST DEPLOYMENT**
+Reviewer: 12/12 on fresh DBs, 2,518 (xss Why-button count varies 140/142 — G-2, Low). Every XSS door clean incl. staff doors; no visible double escaping; guest portal shows `&` and `'` correctly. S15.3-1/-2/-4/-6/-7 PASS.
+Before production: **T-1 (Med, money/data)** phone typed with spaces/dashes defeats the R-6 lookup → lost reply can still create a 2nd resident (reproduced) · **T-2 (Low-Med)** guest.html ID card prints `emergency_contact_name` raw (reproduced) · **T-3 (Low)** Back still available after a failed save → edited name/phone can duplicate or adopt the wrong resident.
+Implementer gates G153c/d: 12/12 PASS ×2, 2,520.
