@@ -193,6 +193,18 @@ async function main() {
       eq(s152Dep.data.pending, 3000, 'S15.2-2 it is shown as pending instead');
       eq((await A('GET', '/guests/abc/deposit-status')).status, 400, 'S15.2-2 bad id → 400');
       eq((await G('GET', `/guests/${s152Wiz.id}/deposit-status`)).status, 401, 'S15.2-2 SECURITY: a resident token cannot read it');
+      // S15.4-1 (T-1): phones stored as digits only
+      const s154Num = '9' + String(Date.now()).slice(-9);
+      const s154 = await A('POST', '/guests', { name: 'S154 Spaced', phone: s154Num.slice(0, 5) + ' ' + s154Num.slice(5, 8) + '-' + s154Num.slice(8), join_date: today, monthly_rent: 5000, deposit_amount: 0 });
+      eq(s154.data.phone, s154Num, 'S15.4-1 POST /guests stores the phone digits only');
+      const s154Login = await api('POST', '/guest-login', { mobile: s154Num, password: s154Num });
+      eq(s154Login.status, 200, 'S15.4-1 she can log in with the plain 10 digits');
+      const s154Put = await A('PUT', `/guests/${s154.data.id}`, { ...s154.data, phone: '+91 ' + s154Num });
+      ok(s154Put.status < 300 && (await A('GET', '/guests')).data.find(x => x.id === s154.data.id).phone === s154Num, 'S15.4-1 PUT /guests strips spaces, symbols and the +91 prefix');
+      const s154Zero = await A('POST', '/guests', { name: 'S154 Zero', phone: '0' + s154Num.replace(/^9/, '8'), join_date: today, monthly_rent: 5000, deposit_amount: 0 });
+      eq(s154Zero.data.phone, s154Num.replace(/^9/, '8'), 'S15.4-1 a leading 0 is dropped');
+      await A('DELETE', `/guests/${s154Zero.data.id}`);
+      await A('DELETE', `/guests/${s154.data.id}`);
       for (const n of ['S151 Old Form', 'S151 Wizard', 'S151 Truthy']) { const g = (await A('GET', '/guests')).data.find(x => x.name === n); if (g) await A('DELETE', `/guests/${g.id}`); }
     }
     console.log('✓ resident complaints');

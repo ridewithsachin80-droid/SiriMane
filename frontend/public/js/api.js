@@ -23,7 +23,7 @@ async function apiFetch(endpoint, options = {}) {
   if (options.body && typeof options.body === 'object') config.body = JSON.stringify(options.body);
   let res;
   try { res = await fetch(`${API_BASE}${endpoint}`, config); }
-  catch { throw new Error('No connection. Check your internet and try again.'); }
+  catch { const e = new Error('No connection. Check your internet and try again.'); e.status = 0; throw e; }
   const data = await readJson(res);
   if (res.status === 401) {
     if (endpoint === '/auth/login') {
@@ -33,7 +33,7 @@ async function apiFetch(endpoint, options = {}) {
     return;
   }
   if (res.status === 429) throw new Error(data.error || 'Too many requests. Please wait a minute and try again.');
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  if (!res.ok) { const e = new Error(data.error || `Request failed (${res.status})`); e.status = res.status; throw e; }   // status lets callers tell 'refused' (4xx) from 'unknown' (0 / 5xx)
   return data;
 }
 

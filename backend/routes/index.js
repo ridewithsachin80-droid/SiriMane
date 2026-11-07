@@ -273,7 +273,19 @@ router.get('/guests/:id', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Sprint 15.4 (T-1): phones are stored as digits only. "80694 83837" and
+// "8069483837" are the same person; spaces broke the duplicate check and the
+// resident login (which compares the typed mobile to the stored one).
+function normPhone(v) {
+  if (v == null || v === '') return v;
+  let d = String(v).replace(/\D/g, '');
+  // Indian mobiles: "+91 98…" and "098…" are the same 10-digit number the resident logs in with
+  if (d.length === 12 && d.startsWith('91')) d = d.slice(2);
+  else if (d.length === 11 && d.startsWith('0')) d = d.slice(1);
+  return d;
+}
 router.post('/guests', auth, async (req, res) => {
+  if (req.body && req.body.phone != null) req.body.phone = normPhone(req.body.phone);
   const { name,phone,email,emergency_contact,emergency_contact_name,id_proof_type,id_proof_number,room_id,bed_number,join_date,monthly_rent,deposit_amount,notes,address,expected_checkout } = req.body;
   if (!name || !join_date) return res.status(400).json({ error: 'Name and join date required' });
   try {
@@ -324,6 +336,7 @@ router.post('/guests', auth, async (req, res) => {
 });
 
 router.put('/guests/:id', auth, async (req, res) => {
+  if (req.body && req.body.phone != null) req.body.phone = normPhone(req.body.phone);
   const { name,phone,email,emergency_contact,emergency_contact_name,room_id,bed_number,monthly_rent,deposit_amount,notes,leave_date,is_active,rent_effective_from,address,id_proof_type,id_proof_number,expected_checkout } = req.body;
   try {
     const existing = await pool.query('SELECT monthly_rent,deposit_amount FROM guests WHERE id=$1', [req.params.id]);

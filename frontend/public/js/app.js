@@ -4329,7 +4329,7 @@ function renderMoveIn() {
       <h4 style="margin:12px 0 10px">${st.t}</h4>
       ${st.html}
       <div class="flex gap-2" style="margin-top:16px">
-        ${moveIn.step > 1 && !moveIn.created ? `<button class="btn btn-outline" id="mi-back" onclick="moveInStep(-1)">Back</button>` : ''}
+        ${moveIn.step > 1 && !moveIn.created && !moveIn.uncertain ? `<button class="btn btn-outline" id="mi-back" onclick="moveInStep(-1)">Back</button>` : ''}
         ${moveIn.step < steps.length ? `<button class="btn btn-primary" style="flex:1" onclick="moveInStep(1)">Next</button>`
           : `<button class="btn btn-success" style="flex:1" id="mi-save" onclick="moveInSave()">${moveIn.created ? '↻ Retry saving the payment' : '✓ Confirm move-in'}</button>`}
       </div>
@@ -4395,13 +4395,13 @@ async function moveInSave() {
   moveIn.saving = true;
   if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
   if (al) al.classList.add('hidden');
+  const phoneKey = String(d.phone || '').replace(/\D/g, '');   // digits only (T-1)
   try {
     if (!moveIn.created) {
       // S15.3-5 (R-6): a lost reply on THIS request would leave her created
       // but unknown to us. Note who already has this phone before the first
       // try; on a retry, a new active resident with the same phone and name
       // is the one our earlier request created — adopt her, don't add twice.
-      const phoneKey = String(d.phone || '').replace(/\D/g, '');
       const samePhone = async () => (await apiFetch(`/guests?active=all&search=${encodeURIComponent(phoneKey)}`))
         .filter(x => String(x.phone || '').replace(/\D/g, '') === phoneKey);
       if (!moveIn.preexisting) moveIn.preexisting = (await samePhone()).map(x => x.id);
@@ -4412,7 +4412,7 @@ async function moveInSave() {
     }
     if (!moveIn.created) {
       moveIn.created = await API.createGuest({
-        name: d.name, phone: d.phone, emergency_contact: d.emergency_contact || null, emergency_contact_name: d.emergency_contact_name || null,
+        name: d.name, phone: phoneKey, emergency_contact: d.emergency_contact || null, emergency_contact_name: d.emergency_contact_name || null,
         room_id: d.room_id, bed_number: d.bed_number || null, join_date: d.join_date, expected_checkout: d.expected_checkout || null,
         monthly_rent: d.monthly_rent, deposit_amount: d.deposit_amount, address: d.address || null,
         id_proof_type: d.id_proof_type || null, id_proof_number: d.id_proof_number || null, notes: null,
@@ -4422,8 +4422,14 @@ async function moveInSave() {
       if (back) back.remove();   // she exists now — going back to edit her would not change the saved record
     }
   } catch (e) {
-    unlock('✓ Confirm move-in');
-    if (al) showAlert(al, e.message); else toast(e.message);
+    // T-3: a refusal (4xx) means nothing was saved — she can go Back and fix
+    // it. No answer (0 / 5xx) means she MAY exist: lock Back so an edited
+    // name or phone can't create a second resident or adopt the wrong one.
+    const refused = e.status >= 400 && e.status < 500;
+    if (!refused) { moveIn.uncertain = true; if (back) back.remove(); }
+    unlock(refused ? '✓ Confirm move-in' : '↻ Retry');
+    const msg = refused ? e.message : `${e.message} She may or may not have been added — tap Retry; she will not be added twice.`;
+    if (al) showAlert(al, msg); else toast(msg);
     return;
   }
   const g = moveIn.created;

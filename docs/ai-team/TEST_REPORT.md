@@ -173,3 +173,8 @@ Re-ran 12/12 on fresh DBs (2,436; xss 67 vs 68 — one-assertion gap, recorded).
 Reviewer: 12/12 on fresh DBs, 2,518 (xss Why-button count varies 140/142 — G-2, Low). Every XSS door clean incl. staff doors; no visible double escaping; guest portal shows `&` and `'` correctly. S15.3-1/-2/-4/-6/-7 PASS.
 Before production: **T-1 (Med, money/data)** phone typed with spaces/dashes defeats the R-6 lookup → lost reply can still create a 2nd resident (reproduced) · **T-2 (Low-Med)** guest.html ID card prints `emergency_contact_name` raw (reproduced) · **T-3 (Low)** Back still available after a failed save → edited name/phone can duplicate or adopt the wrong resident.
 Implementer gates G153c/d: 12/12 PASS ×2, 2,520.
+
+### Sprint 15.4 — independent review of 80c5956: **APPROVE FOR TEST DEPLOYMENT**
+Reviewer: 12/12 fresh gate3, 2,536 (xss Why-button variance). T-1 lost reply with digits/space/dash → one resident, one deposit; T-2 payload inert; T-3 400/409 keep Back, 0/500 lock Back and retry adopts; 429 lands as "uncertain" (safe, wrong wording).
+Before production: **P-1 (Med)** guest-login compares the typed mobile exactly — "+91…", spaced, "0…" get 401 (Android autofill adds +91); edits now normalise old spaced phones so those residents must use the plain number → normalise `mobile` at login too · **P-2 (Med, pre-existing, OWNER DECISION)** two active residents can share a phone; guest-login takes LIMIT 1 → one can see the other's dues / file a UPI claim on her account · backfill of old phones needs owner approval · Low: apiFetch returns undefined on 401 (wizard can mark a payment saved just before the redirect); landline/foreign numbers with leading 0 become wrong +91 wa.me links.
+Implementer gates G154b/c: 12/12 ×2, 2,538.
