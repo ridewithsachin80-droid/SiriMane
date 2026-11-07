@@ -117,3 +117,15 @@ G15h — fix commit: **11/11 PASS, 2,296 assertions** (api 262 = +5 malformed-ia
 Re-ran 11/11 itself (2,296); N-2/N-4/N-5 confirmed fixed, N-2 mutation check reproduced.
 **N-6 (Medium, PRODUCTION BLOCKER until resolved):** while Test shares production's `JWT_SECRET`, a Test token minted by pre-S15 code is accepted by production after any production restart (boot-time cut-off). Resolution chosen: owner gives Test its own `JWT_SECRET` before Sprint 15 goes to production — this removes cross-environment token acceptance entirely. Fallback if not done: keep Test on S15 for >24 h before production.
 N-6d (test weakness) fixed: the post-boot legacy token is now dated after boot but in the past; mutation-checked — a per-request cut-off fails the gate.
+
+## Sprint 15.1 — D-15-5 move-in double deposit
+
+| Run | Source | Result |
+|---|---|---|
+| ui (single, fresh DB) | 9da6faf working tree | FAIL once at 358: `Waiting failed: 5000ms` — same position as the D-15-4 modal-close wait at 360px; then PASS 750. Recorded as probable D-15-4 recurrence, not proven |
+| G151j | 9da6faf | **11/11 PASS, 2,321** |
+| G151k | 9da6faf | **11/11 PASS, 2,321** |
+| Mutation: fix disabled | — | api FAIL "server records NO deposit itself (got 1)"; ui FAIL "exactly one deposit record … (got 2)" — reproduces the owner's bug |
+
+Gate gap closed: the wizard test previously asserted `some` deposit row; it now asserts exactly one deposit and one rent row, the amount and the mode.
+D-15-4 now 2 occurrences in 13 ui runs.
