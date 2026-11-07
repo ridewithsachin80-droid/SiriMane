@@ -178,3 +178,9 @@ Implementer gates G153c/d: 12/12 PASS ×2, 2,520.
 Reviewer: 12/12 fresh gate3, 2,536 (xss Why-button variance). T-1 lost reply with digits/space/dash → one resident, one deposit; T-2 payload inert; T-3 400/409 keep Back, 0/500 lock Back and retry adopts; 429 lands as "uncertain" (safe, wrong wording).
 Before production: **P-1 (Med)** guest-login compares the typed mobile exactly — "+91…", spaced, "0…" get 401 (Android autofill adds +91); edits now normalise old spaced phones so those residents must use the plain number → normalise `mobile` at login too · **P-2 (Med, pre-existing, OWNER DECISION)** two active residents can share a phone; guest-login takes LIMIT 1 → one can see the other's dues / file a UPI claim on her account · backfill of old phones needs owner approval · Low: apiFetch returns undefined on 401 (wizard can mark a payment saved just before the redirect); landline/foreign numbers with leading 0 become wrong +91 wa.me links.
 Implementer gates G154b/c: 12/12 ×2, 2,538.
+
+### Sprint 15.5 — independent review: approved after the A-1 fix
+Round 1 (24896ba): APPROVE for Test but **A-1 (Med) regression** — last-10-digit match + LIMIT 1 locked the second resident on a shared number out → fixed in ae16efb before any push.
+Re-check (ae16efb): **APPROVE FOR TEST DEPLOYMENT** — 30 combinations (two sisters × two formats × five password states): every login lands on the sister whose password was typed; ties → 409; 409 is not a new enumeration oracle. 12/12 on fresh gate3, 2,550 (xss variance).
+Before production: verify on Railway that a changing `X-Forwarded-For` still reaches 429 (limiter depends on the proxy) · Low: LIMIT 5 → a 6th resident on one number gets 401; return the 409 message above 5 · owner calls: forced password change after first login, separate staff/resident limiters, phone backfill, P-2.
+Implementer gates G155g/h: 12/12 ×2, 2,552.

@@ -32,7 +32,7 @@ async function apiFetch(endpoint, options = {}) {
     clearAuth();
     return;
   }
-  if (res.status === 429) throw new Error(data.error || 'Too many requests. Please wait a minute and try again.');
+  if (res.status === 429) { const e = new Error(data.error || 'Too many requests. Please wait a minute and try again.'); e.status = 429; throw e; }
   if (!res.ok) { const e = new Error(data.error || `Request failed (${res.status})`); e.status = res.status; throw e; }   // status lets callers tell 'refused' (4xx) from 'unknown' (0 / 5xx)
   return data;
 }

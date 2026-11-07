@@ -106,3 +106,13 @@ Scope chosen by the team from open review findings and the defect ledger. Nothin
 | S15.4-4 | 12 gates green twice on fresh DBs; independent review before merge to ai/test | QA |
 
 Data note: existing residents whose phone was saved WITH spaces cannot log in to the resident app today (login compares exact text). This sprint does not change existing rows — a backfill is a data UPDATE and needs the owner's approval.
+
+## Sprint 15.5 — P-1 and low items from the 15.4 review (criteria recorded BEFORE build)
+
+| ID | Acceptance criterion | Review |
+|---|---|---|
+| S15.5-1 (P-1) | Resident login accepts the mobile typed as "+91 98…", "98… …" or "098…"; it matches residents whose phone was stored with spaces/dashes too (compared as the last 10 digits in SQL) — so no data backfill is needed for login | SEC REQUIRED (auth) |
+| S15.5-2 | First-login default password (= her mobile) also accepts those forms; the stored hash is of the plain 10 digits | SEC |
+| S15.5-3 | Move-in wizard treats a missing answer from apiFetch (401 → redirect) as NOT saved; 429 carries status 429 and is reported as "refused, try in a minute" | DATA |
+| S15.5-4 | 12 gates green twice; independent review before merge | QA |
+Not in scope (owner decision): P-2 shared phones between two active residents.
