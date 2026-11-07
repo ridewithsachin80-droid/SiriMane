@@ -82,3 +82,15 @@ Scope chosen by the team from open review findings and the defect ledger. Nothin
 | S15.2-5 | D-15-4: flaky modal-focus assertion — root cause found and fixed (app or test), evidence by repeated runs | QA |
 | S15.2-7 | **D-15-6 (Critical, SEC, added during the sprint):** no text written by residents or by the public inbox form becomes HTML on any staff screen; proven by a new gate `xss.smoke.js` that fails before the fix | **SEC REQUIRED** |
 | S15.2-6 | All 11 gates green on a fresh DB, TZ=UTC; new assertions for each item; independent review before merge to ai/test | QA |
+
+## Sprint 15.3 — production blockers from the 15.2 review (team-scoped under the owner's "keep working" instruction)
+
+| ID | Acceptance criterion | Review |
+|---|---|---|
+| S15.3-1 (R-1) | No staff-typed text becomes HTML on admin screens: Resident 360 Address/Emergency/ID type, guest details grid, rent-history button, evening summary, Reports expense category — proven by new staff doors in the xss gate | SEC REQUIRED |
+| S15.3-2 (R-2) | Every inline handler argument built from data is `esc(JSON.stringify(x))` in a double-quoted attribute — no single-quoted or quote-swap variants left | SEC |
+| S15.3-3 (R-3) | Error messages rendered with esc(); resident portal shows staff-written text (notices, menu, announcements) escaped | SEC |
+| S15.3-4 (R-4) | Move-in failure message never tells the warden to record the payment by hand while a retry is pending | DATA |
+| S15.3-5 (R-6) | Lost reply on the resident save: retry adopts the resident the server already created (same phone, created in the last 15 min) instead of creating a second | DATA |
+| S15.3-6 (R-5) | Inbox search matches text with apostrophes and `&` again | QA |
+| S15.3-7 | 12 gates green twice on fresh DBs; independent review before merge to ai/test | QA |
