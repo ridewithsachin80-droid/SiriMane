@@ -1227,11 +1227,20 @@ async function runAtWidth(browser, BASE, width) {
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => !document.getElementById('search-overlay'), { timeout: 6000 });
   ok(await page.evaluate(() => currentPage === 'purchases'), `${tag} Enter on "Add expense" runs it`);
+  // D-15-4: the form opens once Purchases has rendered. Wait for it before
+  // closing it — closing too early left it to pop up later, over Room 360.
+  await page.waitForSelector('#modal-overlay #pu-amt', { timeout: 8000 });
+  ok(true, `${tag} "Add expense" opens the expense form on Purchases`);
   await page.evaluate(() => { closeModal(); openSearch(); });
   await page.waitForSelector('#search-overlay', { timeout: 5000 });
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => !document.getElementById('search-overlay'), { timeout: 5000 });
   ok(true, `${tag} Esc closes the palette`);
+  // D-15-4: a command's form never pops up on a screen the user has moved to.
+  await page.evaluate(() => { paletteRunCommand('expense'); navigate('rooms'); });
+  await page.waitForSelector('.room-tile', { timeout: 8000 });
+  await sleep(800);
+  ok(!(await page.$('#modal-overlay')), `${tag} D-15-4 "Add expense" does not pop up on Rooms after the user moved on`);
 
   // Staff never sees an owner command.
   const staffCmds = await page.evaluate(() => {

@@ -48,8 +48,12 @@ function setupNav() {
 }
 
 let currentPage = null;
+let navSeq = 0;
 
+// Returns a promise that resolves true once this screen has rendered and is
+// still the screen on show (false if it failed, or the user moved on).
 function navigate(page) {
+  const seq = ++navSeq;
   currentPage = page;
   document.querySelectorAll('.nav-item[data-page]').forEach(b => b.classList.toggle('active', b.dataset.page===page));
   const titles = { dashboard:'Home', rooms:'Rooms', guests:'Residents', 'daily-menu':'Daily Menu', 'daily-checklist':'Daily Checklist', complaints:'Requests', payments:'Payments', 'guest-messages':'Announcements', inbox:'Inbox', purchases:'Purchases', collections:'Collections', 'rent-due':'Rent Due', reports:'Reports', 'balance-sheet':'Balance sheet', admin:'Admin', collect:'Collect Rent', reminders:'Rent Reminders', finance:'Finance', operations:'Operations', 'finance-overview':'Finance', visitors:'Visitors', feedback:'Feedback', outbox:'Outbox', maintenance:'Recurring maintenance' };
@@ -72,10 +76,10 @@ function navigate(page) {
     if (cQ) cQ.value = '';
   }
   const pages = { dashboard:pgHome, rooms:pgRoomMap, 'rooms-table':pgRooms, guests:pgGuests, 'daily-menu':pgMenu, 'daily-checklist':pgChecklist, complaints:pgComplaints, payments:pgPayments, 'guest-messages':pgAnnouncements, inbox:pgInbox, purchases:pgPurchases, collections:pgCollections, 'rent-due':pgRentDue, reports:pgReports, 'balance-sheet':pgBalanceSheet, admin:pgAdmin, collect:pgCollect, reminders:pgReminders, finance:pgFinance, operations:pgOperations, 'finance-overview':pgFinanceOverview, visitors:pgVisitors, feedback:pgFeedback, outbox:pgOutbox, maintenance:pgMaintenance };
-  if(!pages[page]) return;
+  if(!pages[page]) return Promise.resolve(false);
   // Error boundary: a thrown error inside any screen shows a retry card
   // instead of a blank page.
-  Promise.resolve().then(() => pages[page]()).then(() => { try { injectSubtabs(page); } catch (e) { console.error(e); } }).catch(e => {
+  return Promise.resolve().then(() => pages[page]()).then(() => { try { injectSubtabs(page); } catch (e) { console.error(e); } return seq === navSeq; }).catch(e => {
     console.error(e);
     setContent(`<div class="card" style="padding:32px;text-align:center">
       <div style="font-size:32px">⚠️</div>
@@ -83,7 +87,16 @@ function navigate(page) {
       <p class="text-muted" style="margin-bottom:16px">${(e && e.message) ? e.message : 'Unexpected error'}</p>
       <button class="btn btn-primary" onclick="navigate('${page}')">↻ Retry</button>
     </div>`);
+    return false;
   });
+}
+// Go to a screen, then open its form once the screen has actually rendered.
+// D-15-4: these used setTimeout(…, 350) — a guess. On slow 4G the screen was
+// not there yet (the owner report never loaded); on a fast phone the form
+// popped up wherever the user had gone by then — over Room 360, or a moment
+// after they pressed Esc. Now nothing opens if the user has moved on.
+function navigateThen(page, fn) {
+  return navigate(page).then(still => { if (still) fn(); });
 }
 
 // Small bottom toast for errors that happen outside a screen's own try/catch
@@ -4015,7 +4028,7 @@ async function runSearch() {
       rows.forEach(row => { const i = searchRows.length; searchRows.push({ go: () => go(row) }); parts.push(`<button class="search-item" data-i="${i}" onclick="searchRows[${i}].go()">${render(row)}</button>`); });
     };
     add('Residents', r.residents, g => `${icon('users')}<span><span>${g.name}${g.is_active ? '' : ' <span class="s-sub">(past)</span>'}</span><div class="s-sub">${g.room_number ? 'Room ' + g.room_number : 'No room'}${g.phone ? ' · ' + g.phone : ''}</div></span>${g.amount_due > 0 ? `<span class="s-right text-red">${fmt(g.amount_due)}</span>` : ''}`,
-      g => { closeSearch(); navigate('guests'); setTimeout(() => viewGuest(g.id), 350); });
+      g => { closeSearch(); navigateThen('guests', () => viewGuest(g.id)); });
     add('Rooms', r.rooms, x => `${icon('bed')}<span><span>Room ${x.room_number}</span><div class="s-sub">Floor ${x.floor} · ${x.occupied}/${x.total_beds} beds</div></span>${x.vacant ? `<span class="s-right text-green">${x.vacant} free</span>` : ''}`,
       () => { closeSearch(); navigate('rooms'); });
     add('Payments', r.payments, p => `${icon('receipt')}<span><span>${p.guest_name} — ${fmt(p.amount)}</span><div class="s-sub">${p.receipt_number || ''} · ${fmtDate(p.collection_date)}${p.status !== 'confirmed' ? ' · ' + p.status : ''}</div></span>`,
@@ -4034,10 +4047,10 @@ async function runSearch() {
 // ── Quick action ─────────────────────────────────────────────────────────
 const QUICK_ACTIONS = [
   { icon: 'rupee', label: 'Collect rent', run: () => navigate('collect') },
-  { icon: 'users', label: 'Add resident', run: () => { navigate('guests'); setTimeout(() => moveInWizard(), 350); } },
-  { icon: 'cart', label: 'Add expense', run: () => { navigate('purchases'); setTimeout(() => purchaseModal(), 350); } },
-  { icon: 'wrench', label: 'Report an issue', run: () => { navigate('complaints'); setTimeout(() => complaintModal(), 350); } },
-  { icon: 'megaphone', label: 'Post an announcement', admin: true, run: () => { navigate('guest-messages'); setTimeout(() => announcementModal(), 350); } }
+  { icon: 'users', label: 'Add resident', run: () => navigateThen('guests', () => moveInWizard()) },
+  { icon: 'cart', label: 'Add expense', run: () => navigateThen('purchases', () => purchaseModal()) },
+  { icon: 'wrench', label: 'Report an issue', run: () => navigateThen('complaints', () => complaintModal()) },
+  { icon: 'megaphone', label: 'Post an announcement', admin: true, run: () => navigateThen('guest-messages', () => announcementModal()) }
 ];
 function openQuickActions() {
   if (document.getElementById('qa-sheet')) return closeQuickActions();
@@ -5291,14 +5304,14 @@ async function bulkConfirm(proposalId, needsCount, count, btn) {
 // Role-filtered exactly like the sidebar (admin flag), never by hiding
 // alone — every command's target is itself role-checked on the server.
 const COMMANDS = [
-  { id: 'add-resident', icon: 'users', label: 'Add resident', run: () => { navigate('guests'); setTimeout(() => moveInWizard(), 350); } },
+  { id: 'add-resident', icon: 'users', label: 'Add resident', run: () => navigateThen('guests', () => moveInWizard()) },
   { id: 'collect', icon: 'rupee', label: 'Collect payment', run: () => navigate('collect') },
-  { id: 'expense', icon: 'cart', label: 'Add expense', run: () => { navigate('purchases'); setTimeout(() => purchaseModal(), 350); } },
-  { id: 'issue', icon: 'wrench', label: 'Report an issue', run: () => { navigate('complaints'); setTimeout(() => complaintModal(), 350); } },
-  { id: 'announce', icon: 'megaphone', label: 'Post announcement', admin: true, run: () => { navigate('guest-messages'); setTimeout(() => announcementModal(), 350); } },
-  { id: 'reminders', icon: 'whatsapp', label: 'Draft reminders', run: () => { navigate('rent-due'); setTimeout(() => toast('Tick the residents, then tap Draft reminders', 'ok'), 400); } },
+  { id: 'expense', icon: 'cart', label: 'Add expense', run: () => navigateThen('purchases', () => purchaseModal()) },
+  { id: 'issue', icon: 'wrench', label: 'Report an issue', run: () => navigateThen('complaints', () => complaintModal()) },
+  { id: 'announce', icon: 'megaphone', label: 'Post announcement', admin: true, run: () => navigateThen('guest-messages', () => announcementModal()) },
+  { id: 'reminders', icon: 'whatsapp', label: 'Draft reminders', run: () => navigateThen('rent-due', () => toast('Tick the residents, then tap Draft reminders', 'ok')) },
   { id: 'tasks', icon: 'check-square', label: "Today's tasks", run: () => navigate('daily-checklist') },
-  { id: 'owner-report', icon: 'receipt', label: 'Generate owner report', admin: true, run: () => { navigate('reports'); setTimeout(() => { if (typeof loadOwnerReport === 'function') loadOwnerReport(true); }, 600); } },
+  { id: 'owner-report', icon: 'receipt', label: 'Generate owner report', admin: true, run: () => navigateThen('reports', () => { if (typeof loadOwnerReport === 'function') loadOwnerReport(true); }) },
   { id: 'close-day', icon: 'moon', label: 'Close the day', admin: true, run: () => navigate('finance-overview') },
   { id: 'theme', icon: 'moon', label: 'Switch theme', run: () => toggleTheme() }
 ];
