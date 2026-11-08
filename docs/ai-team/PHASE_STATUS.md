@@ -130,3 +130,5 @@ Owner decisions: (1) one resident per phone number · (3) force residents to cha
 | S16-4 | bcrypt 5 → 6; every existing password hash still verifies (admin, staff, residents); `npm audit --omit=dev` shows no bcrypt/tar finding (D-15-3) | SEC, OPS (dependency upgrade approved by owner) |
 | S16-5 | Resident app: payment mode capitalised, month shown for every payment, Pay card shows the last RENT payment | UX |
 | S16-6 | 12 gates green twice on fresh DBs; independent review before merge to ai/test | QA |
+| S16-7 | **Owner-approved 8 Nov 07:33** — new `backend/scripts/tidy-phones.js`: dry run by default lists every active-or-not resident whose phone is not 10 plain digits and what it would become; `--apply` rewrites only those rows, skips (and lists) any that would collide with another active resident's number or that don't reduce to 10 digits; safe to re-run | DATA REQUIRED |
+| S16-8 | **Owner-approved 8 Nov 07:33** — new `backend/scripts/fix-id-type.js`: dry run lists residents whose ID type is a placeholder ("— select —" and variants); `--apply` sets only that field to NULL; safe to re-run | DATA REQUIRED |
