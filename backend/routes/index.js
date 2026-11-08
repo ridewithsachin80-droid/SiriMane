@@ -1,7 +1,6 @@
 // routes/index.js — All API routes
 const router = require('express').Router();
 const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
 const PDFDocument = require('pdfkit');
 const pool = require('../db');
 const auth = require('../middleware/auth');
@@ -147,7 +146,7 @@ router.post('/auth/login', async (req, res) => {
     const user = r.rows[0];
     if (!user || !(await bcrypt.compare(password, user.password_hash)))
       return res.status(401).json({ error: 'Invalid credentials' });
-    const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: '8h' });
+    const token = auth.signToken({ userId: user.id }, { expiresIn: '8h' });
     await pool.query(`INSERT INTO activity_log(user_id,action,ip_address) VALUES($1,'login',$2)`, [user.id, req.ip]);
     res.json({ token, user: { id: user.id, username: user.username, role: user.role } });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -274,7 +273,19 @@ router.get('/guests/:id', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Sprint 15.4 (T-1): phones are stored as digits only. "80694 83837" and
+// "8069483837" are the same person; spaces broke the duplicate check and the
+// resident login (which compares the typed mobile to the stored one).
+function normPhone(v) {
+  if (v == null || v === '') return v;
+  let d = String(v).replace(/\D/g, '');
+  // Indian mobiles: "+91 98…" and "098…" are the same 10-digit number the resident logs in with
+  if (d.length === 12 && d.startsWith('91')) d = d.slice(2);
+  else if (d.length === 11 && d.startsWith('0')) d = d.slice(1);
+  return d;
+}
 router.post('/guests', auth, async (req, res) => {
+  if (req.body && req.body.phone != null) req.body.phone = normPhone(req.body.phone);
   const { name,phone,email,emergency_contact,emergency_contact_name,id_proof_type,id_proof_number,room_id,bed_number,join_date,monthly_rent,deposit_amount,notes,address,expected_checkout } = req.body;
   if (!name || !join_date) return res.status(400).json({ error: 'Name and join date required' });
   try {
@@ -307,7 +318,12 @@ router.post('/guests', auth, async (req, res) => {
     // on the guest's profile with no matching transaction — this is what
     // keeps the balance sheet's deposit reconciliation accurate without
     // needing a separate manual entry every time.
-    if (parseFloat(deposit_amount) > 0) {
+    // Sprint 15.1 (D-15-5): the move-in wizard records the deposit it ACTUALLY
+    // received (amount + mode) itself, so it asks us to skip this automatic
+    // entry — otherwise every wizard move-in counted the deposit twice. The
+    // older Add Resident form doesn't send the flag and keeps this behaviour.
+    const depositRecordedByClient = req.body.deposit_recorded_by_client === true;
+    if (parseFloat(deposit_amount) > 0 && !depositRecordedByClient) {
       const depositStatus = req.user.role === 'admin' ? 'confirmed' : 'pending_approval';
       await pool.query(
         `INSERT INTO collections(guest_id,guest_name,amount,collection_date,collection_type,payment_mode,description,created_by,status) VALUES($1,$2,$3,$4,'deposit','cash','Security deposit at check-in',$5,$6)`,
@@ -320,6 +336,7 @@ router.post('/guests', auth, async (req, res) => {
 });
 
 router.put('/guests/:id', auth, async (req, res) => {
+  if (req.body && req.body.phone != null) req.body.phone = normPhone(req.body.phone);
   const { name,phone,email,emergency_contact,emergency_contact_name,room_id,bed_number,monthly_rent,deposit_amount,notes,leave_date,is_active,rent_effective_from,address,id_proof_type,id_proof_number,expected_checkout } = req.body;
   try {
     const existing = await pool.query('SELECT monthly_rent,deposit_amount FROM guests WHERE id=$1', [req.params.id]);
@@ -1151,6 +1168,24 @@ router.get('/rent-due/export/pdf', auth, requireAdmin, async (req, res) => {
 });
 
 // ── PER-GUEST LEDGER ───────────────────────────────
+// Sprint 15.2 (S15.2-2): what deposit was actually COLLECTED, for the
+// checkout screen. Read-only; changes no money computation. Received counts
+// confirmed rows only — pending_verification / pending_approval are shown
+// separately and never as received.
+router.get('/guests/:id/deposit-status', auth, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Bad resident id' });
+  try {
+    const g = await pool.query('SELECT deposit_amount FROM guests WHERE id=$1', [id]);
+    if (!g.rows[0]) return res.status(404).json({ error: 'Resident not found' });
+    const c = await pool.query(`SELECT
+        COALESCE(SUM(amount) FILTER (WHERE status IS NULL OR status='confirmed'),0) AS received,
+        COALESCE(SUM(amount) FILTER (WHERE status LIKE 'pending%'),0) AS pending
+      FROM collections WHERE guest_id=$1 AND collection_type='deposit' AND is_deleted=false`, [id]);
+    res.json({ agreed: Number(g.rows[0].deposit_amount) || 0, received: Number(c.rows[0].received), pending: Number(c.rows[0].pending) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 router.get('/guests/:id/ledger', auth, async (req, res) => {
   try {
     const g = await pool.query('SELECT * FROM guests WHERE id=$1', [req.params.id]);
@@ -1297,33 +1332,58 @@ module.exports = router;
 router.post('/guest-login', async (req, res) => {
   const { mobile, password } = req.body;
   if (!mobile || !password) return res.status(400).json({ error: 'Mobile and password required' });
+  // Sprint 15.5 (P-1): "+91 98…", "98765 43210", "098…" are all her number.
+  // Match on the last 10 digits on BOTH sides, so residents whose phone was
+  // saved with spaces before Sprint 15.4 can log in without a data backfill.
+  const mobileKey = String(normPhone(mobile) || '').slice(-10);
+  if (mobileKey.length !== 10) return res.status(401).json({ error: 'No active account found with this mobile number' });
   try {
+    // S15.5 review A-1: more than one active resident can carry the same
+    // number (sisters; one saved "+91 …", one plain). Check the password
+    // against EVERY match and log in only when exactly one accepts it — the
+    // old exact-text match let each sister in with her own password.
     const r = await pool.query(
-      `SELECT g.*, ro.room_number FROM guests g 
-       LEFT JOIN rooms ro ON g.room_id = ro.id 
-       WHERE g.phone = $1 AND g.is_active = true LIMIT 1`,
-      [mobile]
+      `SELECT g.*, ro.room_number FROM guests g
+       LEFT JOIN rooms ro ON g.room_id = ro.id
+       WHERE right(regexp_replace(COALESCE(g.phone,''), '[^0-9]', '', 'g'), 10) = $1 AND g.is_active = true
+       ORDER BY g.id LIMIT 5`,
+      [mobileKey]
     );
-    const guest = r.rows[0];
-    if (!guest) return res.status(401).json({ error: 'No active account found with this mobile number' });
+    if (!r.rows.length) return res.status(401).json({ error: 'No active account found with this mobile number' });
 
-    // If no password set, default = mobile number
-    let valid = false;
-    if (guest.password_hash) {
-      valid = await bcrypt.compare(password, guest.password_hash);
-    } else {
-      // Default password is mobile number itself
-      valid = (password === mobile);
-      if (valid) {
-        // Auto-set the hash for future logins
-        const hash = await bcrypt.hash(mobile, 10);
-        await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [hash, guest.id]);
+    const phoneLike = /^[\d\s+()-]{10,}$/.test(String(password));
+    const typedKey = String(normPhone(password) || '').slice(-10);
+    const accepts = async (g) => {
+      if (g.password_hash) {
+        if (await bcrypt.compare(password, g.password_hash)) return true;
+        // A first login after 15.5 stores the hash of the plain digits; let
+        // her type the default the way her phone autofills it ("+91 …").
+        return phoneLike && await bcrypt.compare(typedKey, g.password_hash);
       }
+      // No password set yet: the default is her mobile number, in any form
+      return password === mobile || typedKey === mobileKey;
+    };
+    const matched = [];
+    for (const g of r.rows) if (await accepts(g)) matched.push(g);
+
+    if (!matched.length) return res.status(401).json({ error: 'Incorrect password. Default password is your mobile number.' });
+    let guest = matched[0];
+    if (matched.length > 1) {
+      // Before 15.5 the login matched the saved text exactly, so a resident
+      // saved as "+91 …" logged in by typing "+91 …". Keep that: an exact
+      // text match decides. Otherwise we cannot tell who she is, and nobody
+      // is logged in as the wrong person.
+      const exact = matched.filter(g => g.phone === mobile);
+      if (exact.length !== 1) return res.status(409).json({ error: 'Two residents share this mobile number. Please ask the warden to give each of you your own number in the app.' });
+      guest = exact[0];
+    }
+    if (!guest.password_hash) {
+      // Auto-set the hash for future logins — of the plain 10 digits
+      const hash = await bcrypt.hash(mobileKey, 10);
+      await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [hash, guest.id]);
     }
 
-    if (!valid) return res.status(401).json({ error: 'Incorrect password. Default password is your mobile number.' });
-
-    const token = jwt.sign({ guestId: guest.id, type: 'guest' }, process.env.JWT_SECRET, { expiresIn: '24h' });
+    const token = auth.signToken({ guestId: guest.id, type: 'guest' }, { expiresIn: '24h' });
     res.json({
       token,
       guest: {
@@ -1339,7 +1399,7 @@ const guestAuth = async (req, res, next) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
     if (!token) return res.status(401).json({ error: 'No token' });
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = auth.verifyToken(token);
     if (decoded.type !== 'guest') return res.status(401).json({ error: 'Invalid token type' });
     const r = await pool.query('SELECT * FROM guests WHERE id=$1', [decoded.guestId]);
     if (!r.rows[0]) return res.status(401).json({ error: 'Guest not found' });
@@ -1839,7 +1899,7 @@ router.get('/guest-id', guestAuth, async (req, res) => {
          FROM guests g LEFT JOIN rooms r ON r.id=g.room_id WHERE g.id=$1`, [req.guest.id]);
     const x = g.rows[0];
     if (!x) return res.status(404).json({ error: 'Resident not found' });
-    const token = jwt.sign({ type: 'resident-id', guestId: x.id }, process.env.JWT_SECRET, { expiresIn: '24h' });
+    const token = auth.signToken({ type: 'resident-id', guestId: x.id }, { expiresIn: '24h' });
     const settings = await pool.query(`SELECT key, value FROM app_settings WHERE key IN ('pg_name','pg_phone')`);
     const st = Object.fromEntries(settings.rows.map(r => [r.key, r.value]));
     const qr = await QRCode.toString(token, { type: 'svg', margin: 0, errorCorrectionLevel: 'M', width: 220 });
@@ -1859,7 +1919,7 @@ router.post('/resident-id/verify', auth, async (req, res) => {
     let guestId = null;
     if (token) {
       let decoded;
-      try { decoded = jwt.verify(String(token), process.env.JWT_SECRET); }
+      try { decoded = auth.verifyToken(String(token)); }
       catch (e) { return res.status(400).json({ valid: false, error: /expired/i.test(e.message) ? 'That ID has expired — ask her to reopen the portal' : 'That code is not valid' }); }
       if (decoded.type !== 'resident-id') return res.status(400).json({ valid: false, error: 'That code is not a resident ID' });
       guestId = decoded.guestId;

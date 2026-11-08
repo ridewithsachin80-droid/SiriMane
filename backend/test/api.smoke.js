@@ -136,9 +136,114 @@ async function main() {
     r = await api('POST', '/guest-complaint', { category: 'Wifi/Internet', description: 'Smoke: wifi down' }); eq(r.status, 401, 'guest-complaint needs guest token');
     r = await S('POST', '/guest-complaint', { category: 'Wifi/Internet', description: 'x' }); eq(r.status, 401, 'staff token is not a guest token');
     r = await G('POST', '/guest-complaint', { category: 'Wifi/Internet', description: '' }); eq(r.status, 400, 'blank guest complaint');
+    // S15-7: a token names the environment that issued it; another environment's token is refused.
+    {
+      const jwt = require('jsonwebtoken');
+      const payload = JSON.parse(Buffer.from(guestTok.split('.')[1], 'base64url').toString());
+      ok(payload.env, 'S15-7 tokens carry the issuing environment');
+      const foreign = jwt.sign({ guestId: payload.guestId, type: 'guest', env: 'some-other-environment' }, process.env.JWT_SECRET, { expiresIn: '1h' });
+      r = await api('GET', '/guest-portal', null, foreign); eq(r.status, 401, 'S15-7 SECURITY: a token from another environment is refused');
+      const cut = require('../middleware/auth').LEGACY_CUTOFF;
+      const legacy = jwt.sign({ guestId: payload.guestId, type: 'guest', iat: cut - 3600, exp: Math.floor(Date.now() / 1000) + 3600 }, process.env.JWT_SECRET);
+      r = await api('GET', '/guest-portal', null, legacy); eq(r.status, 200, 'S15-7 a token issued before the cut-off (no env) still works until it expires');
+      // iat must be AFTER boot but already in the PAST, so a cut-off computed
+      // per request (now) would wrongly accept it — only a boot-time cut-off refuses. (Review N-6d)
+      while (Date.now() / 1000 < cut + 3) await new Promise(res => setTimeout(res, 200));
+      const lateLegacy = jwt.sign({ guestId: payload.guestId, type: 'guest', iat: cut + 1, exp: Math.floor(Date.now() / 1000) + 3600 }, process.env.JWT_SECRET);
+      ok(lateLegacy && (cut + 1) < Date.now() / 1000, 'S15-7 the late legacy token is dated after boot and before now');
+      r = await api('GET', '/guest-portal', null, lateLegacy); eq(r.status, 401, 'S15-7 SECURITY (review F-03): a token with no env issued AFTER the cut-off is refused');
+      for (const badIat of [null, '', true, [], '1']) {
+        // jsonwebtoken refuses to SIGN a non-numeric iat, so build the token by hand
+        const b64 = o => Buffer.from(JSON.stringify(o)).toString('base64url');
+        const body = b64({ alg: 'HS256', typ: 'JWT' }) + '.' + b64({ guestId: payload.guestId, type: 'guest', iat: badIat, exp: Math.floor(Date.now() / 1000) + 3600 });
+        const odd = body + '.' + require('crypto').createHmac('sha256', process.env.JWT_SECRET).update(body).digest('base64url');
+        r = await api('GET', '/guest-portal', null, odd); eq(r.status, 401, `S15-7 SECURITY (review N-2): an env-less token with iat=${JSON.stringify(badIat)} is refused`);
+      }
+      ok(require('../middleware/auth').ENV_ID.includes('#'), 'S15-7 (review F-04) the environment id includes the database identity');
+      const adminPayload = JSON.parse(Buffer.from(adminTok.split('.')[1], 'base64url').toString());
+      const foreignAdmin = jwt.sign({ userId: adminPayload.userId, env: 'some-other-environment' }, process.env.JWT_SECRET, { expiresIn: '1h' });
+      r = await api('GET', '/rooms', null, foreignAdmin); eq(r.status, 401, 'S15-7 SECURITY: another environment\'s ADMIN token is refused');
+    }
     r = await G('POST', '/guest-complaint', { category: 'Wifi/Internet', description: 'Smoke: wifi down' }); eq(r.status, 201, 'guest raises issue'); eq(r.data.status, 'open', 'open');
     r = await G('GET', '/guest-complaints'); eq(r.status, 200, 'guest lists own'); eq(r.data.length, 1, 'sees exactly own issue'); eq(r.data[0].category, 'Wifi/Internet', 'category');
     r = await S('GET', '/complaints'); const gc = r.data.find(x => x.raised_by === 'guest'); ok(gc, 'staff sees guest issue'); eq(gc.guest_id, guest.id, 'linked'); eq(gc.room_number, 'S1', 'room set');
+        { // Sprint 15.1 (D-15-5): POST /guests deposit auto-log — both paths
+      const s151Rooms = (await A('GET', '/rooms')).data;
+      const s151Room = s151Rooms[0];
+      const s151Count = async id => (await A('GET', '/collections')).data.filter(c => c.guest_id === id && c.collection_type === 'deposit');
+      let s151 = await A('POST', '/guests', { name: 'S151 Old Form', phone: '9' + String(Date.now()).slice(-9), join_date: today, room_id: s151Room && s151Room.id, monthly_rent: 5000, deposit_amount: 9000 });
+      eq(s151.status, 201, 'S15.1-2 old Add form still creates the resident');
+      let s151Deps = await s151Count(s151.data.id);
+      eq(s151Deps.length, 1, 'S15.1-2 MONEY: old Add form → exactly one automatic deposit record');
+      eq(Number(s151Deps[0].amount), 9000, 'S15.1-2 the automatic deposit is the agreed amount');
+      s151 = await A('POST', '/guests', { name: 'S151 Wizard', phone: '8' + String(Date.now()).slice(-9), join_date: today, room_id: s151Room && s151Room.id, monthly_rent: 5000, deposit_amount: 9000, deposit_recorded_by_client: true });
+      eq(s151.status, 201, 'S15.1-1 wizard-style add creates the resident');
+      eq((await s151Count(s151.data.id)).length, 0, 'S15.1-1 MONEY: with deposit_recorded_by_client the server records NO deposit itself');
+      s151 = await A('POST', '/guests', { name: 'S151 Truthy', phone: '7' + String(Date.now()).slice(-9), join_date: today, room_id: s151Room && s151Room.id, monthly_rent: 5000, deposit_amount: 9000, deposit_recorded_by_client: 'yes' });
+      eq((await s151Count(s151.data.id)).length, 1, 'S15.1-1 only a real true skips the record (a string does not)');
+      // S15.2-2 deposit-status: confirmed only counts as received
+      const s152Old = (await A('GET', '/guests')).data.find(x => x.name === 'S151 Old Form');
+      let s152Dep = await A('GET', `/guests/${s152Old.id}/deposit-status`);
+      eq(s152Dep.status, 200, 'S15.2-2 deposit-status answers');
+      eq(s152Dep.data.agreed, 9000, 'S15.2-2 agreed deposit'); eq(s152Dep.data.received, 9000, 'S15.2-2 received = the confirmed deposit row');
+      const s152Wiz = (await A('GET', '/guests')).data.find(x => x.name === 'S151 Wizard');
+      await S('POST', '/collections', { guest_id: s152Wiz.id, guest_name: 'S151 Wizard', amount: 3000, collection_type: 'deposit', payment_mode: 'cash', collection_date: today });
+      s152Dep = await A('GET', `/guests/${s152Wiz.id}/deposit-status`);
+      eq(s152Dep.data.received, 0, 'S15.2-2 MONEY: a staff (pending_approval) deposit is NOT counted as received');
+      eq(s152Dep.data.pending, 3000, 'S15.2-2 it is shown as pending instead');
+      eq((await A('GET', '/guests/abc/deposit-status')).status, 400, 'S15.2-2 bad id → 400');
+      eq((await G('GET', `/guests/${s152Wiz.id}/deposit-status`)).status, 401, 'S15.2-2 SECURITY: a resident token cannot read it');
+      // S15.4-1 (T-1): phones stored as digits only
+      const s154Num = '9' + String(Date.now()).slice(-9);
+      const s154 = await A('POST', '/guests', { name: 'S154 Spaced', phone: s154Num.slice(0, 5) + ' ' + s154Num.slice(5, 8) + '-' + s154Num.slice(8), join_date: today, monthly_rent: 5000, deposit_amount: 0 });
+      eq(s154.data.phone, s154Num, 'S15.4-1 POST /guests stores the phone digits only');
+      const s154Login = await api('POST', '/guest-login', { mobile: s154Num, password: s154Num });
+      eq(s154Login.status, 200, 'S15.4-1 she can log in with the plain 10 digits');
+      const s154Put = await A('PUT', `/guests/${s154.data.id}`, { ...s154.data, phone: '+91 ' + s154Num });
+      ok(s154Put.status < 300 && (await A('GET', '/guests')).data.find(x => x.id === s154.data.id).phone === s154Num, 'S15.4-1 PUT /guests strips spaces, symbols and the +91 prefix');
+      const s154Zero = await A('POST', '/guests', { name: 'S154 Zero', phone: '0' + s154Num.replace(/^9/, '8'), join_date: today, monthly_rent: 5000, deposit_amount: 0 });
+      eq(s154Zero.data.phone, s154Num.replace(/^9/, '8'), 'S15.4-1 a leading 0 is dropped');
+      await A('DELETE', `/guests/${s154Zero.data.id}`);
+      await A('DELETE', `/guests/${s154.data.id}`);
+      // S15.5-1/2 (P-1): resident login with her number in any common form
+      {
+        const n10 = '7' + String(Date.now()).slice(-9);
+        const g155 = await A('POST', '/guests', { name: 'S155 Login', phone: n10, join_date: today, monthly_rent: 5000, deposit_amount: 0 });
+        // Own client address (trust proxy = 1) so these deliberate failures don't
+        // consume the limiter budget the rate-limit test below counts on.
+        const L = async (m, p) => { const r = await fetch(BASE + '/api/guest-login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': '10.15.5.1' }, body: JSON.stringify({ mobile: m, password: p }) }); return { status: r.status, data: await r.json().catch(() => ({})) }; };
+        eq((await L('+91 ' + n10.slice(0, 5) + ' ' + n10.slice(5), '+91' + n10)).status, 200, 'S15.5-1 "+91 xxxxx xxxxx" logs in; default password typed with +91 (first login)');
+        eq((await L(n10, n10)).status, 200, 'S15.5-2 after that first login, the plain 10 digits still work (hash is of the digits)');
+        eq((await L('0' + n10, '+91 ' + n10)).status, 200, 'S15.5-2 "0…" mobile + "+91 …" password both accepted');
+        eq((await L(n10, '1234567')).status, 401, 'S15.5 SECURITY: a wrong password is still refused');
+        eq((await L('12345', '12345')).status, 401, 'S15.5 SECURITY: a short number matches nobody');
+        // A resident saved WITH spaces before 15.4 (written directly, as old data is)
+        const old10 = '6' + String(Date.now()).slice(-9);
+        const gOld = await A('POST', '/guests', { name: 'S155 Old Spaced', phone: old10, join_date: today, monthly_rent: 5000, deposit_amount: 0 });
+        await pool.query('UPDATE guests SET phone=$1 WHERE id=$2', [old10.slice(0, 5) + ' ' + old10.slice(5), gOld.data.id]);
+        eq((await L(old10, old10)).status, 200, 'S15.5-1 a phone stored with spaces before 15.4 logs in with the plain digits — no backfill needed');
+        await A('DELETE', `/guests/${g155.data.id}`); await A('DELETE', `/guests/${gOld.data.id}`);
+        // A-1: two sisters share a number — one saved "+91 …" (old data), one plain
+        const sis = '8' + String(Date.now()).slice(-9);
+        const sA = await A('POST', '/guests', { name: 'S155 Sister A', phone: sis, join_date: today, monthly_rent: 5000, deposit_amount: 0 });
+        const sB = await A('POST', '/guests', { name: 'S155 Sister B', phone: sis, join_date: today, monthly_rent: 5000, deposit_amount: 0 });
+        await pool.query('UPDATE guests SET phone=$1 WHERE id=$2', ['+91 ' + sis, sA.data.id]);
+        // (i) both still on the default password: the exact saved text decides, as before 15.5
+        let rr = await L('+91 ' + sis, '+91 ' + sis); eq(rr.status, 200, 'A-1 sister A (saved "+91 …") logs in typing "+91 …"'); eq(rr.data.guest && rr.data.guest.id, sA.data.id, 'A-1 …as sister A');
+        rr = await L(sis, sis); eq(rr.status, 200, 'A-1 sister B (saved plain) logs in typing the plain number'); eq(rr.data.guest && rr.data.guest.id, sB.data.id, 'A-1 …as sister B, never A');
+        // (ii) each now has her own password (hashes were set by those first logins); custom passwords
+        await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [await require('bcrypt').hash('alpha-123', 6), sA.data.id]);
+        await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [await require('bcrypt').hash('beta-456', 6), sB.data.id]);
+        rr = await L(sis, 'beta-456'); eq(rr.data.guest && rr.data.guest.id, sB.data.id, 'A-1 SECURITY: B logs in with her own password, as B');
+        rr = await L(sis, 'alpha-123'); eq(rr.data.guest && rr.data.guest.id, sA.data.id, 'A-1 SECURITY: A logs in with her own password even typing the plain number, as A');
+        // (iii) same saved text and same password: nobody is logged in as the wrong person
+        await pool.query('UPDATE guests SET phone=$1, password_hash=NULL WHERE id IN ($2,$3)', [sis, sA.data.id, sB.data.id]);
+        rr = await L(sis, sis); eq(rr.status, 409, 'A-1 SECURITY: identical number and password → refused, not a random sister');
+        ok(/warden/.test(rr.data.error || ''), 'A-1 the message tells her what to do');
+        await A('DELETE', `/guests/${sA.data.id}`); await A('DELETE', `/guests/${sB.data.id}`);
+      }
+      for (const n of ['S151 Old Form', 'S151 Wizard', 'S151 Truthy']) { const g = (await A('GET', '/guests')).data.find(x => x.name === n); if (g) await A('DELETE', `/guests/${g.id}`); }
+    }
     console.log('✓ resident complaints');
 
     // ── Room shift ────────────────────────────────────────────────────────
@@ -223,6 +328,13 @@ async function main() {
   eq(r.status, 200, 'staff verify by resident number'); eq(r.data.valid, true, 'active resident verifies'); eq(r.data.resident.name, guest.name, 'verify names her');
   ok(!('phone' in r.data.resident) && !('id_proof_number' in r.data.resident), 'PRIVACY: verify returns no phone or ID number');
   r = await api('POST', '/resident-id/verify', { token: 'not-a-token' }, staffTok); eq(r.status, 400, 'garbage code refused'); eq(r.data.valid, false, 'and reported invalid');
+  { // S15-7 (review F-05): a gate QR minted by another environment is not valid here
+    const jwt = require('jsonwebtoken');
+    const g0 = JSON.parse(Buffer.from(guestTok.split('.')[1], 'base64url').toString());
+    const foreignQr = jwt.sign({ type: 'resident-id', guestId: g0.guestId, env: 'other#000000000000' }, process.env.JWT_SECRET, { expiresIn: '1h' });
+    r = await api('POST', '/resident-id/verify', { token: foreignQr }, staffTok);
+    ok(r.status >= 400 && r.data.valid === false, `S15-7 SECURITY: a gate QR from another environment is refused (${r.status})`);
+  }
   r = await api('POST', '/resident-id/verify', { resident_no: 'SM9999' }, staffTok); eq(r.status, 404, 'unknown resident number → 404');
   r = await api('POST', '/resident-id/verify', { resident_no: idToken.resident_no }); eq(r.status, 401, 'verify needs a staff login');
 

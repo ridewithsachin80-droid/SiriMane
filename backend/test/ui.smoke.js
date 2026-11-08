@@ -86,6 +86,7 @@ async function runAtWidth(browser, BASE, width) {
   await page.waitForFunction(b => { const t = document.querySelector('#cl-date + span')?.textContent; return t && !t.includes(b); }, { timeout: 8000 }, before);
   const after = await page.$eval('#cl-date + span', e => e.textContent);
   ok(/1 \/ \d+ done/.test(after) || /\d+ \/ \d+ done/.test(after), `${tag} tick updates summary (${after.trim()})`);
+  ok(await page.$('#page-content .subtabs'), `${tag} S15-5 the Operations sub-tabs are still there after ticking`);
   await page.screenshot({ path: path.join(SHOTS, `checklist-${width}.png`) });
   await noHScroll('checklist');
   // untick so the other width starts clean
@@ -94,7 +95,7 @@ async function runAtWidth(browser, BASE, width) {
 
   // ── Complaints ────────────────────────────────────────────────────────
   await page.evaluate(() => navigate('complaints'));
-  await page.waitForFunction(() => document.querySelector('#page-content h1')?.textContent.includes('Complaint'), { timeout: 8000 });
+  await page.waitForFunction(() => document.querySelector('#page-content h1')?.textContent.includes('Requests'), { timeout: 8000 });
   await page.evaluate(() => complaintModal());
   await page.waitForSelector('#cp-desc');
   await page.select('#cp-category', 'Water');
@@ -258,7 +259,7 @@ async function runAtWidth(browser, BASE, width) {
 
   // ── Sprint 3: complaint by voice ──────────────────────────────────────
   await page.evaluate(() => navigate('complaints'));
-  await page.waitForFunction(() => document.querySelector('#page-content h1')?.textContent.includes('Complaint'), { timeout: 8000 });
+  await page.waitForFunction(() => document.querySelector('#page-content h1')?.textContent.includes('Requests'), { timeout: 8000 });
   await page.evaluate(() => complaintModal());
   await page.waitForSelector('#cp-mic', { timeout: 5000 });
   await page.evaluate(() => complaintApplyVoice('geyser leaking in bathroom room 2'));
@@ -354,7 +355,7 @@ async function runAtWidth(browser, BASE, width) {
   await noHScroll('reminders');
 
   await page.evaluate(() => navigate('complaints'));
-  await page.waitForFunction(() => document.querySelector('#page-content h1')?.textContent.includes('Complaint'), { timeout: 8000 });
+  await page.waitForFunction(() => document.querySelector('#page-content h1')?.textContent.includes('Requests'), { timeout: 8000 });
   const hasPriority = await page.$$eval('#complaints-tb td[data-label="PRIORITY"] .badge', els => els.length);
   ok(hasPriority >= 1, `${tag} complaints show a priority badge`);
   ok(await page.evaluate(() => document.body.innerText.includes('🔴 High')), `${tag} the geyser/water issue is marked High`);
@@ -697,7 +698,7 @@ async function runAtWidth(browser, BASE, width) {
   ok(!/Guest Messages|Guest Inbox|All Guests|Add Guest/.test(Object.values(wording).join(' ')), `${tag} no legacy "Guest…" screen wording left`);
   ok(/Announcements/.test(wording['guest-messages']), `${tag} Announcements screen renamed`);
   ok(/Messages/.test(wording['inbox']), `${tag} Messages screen renamed`);
-  eq(await page.evaluate(() => { navigate('balance-sheet'); return document.getElementById('page-title').textContent; }), 'Owner & Assets', `${tag} Balance Sheet is "Owner & Assets"`);
+  eq(await page.evaluate(() => { navigate('balance-sheet'); return document.getElementById('page-title').textContent; }), 'Balance sheet', `${tag} S15-5 Balance Sheet has one name`);
   await page.waitForFunction(() => !document.querySelector('#page-content .sm-skel'), { timeout: 12000 });
   const emptyStates = await page.$$eval('.sm-empty-state', els => els.map(e => ({ h: !!e.querySelector('h4'), icon: !!e.querySelector('svg.ic') })));
   ok(emptyStates.every(e => e.h && e.icon), `${tag} empty states have a heading and an icon (${emptyStates.length} on screen)`);
@@ -733,6 +734,25 @@ async function runAtWidth(browser, BASE, width) {
   ok(await page.$eval('#r360-body', e => /Payments/.test(e.textContent)), `${tag} money tab lists payments`);
   await page.screenshot({ path: path.join(SHOTS, `resident360-${width}.png`) });
   await page.evaluate(() => closeModal());
+  // S15-3: every Edit on a resident must open HER edit form. Before Sprint 15
+  // three buttons passed the id as the data argument, opened "Add New Guest"
+  // and saving created a second copy of her.
+  const appSrc = await page.evaluate(() => fetch('/js/app.js').then(r => r.text()));
+  eq((appSrc.match(/guestModal\(\$\{[^}]+\}\)/g) || []).length, 0, `${tag} S15-3 no guestModal(id) call with the id in the data slot`);
+  const guestsBeforeEdit = (await page.evaluate(() => API.getGuests())).length;
+  await page.evaluate(id => guestModal(null, id), target.id);
+  await page.waitForFunction(() => /Edit Guest/.test(document.querySelector('.modal-header')?.textContent || ''), { timeout: 8000 });
+  ok(true, `${tag} S15-3 Edit opens "Edit Guest" for her`);
+  await page.evaluate(() => closeModal());
+  eq((await page.evaluate(() => API.getGuests())).length, guestsBeforeEdit, `${tag} S15-3 opening Edit creates nobody`);
+  // Review F-09: if her record cannot be loaded, no blank "Add New Guest" form opens.
+  const s15NoForm = await page.evaluate(async id => {
+    const real = API.getGuest; API.getGuest = () => Promise.reject(new Error('offline'));
+    try { await guestModal(null, id); } finally { API.getGuest = real; }
+    const h = document.querySelector('.modal-header'); const t = h ? h.textContent : '';
+    closeModal(); return t;
+  }, target.id);
+  ok(!/Add New Guest/.test(s15NoForm), `${tag} S15-3 (review F-09) a failed load never opens a blank Add form`);
 
   // Move-in wizard: nothing is written until the final step
   const guestsBefore = (await page.evaluate(() => API.getGuests())).length;
@@ -755,7 +775,7 @@ async function runAtWidth(browser, BASE, width) {
   await page.waitForSelector('#mi-idtype', { timeout: 5000 });
   await page.evaluate(() => moveInStep(1));
   await page.waitForSelector('#mi-pay-dep', { timeout: 5000 });
-  await page.evaluate(() => { document.getElementById('mi-pay-dep').value = 12000; });
+  await page.evaluate(() => { document.getElementById('mi-pay-dep').value = 12000; document.getElementById('mi-pay-rent').value = 6000; document.getElementById('mi-pay-mode').value = 'UPI'; });
   await page.evaluate(() => moveInStep(1));
   await page.waitForFunction(() => /Nothing is saved until/.test(document.querySelector('.modal-body')?.textContent || ''), { timeout: 5000 });
   eq((await page.evaluate(() => API.getGuests())).length, guestsBefore, `${tag} DATA: six steps in, still nobody created`);
@@ -766,8 +786,27 @@ async function runAtWidth(browser, BASE, width) {
   eq(afterMoveIn.length, guestsBefore + 1, `${tag} resident created on confirm`);
   const made = afterMoveIn.find(g => g.name === 'Wizard Tester');
   ok(made, `${tag} she is in the list`);
+  ok(!made.id_proof_type, `${tag} S15-4 no ID type chosen → stored empty, not "— select —" (got ${JSON.stringify(made.id_proof_type)})`);
   const herPays = await page.evaluate(id => apiFetch(`/guests/${id}/timeline`), made.id);
   ok(herPays.items.some(i => i.kind === 'payment' && /12,000/.test(i.title)), `${tag} the deposit taken at move-in is recorded`);
+  // Sprint 15.1 (D-15-5): EXACTLY one deposit and one rent row — the old check
+  // ("some deposit") passed while every wizard move-in counted the deposit twice.
+  const s151Rows = (await page.evaluate(() => apiFetch('/collections'))).filter(c => c.guest_id === made.id);
+  const s151Dep = s151Rows.filter(c => c.collection_type === 'deposit'), s151Rent = s151Rows.filter(c => c.collection_type === 'rent');
+  eq(s151Dep.length, 1, `${tag} S15.1-1 MONEY: exactly one deposit record after a wizard move-in (got ${s151Dep.length})`);
+  eq(Number(s151Dep[0] && s151Dep[0].amount), 12000, `${tag} S15.1-1 the deposit record is the amount received`);
+  eq(String(s151Dep[0] && s151Dep[0].payment_mode), 'UPI', `${tag} S15.1-1 the deposit record has the mode chosen in the wizard`);
+  eq(s151Rent.length, 1, `${tag} S15.1-1 MONEY: exactly one rent record after a wizard move-in`);
+  eq(s151Rows.length, 2, `${tag} S15.1-1 MONEY: two records in all — ₹18,000 for ₹18,000 received`);
+  const s151Toast = await page.evaluate(() => (document.getElementById('sm-toast') || {}).textContent || '');
+  ok(/18,000 recorded/.test(s151Toast) && /deposit/.test(s151Toast) && /rent/.test(s151Toast) && /UPI/.test(s151Toast), `${tag} S15.1-3 the move-in confirmation says what was recorded ("${s151Toast}")`);
+  // S15.1-4: the Payments card names the type, and months read the same way
+  await page.evaluate(() => navigate('payments'));
+  await page.waitForSelector('#payments-tb', { timeout: 8000 });
+  const s151Cells = await page.evaluate(() => [...document.querySelectorAll('#payments-tb tr')].map(tr => [(tr.querySelector('.pay-type') || {}).textContent, (tr.querySelector('.pay-month') || {}).textContent]).filter(x => x[0]));
+  ok(s151Cells.length > 0 && s151Cells.every(([t]) => /^[A-Z]/.test(t)), `${tag} S15.1-4 every payment row shows its type (${[...new Set(s151Cells.map(x => x[0]))].join(', ')})`);
+  ok(s151Cells.some(([t]) => t === 'Deposit') && s151Cells.some(([t]) => t === 'Rent'), `${tag} S15.1-4 Rent and Deposit are told apart`);
+  ok(s151Cells.every(([, m]) => !/^[A-Z][a-z]{2} \d{4}$/.test(m)), `${tag} S15.1-4 no short "Nov 2026" month next to "November 2026"`);
   // Abandoning the wizard writes nothing
   await page.evaluate(() => moveInWizard());
   await page.waitForSelector('#mi-name', { timeout: 8000 });
@@ -775,6 +814,139 @@ async function runAtWidth(browser, BASE, width) {
   await page.evaluate(() => closeModal());
   await sleep(300);
   eq((await page.evaluate(() => API.getGuests())).length, guestsBefore + 1, `${tag} DATA: an abandoned wizard leaves nobody behind`);
+  // S15.2-1: double tap + a payment that fails (4G drop) → one resident, retry posts only what is missing
+  {
+    await page.evaluate(() => moveInWizard());
+    await page.waitForSelector('#mi-name', { timeout: 8000 });
+    await page.type('#mi-name', `Retry Tester ${width}`);
+    await page.type('#mi-phone', '8' + String(Date.now()).slice(-9));
+    await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-ec-name', { timeout: 5000 });
+    await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-room', { timeout: 5000 });
+    const s152Opts = await page.$$eval('#mi-room option', els => els.map(e => e.value).filter(Boolean));
+    await page.select('#mi-room', s152Opts[0]);
+    await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-rent', { timeout: 5000 });
+    await page.evaluate(() => { document.getElementById('mi-rent').value = 5000; document.getElementById('mi-dep').value = 5000; });
+    await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-idtype', { timeout: 5000 });
+    await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-pay-dep', { timeout: 5000 });
+    await page.evaluate(() => { document.getElementById('mi-pay-dep').value = 5000; document.getElementById('mi-pay-rent').value = 5000; });
+    await page.evaluate(() => moveInStep(1));
+    await page.waitForSelector('#mi-save', { timeout: 5000 });
+    const s152Before = (await page.evaluate(() => API.getGuests())).length;
+    // The rent POST fails once, as if the connection dropped
+    await page.evaluate(() => {
+      window.__s152Orig = API.createCollection;
+      API.createCollection = async (body) => { if (body.collection_type === 'rent' && !window.__s152Failed) { window.__s152Failed = true; throw new Error('Network error — check your connection'); } return window.__s152Orig(body); };
+    });
+    await page.evaluate(() => { moveInSave(); moveInSave(); });   // double tap
+    await page.waitForFunction(() => { const a = document.getElementById('mi-alert'); return a && !a.classList.contains('hidden') && /NOT confirmed/.test(a.textContent); }, { timeout: 10000 });
+    eq((await page.evaluate(() => API.getGuests())).length, s152Before + 1, `${tag} S15.2-1 DATA: a double tap created exactly one resident`);
+    const s152Made = (await page.evaluate(() => API.getGuests())).find(g => g.name === `Retry Tester ${width}`);
+    let s152Rows = (await page.evaluate(() => apiFetch('/collections'))).filter(c => c.guest_id === s152Made.id);
+    eq(s152Rows.filter(c => c.collection_type === 'deposit').length, 1, `${tag} S15.2-1 MONEY: the deposit that went through is recorded once`);
+    eq(s152Rows.filter(c => c.collection_type === 'rent').length, 0, `${tag} S15.2-1 the rent that failed is not recorded`);
+    const s152Alert = await page.$eval('#mi-alert', e => e.textContent);
+    ok(/rent/.test(s152Alert) && /5,000/.test(s152Alert) && /Retry/.test(s152Alert), `${tag} S15.2-1 the warden is told exactly what did not save ("${s152Alert.slice(0, 90)}…")`);
+    ok(/Do not record it again in Collect/.test(s152Alert) && !/record it later in Collect/.test(s152Alert), `${tag} S15.3-4 MONEY: the message never sends her to Collect while a retry is pending`);
+    ok(/Retry/.test(await page.$eval('#mi-save', b => b.textContent)) && !(await page.$eval('#mi-save', b => b.disabled)), `${tag} S15.2-1 the button now offers a retry and is usable`);
+    ok(!(await page.$('#mi-back')), `${tag} S15.2-1 no Back button once she exists (editing would not change the saved record)`);
+    await page.evaluate(() => moveInSave());   // retry
+    await page.waitForFunction(() => !document.querySelector('#mi-name') && !document.querySelector('#mi-save'), { timeout: 10000 });
+    eq((await page.evaluate(() => API.getGuests())).length, s152Before + 1, `${tag} S15.2-1 DATA: the retry did not add her again`);
+    s152Rows = (await page.evaluate(() => apiFetch('/collections'))).filter(c => c.guest_id === s152Made.id);
+    eq(s152Rows.filter(c => c.collection_type === 'deposit').length, 1, `${tag} S15.2-1 MONEY: still exactly one deposit after the retry`);
+    eq(s152Rows.filter(c => c.collection_type === 'rent').length, 1, `${tag} S15.2-1 MONEY: the retry recorded the missing rent once`);
+    await page.evaluate(() => { API.createCollection = window.__s152Orig; delete window.__s152Failed; });
+  }
+  // S15.2-1 (review): the payment REACHED the server but the reply was lost → Retry must not record it twice
+  {
+    await page.evaluate(() => moveInWizard());
+    await page.waitForSelector('#mi-name', { timeout: 8000 });
+    await page.type('#mi-name', `Lost Reply ${width}`);
+    await page.type('#mi-phone', '6' + String(Date.now()).slice(-9));
+    await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-ec-name', { timeout: 5000 });
+    await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-room', { timeout: 5000 });
+    const s152bOpts = await page.$$eval('#mi-room option', els => els.map(e => e.value).filter(Boolean));
+    await page.select('#mi-room', s152bOpts[s152bOpts.length - 1]);
+    await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-rent', { timeout: 5000 });
+    await page.evaluate(() => { document.getElementById('mi-rent').value = 4000; document.getElementById('mi-dep').value = 4000; });
+    await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-idtype', { timeout: 5000 });
+    await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-pay-dep', { timeout: 5000 });
+    await page.evaluate(() => { document.getElementById('mi-pay-dep').value = 4000; document.getElementById('mi-pay-rent').value = 4000; });
+    await page.evaluate(() => moveInStep(1));
+    await page.waitForSelector('#mi-save', { timeout: 5000 });
+    await page.evaluate(() => {
+      window.__s152bOrig = API.createCollection;
+      API.createCollection = async (body) => { const r = await window.__s152bOrig(body); if (body.collection_type === 'deposit' && !window.__s152bLost) { window.__s152bLost = true; throw new Error('Network error — check your connection'); } return r; };
+    });
+    await page.evaluate(() => moveInSave());
+    await page.waitForFunction(() => { const a = document.getElementById('mi-alert'); return a && !a.classList.contains('hidden') && /NOT confirmed/.test(a.textContent); }, { timeout: 10000 });
+    await page.evaluate(() => moveInSave());   // retry
+    await page.waitForFunction(() => !document.querySelector('#mi-save'), { timeout: 10000 });
+    const s152bMade = (await page.evaluate(() => API.getGuests())).filter(g => g.name === `Lost Reply ${width}`);
+    eq(s152bMade.length, 1, `${tag} S15.2-1 DATA: one resident after a lost reply + retry`);
+    const s152bRows = (await page.evaluate(() => apiFetch('/collections'))).filter(c => c.guest_id === s152bMade[0].id);
+    eq(s152bRows.filter(c => c.collection_type === 'deposit').length, 1, `${tag} S15.2-1 MONEY: a deposit whose reply was lost is NOT recorded again on retry`);
+    eq(s152bRows.filter(c => c.collection_type === 'rent').length, 1, `${tag} S15.2-1 MONEY: rent recorded once`);
+    await page.evaluate(() => { API.createCollection = window.__s152bOrig; delete window.__s152bLost; });
+  }
+  // S15.3-5 (R-6): the RESIDENT save reached the server but its reply was lost → retry adopts her, never a second resident
+  {
+    await page.evaluate(() => moveInWizard());
+    await page.waitForSelector('#mi-name', { timeout: 8000 });
+    await page.type('#mi-name', `Lost Guest ${width}`);
+    const s154Digits = '5' + String(Date.now()).slice(-9);
+    await page.type('#mi-phone', s154Digits.slice(0, 5) + ' ' + s154Digits.slice(5));   // T-1: typed with a space, as wardens do
+    await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-ec-name', { timeout: 5000 });
+    await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-room', { timeout: 5000 });
+    const s153Opts = await page.$$eval('#mi-room option', els => els.map(e => e.value).filter(Boolean));
+    await page.select('#mi-room', s153Opts[0]);
+    await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-rent', { timeout: 5000 });
+    await page.evaluate(() => { document.getElementById('mi-rent').value = 3000; document.getElementById('mi-dep').value = 3000; });
+    await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-idtype', { timeout: 5000 });
+    await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-pay-dep', { timeout: 5000 });
+    await page.evaluate(() => { document.getElementById('mi-pay-dep').value = 3000; });
+    await page.evaluate(() => moveInStep(1));
+    await page.waitForSelector('#mi-save', { timeout: 5000 });
+    await page.evaluate(() => {
+      window.__s153Orig = API.createGuest;
+      API.createGuest = async (body) => { const r = await window.__s153Orig(body); if (!window.__s153Lost) { window.__s153Lost = true; throw new Error('Network error — check your connection'); } return r; };
+    });
+    await page.evaluate(() => moveInSave());
+    await page.waitForFunction(() => { const a = document.getElementById('mi-alert'); return a && !a.classList.contains('hidden'); }, { timeout: 10000 });
+    ok(!(await page.$('#mi-back')), `${tag} S15.4-3 (T-3) outcome unknown → Back is locked (an edited name/phone could duplicate her)`);
+    ok(/may or may not/.test(await page.$eval('#mi-alert', e => e.textContent)), `${tag} S15.4-3 the warden is told the outcome is unknown`);
+    await page.evaluate(() => moveInSave());   // retry after the lost reply
+    await page.waitForFunction(() => !document.querySelector('#mi-save'), { timeout: 10000 });
+    const s153Made = (await page.evaluate(() => API.getGuests())).filter(g => g.name === `Lost Guest ${width}`);
+    eq(s153Made.length, 1, `${tag} S15.3-5 / S15.4-1 DATA: a lost reply on the resident save does not create her twice — phone typed with a space`);
+    eq(s153Made[0].phone, s154Digits, `${tag} S15.4-1 the phone is stored as digits only`);
+    const s153Rows = (await page.evaluate(() => apiFetch('/collections'))).filter(c => c.guest_id === s153Made[0].id);
+    eq(s153Rows.filter(c => c.collection_type === 'deposit').length, 1, `${tag} S15.3-5 MONEY: her deposit is recorded once, against the adopted resident`);
+    await page.evaluate(() => { API.createGuest = window.__s153Orig; delete window.__s153Lost; });
+  }
+  // S15.4-3 (T-3): the server REFUSED the save (4xx) → nothing was created, Back stays so she can fix it
+  {
+    await page.evaluate(() => moveInWizard());
+    await page.waitForSelector('#mi-name', { timeout: 8000 });
+    await page.type('#mi-name', `Refused ${width}`);
+    await page.type('#mi-phone', '4' + String(Date.now()).slice(-9));
+    for (let k = 0; k < 2; k++) { await page.evaluate(() => moveInStep(1)); await new Promise(r => setTimeout(r, 150)); }
+    await page.waitForSelector('#mi-room', { timeout: 5000 });
+    const s154Opts = await page.$$eval('#mi-room option', els => els.map(e => e.value).filter(Boolean));
+    await page.select('#mi-room', s154Opts[0]);
+    await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-rent', { timeout: 5000 });
+    await page.evaluate(() => { document.getElementById('mi-rent').value = 3000; document.getElementById('mi-dep').value = 3000; });
+    await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-idtype', { timeout: 5000 });
+    await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-pay-dep', { timeout: 5000 });
+    await page.evaluate(() => moveInStep(1)); await page.waitForSelector('#mi-save', { timeout: 5000 });
+    const s154Before = (await page.evaluate(() => API.getGuests())).length;
+    await page.evaluate(() => { window.__s154Orig = API.createGuest; API.createGuest = async () => { const e = new Error('Bed 1 in this room is taken'); e.status = 400; throw e; }; });
+    await page.evaluate(() => moveInSave());
+    await page.waitForFunction(() => { const a = document.getElementById('mi-alert'); return a && !a.classList.contains('hidden'); }, { timeout: 10000 });
+    ok(await page.$('#mi-back'), `${tag} S15.4-3 a refusal keeps Back available so the warden can fix the form`);
+    eq((await page.evaluate(() => API.getGuests())).length, s154Before, `${tag} S15.4-3 DATA: a refused save created nobody`);
+    await page.evaluate(() => { API.createGuest = window.__s154Orig; closeModal(); });
+  }
 
   // Checkout wizard: refund = deposit − deductions, and it is the server's number
   await page.evaluate(id => checkoutWizard(id), made.id);
@@ -785,6 +957,8 @@ async function runAtWidth(browser, BASE, width) {
   await page.evaluate(() => checkoutStep(1));
   await page.waitForFunction(() => /Refund due/.test(document.querySelector('.modal-body')?.textContent || ''), { timeout: 5000 });
   ok(await page.$eval('.modal-body', e => /11,500/.test(e.textContent)), `${tag} MONEY: refund shown as 12,000 − 500`);
+  ok(await page.$eval('#co-dep-received', e => /12,000 of ₹12,000/.test(e.textContent)), `${tag} S15.2-2 checkout shows the deposit actually received`);
+  ok(!(await page.$('#co-dep-warn')), `${tag} S15.2-2 no warning when the full deposit was collected`);
   const activeBefore = (await page.evaluate(() => API.getGuests())).filter(g => g.is_active).length;
   await page.screenshot({ path: path.join(SHOTS, `checkout-${width}.png`) });
   await page.evaluate(() => checkoutSave());
@@ -793,6 +967,22 @@ async function runAtWidth(browser, BASE, width) {
   eq(activeAfter, activeBefore - 1, `${tag} she is checked out`);
   const refunds = await page.evaluate(() => apiFetch('/deposit-refunds'));
   ok(refunds.some(x => parseFloat(x.refund_amount) === 11500), `${tag} MONEY: the refund recorded is 11,500`);
+  // S15.2-2: deposit agreed but never collected → checkout warns; the refund number itself is unchanged
+  {
+    const s152Room = (await page.evaluate(() => apiFetch('/rooms'))).find(r => true);
+    const s152Short = await page.evaluate(rid => apiFetch('/guests', { method: 'POST', body: { name: 'Short Deposit', phone: '7' + String(Date.now()).slice(-9), room_id: rid, join_date: '2026-06-01', monthly_rent: 4000, deposit_amount: 8000, deposit_recorded_by_client: true } }), s152Room.id);
+    await page.evaluate(id => checkoutWizard(id), s152Short.id);
+    await page.waitForSelector('#co-dep-warn', { timeout: 10000 });
+    ok(await page.$eval('#co-dep-received', e => /0 of ₹8,000/.test(e.textContent)), `${tag} S15.2-2 received ₹0 of ₹8,000 is shown`);
+    ok(await page.$eval('#co-dep-warn', e => /Only ₹0 of the ₹8,000/.test(e.textContent) && /check before paying/.test(e.textContent)), `${tag} S15.2-2 the warden is warned before refunding money never collected`);
+    await page.evaluate(() => checkoutStep(1)); await page.waitForSelector('#co-ded', { timeout: 5000 });
+    await page.evaluate(() => checkoutStep(1));
+    await page.waitForFunction(() => /Refund due/.test(document.querySelector('.modal-body')?.textContent || ''), { timeout: 5000 });
+    ok(await page.$eval('.modal-body', e => /Refund due\s*₹8,000/.test(e.textContent)), `${tag} S15.2-2 MONEY: refund maths unchanged (₹8,000 from the agreed deposit)`);
+    ok(await page.$('#co-dep-warn'), `${tag} S15.2-2 the warning is repeated on the refund step`);
+    await page.evaluate(() => closeModal());
+    await page.evaluate(id => apiFetch(`/guests/${id}`, { method: 'DELETE' }), s152Short.id);
+  }
   // Leaving-soon filter
   await page.evaluate(() => navigate('guests'));
   await page.waitForFunction(() => document.querySelector('#page-content table.sm-cards tbody tr'), { timeout: 10000 });
@@ -1128,11 +1318,20 @@ async function runAtWidth(browser, BASE, width) {
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => !document.getElementById('search-overlay'), { timeout: 6000 });
   ok(await page.evaluate(() => currentPage === 'purchases'), `${tag} Enter on "Add expense" runs it`);
+  // D-15-4: the form opens once Purchases has rendered. Wait for it before
+  // closing it — closing too early left it to pop up later, over Room 360.
+  await page.waitForSelector('#modal-overlay #pu-amt', { timeout: 8000 });
+  ok(true, `${tag} "Add expense" opens the expense form on Purchases`);
   await page.evaluate(() => { closeModal(); openSearch(); });
   await page.waitForSelector('#search-overlay', { timeout: 5000 });
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => !document.getElementById('search-overlay'), { timeout: 5000 });
   ok(true, `${tag} Esc closes the palette`);
+  // D-15-4: a command's form never pops up on a screen the user has moved to.
+  await page.evaluate(() => { paletteRunCommand('expense'); navigate('rooms'); });
+  await page.waitForSelector('.room-tile', { timeout: 8000 });
+  await sleep(800);
+  ok(!(await page.$('#modal-overlay')), `${tag} D-15-4 "Add expense" does not pop up on Rooms after the user moved on`);
 
   // Staff never sees an owner command.
   const staffCmds = await page.evaluate(() => {
@@ -1222,11 +1421,43 @@ async function runAtWidth(browser, BASE, width) {
   }), `${tag} Tab from the last element stays inside the modal`);
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => !document.getElementById('modal-overlay'), { timeout: 5000 });
-  ok(await page.evaluate(() => document.activeElement && document.activeElement.classList.contains('room-tile')), `${tag} focus returns to what opened the modal`);
+  const s15Focus = await page.evaluate(() => { const a = document.activeElement; return { ok: !!a && a.classList.contains('room-tile'), on: a ? a.tagName + '.' + String(a.className).split(' ')[0] : 'none', tiles: document.querySelectorAll('.room-tile').length, page: typeof currentPage !== 'undefined' ? currentPage : '?' }; });
+  ok(s15Focus.ok, `${tag} focus returns to what opened the modal (focus on ${s15Focus.on}; page ${s15Focus.page}; ${s15Focus.tiles} tiles)`);
   eq(await page.$$eval('#page-content input:not([type=hidden]):not([type=checkbox]), #page-content select, #page-content textarea',
     els => els.filter(el => !el.getAttribute('aria-label') && !(el.id && document.querySelector(`label[for="${el.id}"]`))).length), 0,
     `${tag} every input has a label or a name`);
 
+  // ═══════════════ Sprint 15 ═══════════════
+  // S15-5: one button per job per screen; hamburger hidden on phones
+  for (const pg of ['payments', 'collections', 'guests', 'complaints', 'guest-messages', 'rooms-table', 'daily-menu', 'purchases']) {
+    await page.evaluate(x => navigate(x), pg);
+    await page.waitForFunction(() => !document.querySelector('#page-content .sm-skel'), { timeout: 10000 });
+    await sleep(150);
+    eq(await page.$eval('#topbar-actions', e => e.children.length), 0, `${tag} S15-5 ${pg}: no duplicate button in the top bar`);
+  }
+  ok(await page.$eval('#menu-toggle', e => getComputedStyle(e).display === 'none'), `${tag} S15-5 phone: hamburger hidden (More opens the same menu)`);
+  // S15-5: "Generate owner report" lands on Reports with the report card
+  await page.evaluate(() => { closeModal(); COMMANDS.find(c => c.id === 'owner-report').run(); });
+  await page.waitForFunction(() => currentPage === 'reports' && document.getElementById('owner-summary'), { timeout: 10000 });
+  ok(true, `${tag} S15-5 owner-report shortcut opens Reports with the report`);
+  // S15-6: the Payments header counts confirmed money only
+  const s15Gid = (await page.evaluate(() => API.getGuests()))[0].id;
+  const s15YmNow = new Date(Date.now() + 5.5 * 3600 * 1000);
+  await pool.query(`INSERT INTO collections(guest_id, guest_name, amount, collection_date, collection_month, collection_type, payment_mode, status, receipt_number)
+                    VALUES($1,'UI Guest',100,$2,'claim','rent','UPI','pending_verification',$3)`, [s15Gid, s15YmNow.toISOString().slice(0, 10), 'S15-' + width + '-' + Date.now()]);
+  await page.evaluate(() => navigate('payments'));
+  await page.waitForSelector('#pay-received', { timeout: 10000 });
+  const s15Rows = await page.evaluate(() => paymentsListCache);
+  const s15Confirmed = s15Rows.filter(c => c.status === 'confirmed' || !c.status).reduce((t, c) => t + Number(c.amount), 0);
+  const s15Pending = s15Rows.filter(c => /^pending/.test(c.status || '')).reduce((t, c) => t + Number(c.amount), 0);
+  ok(s15Pending >= 100, `${tag} S15-6 fixture: a pending claim exists (${s15Pending})`);
+  const s15Head = await page.$eval('#pay-received', e => e.textContent);
+  const s15Shown = Number(s15Head.replace(/[^0-9]/g, ''));
+  eq(s15Shown, s15Confirmed, `${tag} S15-6 MONEY: header shows confirmed only (${s15Head.trim()})`);
+  ok(/received/.test(s15Head), `${tag} S15-6 header says "received", not "total"`);
+  ok(await page.$eval('#pay-waiting', e => /waiting for confirmation/.test(e.textContent)), `${tag} S15-6 pending money shown separately as "waiting"`);
+  eq(Number((await page.$eval('#pay-waiting', e => e.textContent)).split('waiting')[0].replace(/[^0-9]/g, '')), s15Pending, `${tag} S15-6 the waiting line equals the s15Pending s15Rows`);
+  await pool.query(`DELETE FROM collections WHERE receipt_number LIKE 'S15-${width}-%'`);
   eq(jsErrors.length, 0, `${tag} no uncaught JS errors (${jsErrors.join('; ')})`);
   await page.close(); await ctx.close();
 }
@@ -1235,7 +1466,7 @@ async function runAtWidth(browser, BASE, width) {
   await pool.query(`TRUNCATE complaints, guest_room_history, checklist_log, collections, guest_rent_history, deposit_refunds, guests, rooms, day_closings, collection_variances RESTART IDENTITY CASCADE`);
   const server = app.listen(0);
   const BASE = `http://127.0.0.1:${server.address().port}`;
-  // Fixtures via API: two rooms, one guest, one confirmed collection
+  // Fixtures via API: two rooms, one guest, one s15Confirmed collection
   const login = await (await fetch(BASE + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'admin', password: process.env.ADMIN_PASSWORD || 'SiriMane@2024' }) })).json();
   const H = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + login.token };
   const post = (p, b) => fetch(BASE + '/api' + p, { method: 'POST', headers: H, body: JSON.stringify(b) }).then(r => r.json());
@@ -1243,6 +1474,7 @@ async function runAtWidth(browser, BASE, width) {
   const r1 = await post('/rooms', { room_number: 'U1', floor: 1, total_beds: 2, monthly_rent: 6000 });
   await post('/rooms', { room_number: 'U2', floor: 1, total_beds: 2, monthly_rent: 6000 });
   await post('/rooms', { room_number: 'U3', floor: 1, total_beds: 2, monthly_rent: 6000 });
+  await post('/rooms', { room_number: 'U4', floor: 1, total_beds: 4, monthly_rent: 6000 });   // S15.3: beds for the retry wizards
   const g = await post('/guests', { name: 'UI Guest', phone: '9000000001', room_id: r1.id, bed_number: 1, join_date: '2026-06-01', monthly_rent: 6000, deposit_amount: 12000 });
   const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
   await post('/collections', { guest_id: g.id, guest_name: g.name, amount: 6000, collection_date: today, collection_month: 'September 2026', collection_type: 'rent', payment_mode: 'upi' });
