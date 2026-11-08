@@ -39,20 +39,18 @@ const CSP_BASE = {
   "form-action": ["'self'"],
   "frame-ancestors": ["'none'"]
 };
-const GA = ["https://www.googletagmanager.com", "https://*.google-analytics.com", "https://*.analytics.google.com"];
+const GA = ["https://www.googletagmanager.com", "https://*.googletagmanager.com", "https://*.google-analytics.com", "https://*.analytics.google.com"];
 function cspHeader(extra) {
   return Object.entries(CSP_BASE).map(([k, v]) => [k, ...v, ...((extra && extra[k]) || [])].join(' ')).join('; ');
 }
 const CSP_APP = cspHeader();
 const CSP_HOME = cspHeader({ "script-src": ["https://www.googletagmanager.com"], "connect-src": GA, "img-src": GA });
-const APP_PATHS = /^\/(api\/|health|management|siri-mane-management|guest|siri-mane-guest-portal|js\/|css\/|sw-guest\.js|manifest)/;
-app.use((req, res, next) => {
-  // The landing page is '/', '/home.html' and every unknown page path (served
-  // by the catch-all below). Everything else gets the app policy.
-  const home = !APP_PATHS.test(req.path) && (req.path === '/' || req.path === '/home.html' || !/\.[a-z0-9]+$/i.test(req.path));
-  res.setHeader('Content-Security-Policy', home ? CSP_HOME : CSP_APP);
-  next();
-});
+// Every response gets the strict app policy. Only the handlers that actually
+// send home.html (below) switch to the home policy — so no spelling of a URL
+// (e.g. /MANAGEMENT, which Express matches case-insensitively) can serve a
+// staff or resident page with the looser one. (Review S17-4.)
+app.use((req, res, next) => { res.setHeader('Content-Security-Policy', CSP_APP); next(); });
+const sendHome = (req, res) => { res.setHeader('Content-Security-Policy', CSP_HOME); res.sendFile(path.join(PUBLIC, 'home.html')); };
 app.locals.CSP_APP = CSP_APP; app.locals.CSP_HOME = CSP_HOME;   // for the gates
 app.use(cors({
   origin: process.env.FRONTEND_URL || '*',
@@ -88,6 +86,8 @@ const makeLoginLimiter = () => rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true,
+  // S17-1 review: a turned-off account with the RIGHT password (403) is not a guess
+  requestWasSuccessful: (req, res) => res.statusCode < 400 || res.statusCode === 403,
   message: { error: 'Too many login attempts. Please wait 15 minutes and try again.' }
 });
 app.use('/api/auth/login', makeLoginLimiter());
@@ -112,6 +112,7 @@ const accountLimiter = (max, keyOf, who) => rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true,
+  requestWasSuccessful: (req, res) => res.statusCode < 400 || res.statusCode === 403,   // S17-1 review
   keyGenerator: (req) => keyOf(req.body || {}),
   // S16.3-4: when a pause trips, put it on the bell (once per account per
   // window) so the warden/admin knows someone is guessing.
@@ -166,10 +167,11 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString(), schema: s.ok === null ? 'unchecked' : (s.ok ? 'ok' : 'missing'), schemaMissing: s.missing, schemaCheckedAt: s.checkedAt });
 });
 
+app.get('/home.html', sendHome);   // before static, so it gets the home policy
 app.use(express.static(PUBLIC));
 
 // Root
-app.get('/', (req, res) => res.sendFile(path.join(PUBLIC, 'home.html')));
+app.get('/', sendHome);
 
 // Guest portal
 app.get('/siri-mane-guest-portal', (req, res) => res.sendFile(path.join(PUBLIC, 'guest.html')));
@@ -180,7 +182,7 @@ app.get('/siri-mane-management', (req, res) => res.sendFile(path.join(PUBLIC, 'm
 app.get('/management', (req, res) => res.sendFile(path.join(PUBLIC, 'management.html')));
 
 // Catch-all for the public site
-app.get('*', (req, res) => res.sendFile(path.join(PUBLIC, 'home.html')));
+app.get('*', sendHome);
 
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);

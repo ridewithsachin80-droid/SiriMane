@@ -1421,15 +1421,27 @@ async function setDisabled(req, res, off) {
   const id = parseInt(req.params.id, 10);
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'Bad user id' });
   if (id === req.user.id) return res.status(400).json({ error: "You can't turn off your own account." });
+  const client = await pool.connect();
+  let r;
   try {
-    const r = await pool.query(`UPDATE users SET disabled_at = ${off ? 'COALESCE(disabled_at, NOW())' : 'NULL'} WHERE id=$1 RETURNING id, username, role, disabled_at`, [id]);
-    if (!r.rows[0]) return res.status(404).json({ error: 'User not found' });
+    // One turn-off/on at a time, and the admin doing it must still be on —
+    // two admins turning each other off at the same moment can't leave none.
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(17017)');
+    const me = await client.query('SELECT disabled_at FROM users WHERE id=$1', [req.user.id]);
+    if (!me.rows[0] || me.rows[0].disabled_at) { await client.query('ROLLBACK'); return res.status(401).json({ error: 'This account is turned off — ask the owner.' }); }
+    r = await client.query(`UPDATE users SET disabled_at = ${off ? 'COALESCE(disabled_at, NOW())' : 'NULL'} WHERE id=$1 RETURNING id, username, role, disabled_at`, [id]);
+    if (!r.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'User not found' }); }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (err.code === '42703') return res.status(503).json({ error: 'This needs a database update first: run node backend/scripts/migrate-all.js in the Railway console.' });
+    return res.status(500).json({ error: err.message });
+  } finally { client.release(); }
+  try {
     await logActivity(req, off ? 'user_disable' : 'user_enable', r.rows[0].username);
     res.json({ ...r.rows[0], message: off ? `${r.rows[0].username} is turned off — they can no longer log in.` : `${r.rows[0].username} can log in again.` });
-  } catch (err) {
-    if (err.code === '42703') return res.status(503).json({ error: 'This needs a database update first: run node backend/scripts/migrate-all.js in the Railway console.' });
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 }
 router.post('/users/:id/disable', auth, requireAdmin, (req, res) => setDisabled(req, res, true));
 router.post('/users/:id/enable', auth, requireAdmin, (req, res) => setDisabled(req, res, false));
