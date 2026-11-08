@@ -27,6 +27,11 @@ const PHONE = '9000000042';
 const NEWPW = 'Portal@2026';
 let portalPw = PHONE;
 let resetToDefault = false;
+// The login box always EXISTS (it's only hidden), so "is she logged out?" must
+// ask whether the login screen is SHOWING — the old check was always true and
+// fired a stray background login on every run (found in Sprint 16).
+const loggedOut = (page) => page.evaluate(() => !document.getElementById('login-section').classList.contains('hidden'));
+const fillLogin = async (page, pw) => { await page.$eval('#login-mobile', e => { e.value = ''; }); await page.$eval('#login-password', e => { e.value = ''; }); await page.type('#login-mobile', PHONE); await page.type('#login-password', pw); };
 
 async function runAtWidth(browser, BASE, width, fixtures) {
   const ctx = await browser.createBrowserContext();
@@ -238,9 +243,9 @@ async function runAtWidth(browser, BASE, width, fixtures) {
 
   // ── Sprint 8: digital resident ID ──────────────────────────────────────
   // The session test above deliberately expires her login, so sign in again.
-  if (await page.$('#login-mobile')) {
-    await page.type('#login-mobile', PHONE);
-    await page.type('#login-password', portalPw);
+  ok(await loggedOut(page), `${tag} the expired session shows the login screen (so the next checks really run)`);
+  if (await loggedOut(page)) {
+    await fillLogin(page, portalPw);
     await page.evaluate(() => document.getElementById('login-btn').click());
     ok(await page.evaluate(() => new Promise(r => setTimeout(() => r(document.getElementById('force-pw-section').classList.contains('hidden')), 600))), `${tag} S16-2 after she set her own password she is not asked again`);
     await page.waitForFunction(() => !document.getElementById('portal-section').classList.contains('hidden'), { timeout: 8000 });
@@ -300,8 +305,8 @@ async function runAtWidth(browser, BASE, width, fixtures) {
   await page.screenshot({ path: path.join(SHOTS, `portal-id-${width}.png`) });
 
   // ── Sprint 11: portal home, meals, visitors, emergency, satisfaction ───
-  if (await page.$('#login-mobile')) {
-    await page.type('#login-mobile', PHONE); await page.type('#login-password', PHONE); await page.evaluate(() => document.getElementById('login-btn').click());
+  if (await loggedOut(page)) {
+    await fillLogin(page, portalPw); await page.evaluate(() => document.getElementById('login-btn').click());
     await page.waitForFunction(() => !document.getElementById('portal-section').classList.contains('hidden'), { timeout: 8000 });
   }
   await page.evaluate(() => showTab('home'));

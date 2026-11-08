@@ -924,6 +924,18 @@ async function runAtWidth(browser, BASE, width) {
     eq(s153Rows.filter(c => c.collection_type === 'deposit').length, 1, `${tag} S15.3-5 MONEY: her deposit is recorded once, against the adopted resident`);
     await page.evaluate(() => { API.createGuest = window.__s153Orig; delete window.__s153Lost; });
   }
+  // S16-1 (review): a double tap on Next at step 1 moves ONE step, never skipping emergency contacts
+  {
+    await page.evaluate(() => moveInWizard());
+    await page.waitForSelector('#mi-name', { timeout: 8000 });
+    await page.type('#mi-name', `Double Tap ${width}`);
+    await page.type('#mi-phone', '3' + String(Date.now()).slice(-9));
+    await page.evaluate(() => { moveInStep(1); moveInStep(1); });
+    await page.waitForSelector('#mi-ec-name', { timeout: 5000 });
+    await new Promise(r => setTimeout(r, 600));
+    eq(await page.evaluate(() => moveIn.step), 2, `${tag} S16-1 double tap on Next lands on step 2 (emergency contact), not 3`);
+    await page.evaluate(() => closeModal());
+  }
   // S15.4-3 (T-3): the server REFUSED the save (4xx) → nothing was created, Back stays so she can fix it
   {
     await page.evaluate(() => moveInWizard());

@@ -279,8 +279,25 @@ async function main() {
         eq(r16.status, 201, "S16-1 a checked-out resident's number can be given to a new resident");
         const newOwnerId = r16.data.id;
         eq((await A('PUT', `/guests/${a16.data.id}`, { ...a16.data, is_active: true })).status, 409, 'S16-1 re-activating someone onto a number now in use is refused');
+        eq((await A('PUT', `/guests/${a16.data.id}`, { ...a16.data, is_active: 'true' })).status, 409, 'S16-1 (review F16-2) …also when is_active is sent as the text "true"');
         for (const id of [a16.data.id, b16.data.id, newOwnerId]) await A('DELETE', `/guests/${id}`);
 
+        // S16-2 (review F16-1): the default can't be bypassed by spelling
+        {
+          const nb = '6' + String(Date.now()).slice(-9);
+          const gb = (await A('POST', '/guests', { name: 'S16 Bypass', phone: nb, join_date: today, monthly_rent: 5000, deposit_amount: 0 })).data;
+          const XL = async (m, p) => { const r = await fetch(BASE + '/api/guest-login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': '10.16.2.9' }, body: JSON.stringify({ mobile: m, password: p }) }); return { status: r.status, data: await r.json().catch(() => ({})) }; };
+          eq((await XL(nb + 'x', nb + 'x')).status, 401, 'S16-2 F16-1 SECURITY: "98…x" as mobile AND password does not get in');
+          const dotted = nb.slice(0, 5) + '.' + nb.slice(5);
+          eq((await XL(dotted, dotted)).status, 401, 'S16-2 F16-1 SECURITY: "98…" with a dot as mobile AND password does not get in');
+          let rb = await XL(nb, '+91 ' + nb);
+          ok(rb.status === 200 && rb.data.must_change_password === true, 'S16-2 the real default still works — and is restricted');
+          // A hash that IS her number (set before S16) is still "the default"
+          await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [await require('bcrypt').hash(nb, 6), gb.id]);
+          rb = await XL(nb, nb);
+          ok(rb.status === 200 && rb.data.must_change_password === true, 'S16-2 F16-1 a stored password that is her own number still forces the change');
+          await A('DELETE', `/guests/${gb.id}`);
+        }
         // S16-3 separate limiters: 10 wrong resident logins don't block staff from the same address
         const XF = { 'Content-Type': 'application/json', 'X-Forwarded-For': '10.16.3.1' };
         const tryLogin = async (path, body) => (await fetch(BASE + '/api' + path, { method: 'POST', headers: XF, body: JSON.stringify(body) })).status;

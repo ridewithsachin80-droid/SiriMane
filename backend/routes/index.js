@@ -376,7 +376,9 @@ router.put('/guests/:id', auth, async (req, res) => {
     // can still be edited; the warden fixes those numbers by hand.
     const oldKey = String(normPhone(existing.rows[0].phone) || '').slice(-10);
     const newKey = phone != null ? String(phone).slice(-10) : oldKey;
-    const reactivating = existing.rows[0].is_active === false && is_active === true;
+    // Postgres reads 'true', 't', 'yes', 'on', '1' as true too (review F16-2)
+    const asBool = v => v === true || v === 1 || (typeof v === 'string' && ['true', 't', 'yes', 'y', 'on', '1'].includes(v.trim().toLowerCase()));
+    const reactivating = existing.rows[0].is_active === false && is_active !== undefined && is_active !== null && asBool(is_active);
     if (newKey && (newKey !== oldKey || reactivating)) {
       const t = await phoneTakenBy(newKey, parseInt(req.params.id, 10));
       if (t) return res.status(409).json({ error: phoneTakenMsg(t) });
@@ -1400,8 +1402,10 @@ router.post('/guest-login', async (req, res) => {
         // her type the default the way her phone autofills it ("+91 …").
         return phoneLike && await bcrypt.compare(typedKey, g.password_hash);
       }
-      // No password set yet: the default is her mobile number, in any form
-      return password === mobile || typedKey === mobileKey;
+      // No password set yet: the default is her mobile number, typed in any
+      // PHONE form ("+91 98…", spaces, dashes). Not any string that happens to
+      // equal what she typed as the mobile (S16 review F16-1: "98…x" got in).
+      return phoneLike && typedKey === String(normPhone(g.phone) || '').slice(-10);
     };
     const matched = [];
     for (const g of r.rows) if (await accepts(g)) matched.push(g);
@@ -1423,10 +1427,11 @@ router.post('/guest-login', async (req, res) => {
       await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [hash, guest.id]);
     }
 
-    // S16-2: logged in with the default password (her own number) → this
-    // token can do nothing except set a new password (enforced in guestAuth).
+    // S16-2: is she still on the default password? Decided from the
+    // CREDENTIAL that verified, not from how she typed it (review F16-1):
+    // no hash yet → default; a hash that is of her own number → default.
     const guestKey = String(normPhone(guest.phone) || '').slice(-10);
-    const onDefault = typedKey.length === 10 && typedKey === guestKey && /^[\d\s+()-]+$/.test(String(password));
+    const onDefault = !guest.password_hash || (guestKey.length === 10 && await bcrypt.compare(guestKey, guest.password_hash));
     const token = auth.signToken({ guestId: guest.id, type: 'guest', ...(onDefault ? { pwc: 1 } : {}) }, { expiresIn: onDefault ? '1h' : '24h' });
     res.json({
       token,

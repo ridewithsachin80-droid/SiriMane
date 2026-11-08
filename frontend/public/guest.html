@@ -464,11 +464,14 @@ window.onload = () => {
   const savedData = sessionRead('guest_data');
   const expires = sessionRead('guest_expires');
   if (expires && Date.now() > Number(expires)) { sessionClear(); registerPortalSW(); return; }
-  if (saved && savedData) {
+  // window.onload waits for EVERY resource; on slow 4G she may already have
+  // logged in by then. Restoring the saved session again would redraw the
+  // app and pull her back to Home mid-task (found by the Sprint 16 gate).
+  if (saved && savedData && !guestToken) {
     guestToken = saved;
     guestData = JSON.parse(savedData);
     showPortal();
-    loadGuestData().then(() => showTab('home'));
+    loadThenHome();
   }
   registerPortalSW();
 };
@@ -549,7 +552,7 @@ async function guestLogin() {
     }
     sessionSave(guestToken, guestData, document.getElementById('login-remember')?.checked);
     showPortal();
-    loadGuestData().then(() => showTab('home'));
+    loadThenHome();
     showInstallBar();
   } catch(e) {
     showAl(al, 'Connection error. Try again.', 'danger');
@@ -1077,7 +1080,7 @@ async function forcePasswordSave() {
     forcePw = null;
     document.getElementById('force-pw-section').classList.add('hidden');
     showPortal();
-    loadGuestData().then(() => showTab('home'));
+    loadThenHome();
     showInstallBar();
   } catch (e) { showAl(al, 'Connection error. Try again.', 'danger'); }
   finally { btn.disabled = false; }
@@ -1119,7 +1122,15 @@ const PORTAL_PAGES = { help: ['complaint', 'message', 'visitors'], me: ['idcard'
 const PORTAL_NAV = { home: 'home', menu: 'home', notices: 'home', pay: 'pay',
   help: 'help', complaint: 'help', message: 'help', visitors: 'help',
   me: 'me', idcard: 'me', details: 'me', settings: 'me', emergency: 'me' };
+// Opening the app lands on Home once her data is in — unless she has already
+// tapped another tab while it loaded (slow 4G): then she stays where she is.
+let portalNavSeq = 0;
+function loadThenHome() {
+  const seq = portalNavSeq;
+  return loadGuestData().then(() => { if (portalNavSeq === seq) showTab('home'); });
+}
 function showTab(tab) {
+  portalNavSeq++;
   ['home','pay','details','idcard','menu','notices','complaint','visitors','emergency','message','settings'].forEach(t => {
     document.getElementById('tab-'+t).classList.add('hidden');
   });

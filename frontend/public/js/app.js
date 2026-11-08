@@ -4353,13 +4353,17 @@ function moveInStep(delta) {
   if (delta > 0) {
     if (moveIn.step === 1 && (!d.name || !d.phone || d.phone.replace(/\D/g, '').length !== 10)) return toast('Her name and a 10-digit phone number are needed');
     if (moveIn.step === 1 && !moveIn.phoneOk) {
-      // S16-1: one resident per number — say so now, not after the money steps
+      // S16-1: one resident per number — say so now, not after the money steps.
+      // One check at a time: a double tap must not jump two steps (review).
+      if (moveIn.checkingPhone) return;
+      moveIn.checkingPhone = true;
       const key = d.phone.replace(/\D/g, '').slice(-10);
       apiFetch(`/guests/phone-check?phone=${encodeURIComponent(key)}`).then(r => {
         if (!moveIn) return;
+        moveIn.checkingPhone = false;
         if (r && r.taken) return toast(r.message);
-        moveIn.phoneOk = key; moveInStep(delta);
-      }).catch(e => toast(e.message));
+        if (moveIn.step === 1) { moveIn.phoneOk = key; moveInStep(delta); }
+      }).catch(e => { if (moveIn) moveIn.checkingPhone = false; toast(e.message); });
       return;
     }
     if (moveIn.step === 3 && !d.room_id) return toast('Choose a room');

@@ -35,6 +35,8 @@ async function main() {
 
   const change = [], skipped = [];
   for (const g of rows) {
+    // Two numbers in one field ("93333/93334"), notes or letters: never guess (review)
+    if (/[^\d\s+().-]/.test(g.phone)) { skipped.push({ ...g, why: 'has other characters (two numbers? a note?) — check it by hand' }); continue; }
     const next = tenDigits(g.phone);
     // A resident's number is her login, so it should be an Indian mobile (starts 6–9).
     // Anything else — foreign, a landline without its 0, a typo — is for the warden to check.
