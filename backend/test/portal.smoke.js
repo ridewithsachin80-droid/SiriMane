@@ -73,6 +73,9 @@ async function runAtWidth(browser, BASE, width, fixtures) {
     ok(await page.evaluate(() => document.getElementById('portal-section').classList.contains('hidden')), `${tag} S16-2 the default password shows ONLY the set-your-own screen`);
     const s16Tok = await page.evaluate(() => guestToken);
     eq((await fetch(BASE + '/api/guest-portal', { headers: { Authorization: 'Bearer ' + s16Tok } })).status, 403, `${tag} S16-2 SECURITY: that login cannot read her data through the API either`);
+    // S16.3-5: label ABOVE a full-width box at phone widths
+    const s163L = await page.evaluate(() => { const l = document.querySelector('label[for=fpw-new]').getBoundingClientRect(), i = document.getElementById('fpw-new').getBoundingClientRect(), c = document.querySelector('#force-pw-section .card-b').getBoundingClientRect(); return { above: l.bottom <= i.top + 1, ratio: i.width / c.width }; });
+    ok(s163L.above && s163L.ratio > 0.8, `${tag} S16.3-5 the label sits above a full-width box (${Math.round(s163L.ratio * 100)}% wide)`);
     await page.type('#fpw-new', PHONE); await page.type('#fpw-confirm', PHONE); await page.click('#fpw-btn');
     await page.waitForFunction(() => !document.getElementById('fpw-alert').classList.contains('hidden'), { timeout: 5000 });
     ok(/not your phone number/.test(await page.$eval('#fpw-alert', e => e.textContent)), `${tag} S16-2 her phone number is refused as the new password`);
@@ -339,6 +342,20 @@ async function runAtWidth(browser, BASE, width, fixtures) {
     ok(!JSON.stringify(insight).includes('Portal Resident'), `${tag} PRIVACY: food insight names no resident`);
   }
 
+  // ── Sprint 16.3 (S16.3-7): she sends a message and sees the reply ─────
+  await page.evaluate(() => showTab('message'));
+  await page.waitForSelector('#msg-body', { timeout: 8000 });
+  const s163Msg = `Fan noisy ${width}`;
+  await page.$eval('#msg-body', (e, v) => { e.value = v; }, s163Msg);
+  await page.evaluate(() => sendMessage());
+  await page.waitForFunction(m => (document.getElementById('my-msgs')?.textContent || '').includes(m), { timeout: 8000 }, s163Msg);
+  ok(/No reply yet/.test(await page.$eval('#my-msgs', e => e.textContent)), `${tag} S16.3-7 her message is listed, waiting for a reply`);
+  const s163Row = (await pool.query('SELECT id FROM inbox_messages WHERE message=$1 AND guest_id IS NOT NULL', [s163Msg])).rows[0];
+  ok(!!s163Row, `${tag} S16.3-7 the message is linked to her account`);
+  await fetch(`${BASE}/api/inbox/${s163Row.id}/reply`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + fixtures.adminTok }, body: JSON.stringify({ reply: `Electrician tomorrow <b>${width}</b>` }) });
+  await page.evaluate(() => loadMyMessages());
+  await page.waitForFunction(w => (document.getElementById('my-msgs')?.textContent || '').includes('Electrician tomorrow <b>' + w + '</b>'), { timeout: 8000 }, width);
+  ok(await page.$eval('#my-msgs', e => !e.querySelector('b') && /Reply from Siri Mane/.test(e.textContent)), `${tag} S16.3-7 she sees the reply, as text`);
   await page.evaluate(() => showTab('visitors'));
   await page.waitForSelector('#vis-name', { timeout: 8000 });
   // Fresh each run so "the newest visitor" is unambiguous.

@@ -167,3 +167,4 @@ Released before this sprint: 16.2 + 16.2.1 (PR #14, main = 76beb18). Production 
 | S16.3-4 | When a per-account login pause trips, a bell notification appears (resident → warden, staff/admin → admin) once per account per window, showing only the last 4 digits of a resident's number | SEC/UX |
 | S16.3-5 | Resident "Set your own password" screen: labels above full-width boxes at 360/390 px | UX |
 | S16.3-6 | 12 gates green twice; independent review before merge | QA |
+| S16.3-7 | **Found while answering the owner (12:33): replies to residents' messages were never shown to them.** A message sent from the resident app is linked to her account (`inbox_messages.guest_id`, additive migration `migrate-guest-messages.js`); her name/phone/room come from her record, not from the form; Help shows "My messages" with each reply. Before the migration runs, sending still works and the list says replies will appear soon. The public form (no login) is unchanged | SEC/DATA |

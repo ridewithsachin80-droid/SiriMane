@@ -2852,13 +2852,69 @@ async function renderAdminStaffTab() {
                 <td><strong>${esc(u.username)}</strong></td>
                 <td><span class="badge ${u.role==='admin'?'badge-purple':'badge-blue'}">${u.role}</span></td>
                 <td>${fmtDate(u.created_at)}</td>
-                <td>${u.username!==JSON.parse(localStorage.getItem('sm_user')||'{}').username?`<button class="btn btn-danger btn-sm btn-icon" onclick="delStaffUser(${u.id},${jsAttr((u.username))})">✕</button>`:'<span class="text-muted">You</span>'}</td>
+                <td><button class="btn btn-outline btn-sm" onclick="userPasswordModal(${u.id},${jsAttr(u.username)})">Password</button> <button class="btn btn-outline btn-sm" onclick="userRenameModal(${u.id},${jsAttr(u.username)})">Rename</button> ${u.username!==JSON.parse(localStorage.getItem('sm_user')||'{}').username?`<button class="btn btn-danger btn-sm btn-icon" onclick="delStaffUser(${u.id},${jsAttr((u.username))})">✕</button>`:'<span class="text-muted">You</span>'}</td>
               </tr>`).join('')}
             </tbody>
           </table>
         </div>
       </div>`;
   } catch(e) { (adminHost(__seq) || {}).innerHTML = `<div class="alert alert-danger">${esc(e.message)}</div>`; }
+}
+
+// ── Sprint 16.3: passwords and usernames ────────────────────────────────
+function pwModal(title, body, saveLabel, onSave) {
+  openModal(`
+    <div class="modal">
+      <div class="modal-header"><h3>${esc(title)}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+      <div class="modal-body"><div id="pw-alert" class="alert alert-danger hidden"></div>${body}</div>
+      <div class="modal-footer"><button class="btn btn-outline" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="pw-save">${esc(saveLabel)}</button></div>
+    </div>`);
+  document.getElementById('pw-save').onclick = async () => {
+    const al = document.getElementById('pw-alert'), btn = document.getElementById('pw-save');
+    btn.disabled = true;
+    try { const msg = await onSave(); closeModal(); toast(msg, 'ok'); }
+    catch (e) { showAlert(al, e.message); }
+    finally { btn.disabled = false; }
+  };
+}
+function myPasswordModal() {
+  pwModal('My password', `
+    <div class="form-group"><label for="pw-cur">Current password</label><input id="pw-cur" type="password" autocomplete="current-password"/></div>
+    <div class="form-group"><label for="pw-new">New password (at least 8 characters)</label><input id="pw-new" type="password" autocomplete="new-password"/></div>
+    <div class="form-group"><label for="pw-new2">Type it again</label><input id="pw-new2" type="password" autocomplete="new-password"/></div>`,
+    'Change password', async () => {
+      const c = document.getElementById('pw-cur').value, n = document.getElementById('pw-new').value;
+      if (n !== document.getElementById('pw-new2').value) throw new Error('The two new passwords do not match');
+      await API.changePassword(c, n);
+      return 'Password changed — use it next time you log in';
+    });
+}
+function userPasswordModal(id, username) {
+  pwModal(`New password for ${username}`, `
+    <p class="text-muted" style="margin-top:0">Tell ${esc(username)} the new password in person. Their open sessions keep working.</p>
+    <div class="form-group"><label for="pw-new">New password (at least 8 characters)</label><input id="pw-new" type="password" autocomplete="new-password"/></div>
+    <div class="form-group"><label for="pw-new2">Type it again</label><input id="pw-new2" type="password" autocomplete="new-password"/></div>`,
+    'Set password', async () => {
+      const n = document.getElementById('pw-new').value;
+      if (n !== document.getElementById('pw-new2').value) throw new Error('The two passwords do not match');
+      return (await API.setUserPassword(id, n)).message;
+    });
+}
+function userRenameModal(id, username) {
+  pwModal(`Rename ${username}`, `
+    <p class="text-muted" style="margin-top:0">Renaming "admin" to something less guessable makes password guessing harder. The password stays the same.</p>
+    <div class="form-group"><label for="pw-name">New username</label><input id="pw-name" value="${esc(username)}" autocapitalize="off" autocomplete="off"/></div>`,
+    'Rename', async () => {
+      const r = await API.renameUser(id, document.getElementById('pw-name').value.trim());
+      const me = JSON.parse(localStorage.getItem('sm_user') || '{}');
+      if (me.id === id || me.username === username) { me.username = r.username; localStorage.setItem('sm_user', JSON.stringify(me)); }
+      if (adminActiveTab === 'staff') renderAdminStaffTab();
+      return `Renamed to ${r.username} — use it next time you log in`;
+    });
+}
+async function resetGuestLogin(id, name) {
+  if (!confirm(`Reset ${name}'s app login? She will log in with her phone number and must set a new password.`)) return;
+  try { toast((await API.resetGuestLogin(id)).message, 'ok'); } catch (e) { toast(e.message); }
 }
 
 function staffModal() {
@@ -2868,7 +2924,7 @@ function staffModal() {
       <div class="modal-body">
         <div id="st-alert" class="alert alert-danger hidden"></div>
         <div class="form-group"><label>Username *</label><input id="st-username" placeholder="e.g. warden1"/></div>
-        <div class="form-group"><label>Password *</label><input id="st-password" type="password" placeholder="At least 6 characters"/></div>
+        <div class="form-group"><label>Password *</label><input id="st-password" type="password" placeholder="At least 8 characters"/></div>
         <div class="form-group"><label>Role</label>
           <select id="st-role"><option value="staff">Staff (can't delete records or manage users)</option><option value="admin">Admin (full access)</option></select>
         </div>
@@ -4242,6 +4298,7 @@ function renderResident360() {
         <button class="btn btn-primary btn-sm" onclick="closeModal();collectFrom(${g.id})">${icon('rupee')} Collect</button>
         ${g.phone ? `<a class="btn btn-outline btn-sm" target="_blank" rel="noopener" href="${buildWhatsappUrl(g.phone, 'Hello ' + g.name + ',') || '#'}">${icon('whatsapp')} WhatsApp</a>` : ''}
         <button class="btn btn-outline btn-sm" onclick="guestModal(null, ${g.id})">Edit</button>
+        ${g.is_active ? `<button class="btn btn-outline btn-sm" id="r360-reset-login" onclick="resetGuestLogin(${g.id}, ${jsAttr(g.name)})">Reset app login</button>` : ''}
         ${g.is_active && isAdmin() ? `<button class="btn btn-outline btn-sm" onclick="checkoutWizard(${g.id})">Checkout</button>` : ''}
       </div>`,
     money: () => {

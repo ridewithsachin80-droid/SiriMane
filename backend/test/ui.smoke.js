@@ -995,6 +995,47 @@ async function runAtWidth(browser, BASE, width) {
     await page.evaluate(() => closeModal());
     await page.evaluate(id => apiFetch(`/guests/${id}`, { method: 'DELETE' }), s152Short.id);
   }
+  // ── Sprint 16.3: My password, staff Password/Rename, Reset app login ─────
+  {
+    ok(await page.$('#my-pw-btn'), `${tag} S16.3-1 a "My password" button is in the sidebar`);
+    await page.evaluate(() => myPasswordModal());
+    await page.waitForSelector('#pw-cur', { timeout: 5000 });
+    await page.type('#pw-cur', 'whatever'); await page.type('#pw-new', 'Abcdefgh1'); await page.type('#pw-new2', 'Different1');
+    await page.click('#pw-save');
+    await page.waitForFunction(() => !document.getElementById('pw-alert').classList.contains('hidden'), { timeout: 5000 });
+    ok(/do not match/.test(await page.$eval('#pw-alert', e => e.textContent)), `${tag} S16.3-1 mismatched new passwords are caught before sending`);
+    await page.evaluate(() => closeModal());
+    // a throwaway staff account to rename and re-password through the screens
+    const s163u = await page.evaluate(w => apiFetch('/users', { method: 'POST', body: { username: 'ui163_' + w, password: 'Temp-Pass-1', role: 'staff' } }), width);
+    await page.evaluate(() => { navigate('admin'); });
+    await page.waitForFunction(() => typeof switchAdminTab === 'function' && document.querySelector('#admin-tab-content'), { timeout: 8000 });
+    await page.evaluate(() => switchAdminTab('staff'));
+    await page.waitForFunction(n => [...document.querySelectorAll('#staff-tb tr')].some(r => r.textContent.includes(n)), { timeout: 8000 }, 'ui163_' + width);
+    const s163Btns = await page.evaluate(n => { const r = [...document.querySelectorAll('#staff-tb tr')].find(x => x.textContent.includes(n)); return [...r.querySelectorAll('button')].map(b => b.textContent.trim()); }, 'ui163_' + width);
+    ok(s163Btns.includes('Password') && s163Btns.includes('Rename'), `${tag} S16.3-2 each account has Password and Rename (${s163Btns.join(', ')})`);
+    await page.evaluate((id, n) => userRenameModal(id, n), s163u.id, s163u.username);
+    await page.waitForSelector('#pw-name', { timeout: 5000 });
+    await page.$eval('#pw-name', (e, w) => { e.value = 'ui163r_' + w; }, width);
+    await page.click('#pw-save');
+    await page.waitForFunction(n => [...document.querySelectorAll('#staff-tb tr')].some(r => r.textContent.includes(n)), { timeout: 8000 }, 'ui163r_' + width);
+    ok(true, `${tag} S16.3-2 rename through the screen shows the new name`);
+    await page.evaluate((id, n) => userPasswordModal(id, n), s163u.id, 'ui163r_' + width);
+    await page.waitForSelector('#pw-new', { timeout: 5000 });
+    await page.type('#pw-new', 'Fresh-Pass-9'); await page.type('#pw-new2', 'Fresh-Pass-9');
+    await page.click('#pw-save');
+    await page.waitForFunction(() => !document.getElementById('pw-save'), { timeout: 8000 });
+    const s163Login = await page.evaluate(w => fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': '192.0.2.200' }, body: JSON.stringify({ username: 'ui163r_' + w, password: 'Fresh-Pass-9' }) }).then(r => r.status), width);
+    eq(s163Login, 200, `${tag} S16.3-2 the password set through the screen works`);
+    // It now has history (the rename and password change are in the audit log), so removal is refused politely
+    const s163Del = await page.evaluate(id => apiFetch(`/users/${id}`, { method: 'DELETE' }).then(() => 'removed', e => e.message), s163u.id);
+    ok(/cannot be removed/.test(s163Del), `${tag} S16.3 removing an account with history explains why and what to do`);
+    // Resident 360 has "Reset app login"
+    const s163g = (await page.evaluate(() => API.getGuests())).find(g => g.is_active);
+    await page.evaluate(id => residentProfile(id), s163g.id);
+    await page.waitForSelector('#r360-reset-login', { timeout: 8000 });
+    ok(true, `${tag} S16.3-3 Resident 360 offers "Reset app login"`);
+    await page.evaluate(() => closeModal());
+  }
   // Leaving-soon filter
   await page.evaluate(() => navigate('guests'));
   await page.waitForFunction(() => document.querySelector('#page-content table.sm-cards tbody tr'), { timeout: 10000 });
