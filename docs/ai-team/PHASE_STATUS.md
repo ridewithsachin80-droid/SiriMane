@@ -180,3 +180,5 @@ Released before this sprint: 16.2 + 16.2.1 (PR #14, main = 76beb18). Production 
 | S16.4-3 | A resident app-login reset also puts a notification on the ADMIN's bell (who reset whose) | SEC |
 | S16.4-4 | Rename writes "old → new" to the audit log; creating a user is refused if the name exists in another case | SEC |
 | S16.4-5 | 12 gates green twice; independent review before merge | QA |
+
+**16.4 status:** review round 3 APPROVE (c3553ce) after two BLOCKs — see TEST_REPORT. Also fixed in review: B16.4-1 symlink, D16.4-a refresh gate (46 save helpers), D16.4-b error card, username format on create. Release: no new migration in 16.4 (16.3 needs `node backend/scripts/migrate-all.js`).
