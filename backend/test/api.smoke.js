@@ -461,6 +461,10 @@ async function main() {
           const home = await h('/');
           ok(/script-src [^;]*googletagmanager/.test(home) && /frame-ancestors 'none'/.test(home), 'S17-4 the public home page allows Google Analytics');
           for (const p of ['/home.html', '/some-unknown-page']) ok(/googletagmanager/.test(await h(p)), `S17-4 ${p} (the home page) allows Google Analytics`);
+          // Hotfix 17.1: GA4 linked to Google Ads also sends to www.google.com/g/collect (blocked in production 9 Nov)
+          ok(/connect-src [^;]*https:\/\/\*\.google\.com/.test(home) && /img-src [^;]*https:\/\/\*\.google\.com/.test(home) && /connect-src [^;]*\*\.g\.doubleclick\.net/.test(home) && /frame-src https:\/\/www\.googletagmanager\.com(;|$)/.test(home), 'S17.1 the home page allows Google Analytics with Ads features (google.com/g/collect)');
+          const app = await h('/management');
+          ok(!/google\.com|doubleclick|googlesyndication/.test(app) && /frame-src 'none'/.test(app), 'S17.1 SECURITY: staff pages still allow none of the Google hosts');
           // Express matches routes case-insensitively: no spelling may give a staff/resident page the home policy (review)
           for (const p of ['/MANAGEMENT', '/Management', '/Siri-Mane-Management', '/GUEST', '/Guest', '/SIRI-MANE-GUEST-PORTAL', '/management.html', '/guest.html']) {
             const r = await fetch(BASE + p); const c = r.headers.get('content-security-policy') || ''; const body = await r.text();
