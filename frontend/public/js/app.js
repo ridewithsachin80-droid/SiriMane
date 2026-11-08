@@ -165,7 +165,10 @@ async function loadComplaintsCount() {
 // D16.4-a: a save that waits for the server, then refreshes the screen
 // (pgRooms() after "Save"), must not redraw it if she has moved on meanwhile.
 function refreshGate(seq) {
-  return (fn) => (seq === navSeq ? fn : () => undefined);
+  // Still on the same screen — including when she tapped that screen again
+  // during the save — refresh it; moved elsewhere, skip it.
+  const page = currentPage;
+  return (fn) => (seq === navSeq || currentPage === page ? fn : () => undefined);
 }
 function drawFor(seq) {
   return (html) => {
@@ -488,8 +491,9 @@ function filterGuests() {
 }
 
 async function approveRentVariance(id, refresh) {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   if (!confirm('Approve this rent rate even though it differs from the room\'s standard rate?')) return;
-  try { await API.approveRentVariance(id); (refresh || pgGuests)(); } catch(e) { alert(e.message); }
+  try { await API.approveRentVariance(id); __ifHere(refresh || pgGuests)(); } catch(e) { alert(e.message); }
 }
 
 function filterTable(q, containerId) {
@@ -4323,7 +4327,7 @@ async function pgHome(force) {
   briefCache = { text: h.brief.text, computed_at: h.brief.computed_at, cached: h.brief.cached };
   loadMyTasks();
 }
-async function loadHome(force) { if (force) { await apiFetch('/copilot/brief?force=1'); } navigate('dashboard'); }
+async function loadHome(force) { const s = navSeq; if (force) { await apiFetch('/copilot/brief?force=1'); } if (s === navSeq) navigate('dashboard'); }   // review 16.4: a slow brief must not pull her back to Home
 
 
 /* ═══════════════════════════════════════════════════════════════
@@ -5213,7 +5217,7 @@ async function pgOutboxBulk() {
 }
 async function draftOutbox() {
   const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */  try { const r = await apiFetch('/outbox/draft', { method: 'POST' }); toast(r.drafted ? `${r.drafted} drafted` : 'Nothing due right now', 'ok'); __ifHere(pgOutbox)(); } catch (e) { toast(e.message); } }
-async function markSent(id) { try { await apiFetch(`/outbox/${id}/sent`, { method: 'POST' }); setTimeout(pgOutbox, 600); } catch (e) { toast(e.message); } }
+async function markSent(id) { const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */  try { await apiFetch(`/outbox/${id}/sent`, { method: 'POST' }); setTimeout(() => __ifHere(pgOutbox)(), 600); } catch (e) { toast(e.message); } }
 async function skipMessage(id) {
   const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */  try { await apiFetch(`/outbox/${id}/skip`, { method: 'POST' }); __ifHere(pgOutbox)(); } catch (e) { toast(e.message); } }
 

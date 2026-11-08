@@ -1076,7 +1076,35 @@ async function runAtWidth(browser, BASE, width) {
     await page.evaluate(() => navigate('purchases'));
     await page.waitForFunction(() => /could not load/.test(document.getElementById('page-content').textContent), { timeout: 8000 });
     ok(await page.evaluate(() => /Network down/.test(document.getElementById('page-content').textContent)), `${tag} D16.4-b the error card still shows when she stays on the failing screen`);
+    // review 16.4: the error text is escaped — a message carrying markup is shown as text
+    await page.evaluate(() => {
+      pgPurchases = () => Promise.reject(new Error('<img id="esc164" src=x onerror="window.__pwn164=1">'));
+      navigate('purchases');
+    });
+    await page.waitForFunction(() => /could not load/.test(document.getElementById('page-content').textContent), { timeout: 8000 });
+    await new Promise(r => setTimeout(r, 300));
+    ok(await page.evaluate(() => !document.getElementById('esc164') && !window.__pwn164 && /<img id="esc164"/.test(document.getElementById('page-content').textContent)), `${tag} SECURITY: the error card shows the message as text, never as markup`);
     await page.evaluate(() => { pgPurchases = window.__origPgPurchases; apiFetch = window.__origApiFetch; });
+    // review 16.4: Outbox "Sent" refreshes after a 600 ms timer — moving away during it must not redraw Outbox
+    await page.evaluate(() => navigate('outbox')); await page.waitForFunction(() => currentPage === 'outbox', { timeout: 8000 });
+    await new Promise(r => setTimeout(r, 600));
+    await page.evaluate(() => {
+      apiFetch = (path, opts) => /\/outbox\/\d+\/sent$/.test(path) ? Promise.resolve({ ok: true }) : window.__origApiFetch(path, opts);
+      window.__pgOutboxCalls = 0; window.__origPgOutbox = pgOutbox; pgOutbox = (...a) => { window.__pgOutboxCalls++; return window.__origPgOutbox(...a); };
+      markSent(999999);
+    });
+    await new Promise(r => setTimeout(r, 100));
+    await page.evaluate(() => navigate('rooms'));
+    await page.waitForSelector('.room-tile', { timeout: 8000 });
+    await new Promise(r => setTimeout(r, 1500));
+    ok(await page.evaluate(() => window.__pgOutboxCalls === 0 && currentPage === 'rooms' && document.querySelectorAll('.room-tile').length > 0), `${tag} D16.4-a Outbox "Sent" timer does not redraw Outbox after she moved to Rooms`);
+    // …and if she stays, it does refresh
+    await page.evaluate(() => navigate('outbox')); await page.waitForFunction(() => currentPage === 'outbox', { timeout: 8000 });
+    await new Promise(r => setTimeout(r, 600));
+    await page.evaluate(() => { window.__pgOutboxCalls = 0; markSent(999999); });
+    await new Promise(r => setTimeout(r, 1500));
+    ok(await page.evaluate(() => window.__pgOutboxCalls === 1), `${tag} D16.4-a Outbox "Sent" still refreshes when she stays`);
+    await page.evaluate(() => { pgOutbox = window.__origPgOutbox; apiFetch = window.__origApiFetch; });
   }
   // Leaving-soon filter
   await page.evaluate(() => navigate('guests'));

@@ -1339,7 +1339,7 @@ router.put('/users/:id/username', auth, requireAdmin, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const name = String((req.body && req.body.username) || '').trim();
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'Bad user id' });
-  if (!USERNAME_RE.test(name)) return res.status(400).json({ error: 'Use 3–30 letters, digits, dots, dashes or underscores.' });
+  if (!USERNAME_RE.test(name)) return res.status(400).json({ error: 'Username: use 3–30 letters, digits, dots, dashes or underscores.' });
   try {
     const clash = await pool.query('SELECT id FROM users WHERE lower(username)=lower($1) AND id<>$2', [name, id]);
     if (clash.rows[0]) return res.status(400).json({ error: 'That username is already taken.' });
@@ -1374,19 +1374,20 @@ router.post('/guests/:id/reset-login', auth, async (req, res) => {
 });
 
 router.post('/users', auth, requireAdmin, async (req, res) => {
-  const { username, password, role } = req.body;
+  const { password, role } = req.body;
+  const username = req.body.username == null ? '' : String(req.body.username).trim();   // review 16.4: one normalised value everywhere
   if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
   { const why = staffPasswordProblem(password, username); if (why) return res.status(400).json({ error: why }); }   // S16.3: one rule for staff passwords
+  if (!USERNAME_RE.test(username)) return res.status(400).json({ error: 'Username: use 3–30 letters, digits, dots, dashes or underscores.' });   // same rule as rename
   // S16.4-4: "Warden" and "warden" are the same name
-  if (!USERNAME_RE.test(String(username).trim())) return res.status(400).json({ error: 'Use 3–30 letters, digits, dots, dashes or underscores.' });   // review: same rule as rename
-  try { const c = await pool.query('SELECT 1 FROM users WHERE lower(username)=lower($1) LIMIT 1', [String(username).trim()]); if (c.rows[0]) return res.status(400).json({ error: 'Username already exists' }); }
+  try { const c = await pool.query('SELECT 1 FROM users WHERE lower(username)=lower($1) LIMIT 1', [username]); if (c.rows[0]) return res.status(400).json({ error: 'Username already exists' }); }
   catch (err) { return res.status(500).json({ error: err.message }); }
   const finalRole = role === 'admin' ? 'admin' : 'staff';
   try {
     const hash = await bcrypt.hash(password, 12);
     const r = await pool.query(
       'INSERT INTO users(username,password_hash,role) VALUES($1,$2,$3) RETURNING id,username,role,created_at',
-      [username.trim(), hash, finalRole]
+      [username, hash, finalRole]
     );
     await logActivity(req, 'user_create', `${username} (${finalRole})`);
     res.status(201).json(r.rows[0]);
