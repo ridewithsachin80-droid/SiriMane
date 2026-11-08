@@ -382,6 +382,8 @@ async function main() {
         eq((await login('s163user', 'Third-Pass-3', 4)).status, 200, 'S16.3-2 the new one works');
         eq((await A('PUT', `/users/${t163.id}/username`, { username: 'ADMIN' })).status, 400, 'S16.3-2 a name taken in another case is refused');
         eq((await A('PUT', `/users/${t163.id}/username`, { username: 'a b<c>' })).status, 400, 'S16.3-2 odd characters are refused');
+        eq((await A('POST', '/users', { username: 'x<img src=x>', password: 'Long-Enough-1', role: 'staff' })).status, 400, 'S16.4 a new account with odd characters in its name is refused');
+        eq((await A('POST', '/users', { username: 'ab', password: 'Long-Enough-1', role: 'staff' })).status, 400, 'S16.4 a new account name under 3 characters is refused');
         eq((await api('PUT', `/users/${t163.id}/username`, { username: 's163self' }, tok)).status, 403, 'S16.3-2 SECURITY: staff cannot rename accounts');
         let r163 = await A('PUT', `/users/${t163.id}/username`, { username: 's163renamed' });
         eq(r163.status, 200, 'S16.3-2 admin renames an account');
