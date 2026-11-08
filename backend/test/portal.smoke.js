@@ -22,6 +22,16 @@ const eq = (a, b, m) => { assert.strictEqual(a, b, `${m} (got ${JSON.stringify(a
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const SHOTS = path.join(__dirname, 'screenshots'); fs.mkdirSync(SHOTS, { recursive: true });
 const PHONE = '9000000042';
+// Sprint 16 (S16-2): the first login with the default password must set a new
+// one. The first width does that through the real screen; later logins use it.
+const NEWPW = 'Portal@2026';
+let portalPw = PHONE;
+let resetToDefault = false;
+// The login box always EXISTS (it's only hidden), so "is she logged out?" must
+// ask whether the login screen is SHOWING — the old check was always true and
+// fired a stray background login on every run (found in Sprint 16).
+const loggedOut = (page) => page.evaluate(() => !document.getElementById('login-section').classList.contains('hidden'));
+const fillLogin = async (page, pw) => { await page.$eval('#login-mobile', e => { e.value = ''; }); await page.$eval('#login-password', e => { e.value = ''; }); await page.type('#login-mobile', PHONE); await page.type('#login-password', pw); };
 
 async function runAtWidth(browser, BASE, width, fixtures) {
   const ctx = await browser.createBrowserContext();
@@ -55,8 +65,21 @@ async function runAtWidth(browser, BASE, width, fixtures) {
   ok(manifest.start_url.startsWith('/guest'), `${tag} start_url opens the portal`);
   ok(await page.$eval('.p-bottomnav', e => getComputedStyle(e).display === 'none'), `${tag} S15 (review F-13) no bottom bar on the login screen`);
   await page.type('#login-mobile', PHONE);
-  await page.type('#login-password', PHONE);
+  await page.type('#login-password', portalPw);
   await page.click('#login-btn');
+  if (portalPw === PHONE) {
+    // S16-2: default password → the set-your-own screen, nothing else
+    await page.waitForFunction(() => !document.getElementById('force-pw-section').classList.contains('hidden'), { timeout: 8000 });
+    ok(await page.evaluate(() => document.getElementById('portal-section').classList.contains('hidden')), `${tag} S16-2 the default password shows ONLY the set-your-own screen`);
+    const s16Tok = await page.evaluate(() => guestToken);
+    eq((await fetch(BASE + '/api/guest-portal', { headers: { Authorization: 'Bearer ' + s16Tok } })).status, 403, `${tag} S16-2 SECURITY: that login cannot read her data through the API either`);
+    await page.type('#fpw-new', PHONE); await page.type('#fpw-confirm', PHONE); await page.click('#fpw-btn');
+    await page.waitForFunction(() => !document.getElementById('fpw-alert').classList.contains('hidden'), { timeout: 5000 });
+    ok(/not your phone number/.test(await page.$eval('#fpw-alert', e => e.textContent)), `${tag} S16-2 her phone number is refused as the new password`);
+    await page.evaluate(() => { document.getElementById('fpw-new').value = ''; document.getElementById('fpw-confirm').value = ''; });
+    await page.type('#fpw-new', NEWPW); await page.type('#fpw-confirm', NEWPW); await page.click('#fpw-btn');
+    portalPw = NEWPW;
+  }
   await page.waitForFunction(() => !document.getElementById('portal-section').classList.contains('hidden'), { timeout: 8000 });
   ok(true, `${tag} resident logs in`);
   const headerH = await page.$eval('.header', e => e.getBoundingClientRect().height);
@@ -220,12 +243,22 @@ async function runAtWidth(browser, BASE, width, fixtures) {
 
   // ── Sprint 8: digital resident ID ──────────────────────────────────────
   // The session test above deliberately expires her login, so sign in again.
-  if (await page.$('#login-mobile')) {
-    await page.type('#login-mobile', PHONE);
-    await page.type('#login-password', PHONE);
+  ok(await loggedOut(page), `${tag} the expired session shows the login screen (so the next checks really run)`);
+  if (await loggedOut(page)) {
+    await fillLogin(page, portalPw);
     await page.evaluate(() => document.getElementById('login-btn').click());
+    ok(await page.evaluate(() => new Promise(r => setTimeout(() => r(document.getElementById('force-pw-section').classList.contains('hidden')), 600))), `${tag} S16-2 after she set her own password she is not asked again`);
     await page.waitForFunction(() => !document.getElementById('portal-section').classList.contains('hidden'), { timeout: 8000 });
   }
+  // ── Sprint 16 (S16-5): payment lines read the same way ─────────────────
+  await page.evaluate(() => showTab('details'));
+  await page.waitForSelector('#tab-details .pay-item', { timeout: 8000 });
+  const s16Pays = await page.$$eval('#tab-details .pay-item', els => els.map(e => ({ t: e.innerText, m: !!e.querySelector('.pay-month') })));
+  ok(s16Pays.length >= 2 && s16Pays.every(p => p.m), `${tag} S16-5 every payment shows its month (${s16Pays.length})`);
+  ok(s16Pays.every(p => !/· cash\b/.test(p.t)), `${tag} S16-5 mode is capitalised ("Cash", not "cash")`);
+  await page.evaluate(() => showTab('pay'));
+  const s16Card = await page.evaluate(() => (document.querySelector('#tab-pay') || document.body).innerText);
+  ok(/6,000\s*Rent/i.test(s16Card) && !/1,000\s*Deposit/i.test(s16Card), `${tag} S16-5 the Pay card shows the last RENT payment, not the newer deposit`);
   // ── Sprint 15: four bottom tabs, no top strip, nothing lost ────────────
   eq((await page.$$('.tab')).length, 0, `${tag} S15-1 the 11-tab top strip is gone`);
   const navs = await page.$$eval('.p-bottomnav button', els => els.map(e => e.dataset.nav));
@@ -272,8 +305,8 @@ async function runAtWidth(browser, BASE, width, fixtures) {
   await page.screenshot({ path: path.join(SHOTS, `portal-id-${width}.png`) });
 
   // ── Sprint 11: portal home, meals, visitors, emergency, satisfaction ───
-  if (await page.$('#login-mobile')) {
-    await page.type('#login-mobile', PHONE); await page.type('#login-password', PHONE); await page.evaluate(() => document.getElementById('login-btn').click());
+  if (await loggedOut(page)) {
+    await fillLogin(page, portalPw); await page.evaluate(() => document.getElementById('login-btn').click());
     await page.waitForFunction(() => !document.getElementById('portal-section').classList.contains('hidden'), { timeout: 8000 });
   }
   await page.evaluate(() => showTab('home'));
@@ -365,6 +398,8 @@ async function runAtWidth(browser, BASE, width, fixtures) {
     emergency_contact: '9000000099', emergency_contact_name: `Amma"'><img src=x data-xss=ecn onerror="window.__xss=1">` });   // T-2: staff-typed, shown on her ID card
   const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
   await post('/collections', { guest_id: guest.id, guest_name: guest.name, amount: 6000, collection_date: today, collection_month: 'August 2026', collection_type: 'rent', payment_mode: 'cash' });
+  // S16-5: a deposit stored the way the old automatic entry did — lower-case mode, no month, newest
+  await post('/collections', { guest_id: guest.id, guest_name: guest.name, amount: 1000, collection_date: today, collection_type: 'deposit', payment_mode: 'cash' });
   await post('/announcements', { title: 'Water tank cleaning', message: 'Supply off 10am-12pm on Sunday.', priority: 'important' });
   for (const d of ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'])
     for (const m of ['Breakfast','Lunch','Dinner'])
@@ -372,9 +407,16 @@ async function runAtWidth(browser, BASE, width, fixtures) {
   await put('/settings', { pg_phone: '9880217627', pg_name: 'Siri Mane PG', upi_vpa: 'sirimane@upi', upi_name: 'Siri Mane PG' }).catch(() => {});
 
   // The portal's own view of the balance is the source of truth for the test.
-  const gLogin = await (await fetch(BASE + '/api/guest-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mobile: PHONE, password: PHONE }) })).json();
+  let gLogin = await (await fetch(BASE + '/api/guest-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mobile: PHONE, password: portalPw }) })).json();
+  if (gLogin.must_change_password) {
+    // S16-2: read the fixtures with a real session, then put her back on the
+    // default so the screen test below meets the set-your-own-password flow.
+    gLogin = await (await fetch(BASE + '/api/guest-change-password', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + gLogin.token }, body: JSON.stringify({ currentPassword: PHONE, newPassword: 'Setup@2026' }) })).json();
+    resetToDefault = true;
+  }
   const portal = await (await fetch(BASE + '/api/guest-portal', { headers: { Authorization: 'Bearer ' + gLogin.token } })).json();
   const fixtures = { balance: parseFloat(portal.current_balance || 0), adminTok: login.token, guestId: guest.id, roomNumber: 'P1' };
+  if (resetToDefault) await require('../db').query('UPDATE guests SET password_hash = NULL WHERE id = $1', [guest.id]);
 
   const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox', '--disable-gpu'] });
   try {
