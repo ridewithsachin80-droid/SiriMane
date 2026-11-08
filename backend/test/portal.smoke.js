@@ -39,6 +39,10 @@ async function runAtWidth(browser, BASE, width, fixtures) {
   await page.setViewport({ width, height: 780, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
   const jsErrors = [];
   page.on('pageerror', e => jsErrors.push(e.message));
+  // S17-4: every content-security-policy violation on any screen is recorded
+  const cspViolations = [];
+  await page.exposeFunction('__cspReport', v => { cspViolations.push(v); });
+  await page.evaluateOnNewDocument(() => { document.addEventListener('securitypolicyviolation', e => { try { window.__cspReport(`${e.violatedDirective} ${e.blockedURI}`); } catch (_) {} }); });
   const tag = `@${width}`;
   const fits = async (label) => {
     const w = await page.evaluate(() => document.documentElement.scrollWidth);
@@ -399,6 +403,7 @@ async function runAtWidth(browser, BASE, width, fixtures) {
   }
 
   eq(jsErrors.length, 0, `${tag} no uncaught JS errors (${jsErrors.join('; ')})`);
+  eq(cspViolations.length, 0, `${tag} S17-4 no content-security-policy violation on any screen (${cspViolations.slice(0, 5).join('; ')})`);
   await page.close(); await ctx.close();
 }
 

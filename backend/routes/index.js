@@ -146,6 +146,8 @@ router.post('/auth/login', async (req, res) => {
     const user = r.rows[0];
     if (!user || !(await bcrypt.compare(password, user.password_hash)))
       return res.status(401).json({ error: 'Invalid credentials' });
+    // S17-1: only someone who knows the password learns the account is off
+    if (user.disabled_at) return res.status(403).json({ error: 'This account is turned off — ask the owner.' });
     const token = auth.signToken({ userId: user.id }, { expiresIn: '8h' });
     await pool.query(`INSERT INTO activity_log(user_id,action,ip_address) VALUES($1,'login',$2)`, [user.id, req.ip]);
     res.json({ token, user: { id: user.id, username: user.username, role: user.role } });
@@ -1304,7 +1306,7 @@ router.put('/settings', auth, requireAdmin, async (req, res) => {
 // ── STAFF / USERS (admin only) ────────────────────
 router.get('/users', auth, requireAdmin, async (req, res) => {
   try {
-    const r = await pool.query('SELECT id, username, role, created_at FROM users ORDER BY created_at ASC');
+    const r = await pool.query(`SELECT id, username, role, created_at, (to_jsonb(u)->>'disabled_at') AS disabled_at FROM users u ORDER BY created_at ASC`);   // S17-1
     res.json(r.rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1408,10 +1410,41 @@ router.delete('/users/:id', auth, requireAdmin, async (req, res) => {
     // Sprint 16.3: someone who has entered anything (audit log, payments,
     // expenses …) is part of the books' history and can't be deleted. Say so
     // plainly — and how to lock them out instead.
-    if (err.code === '23503') return res.status(409).json({ error: 'This account has entries in the books and the audit log, so it cannot be removed. To stop them logging in, set a new password for it (Password button).' });
+    if (err.code === '23503') return res.status(409).json({ error: 'This account has entries in the books and the audit log, so it cannot be removed. Use "Turn off" instead — they can no longer log in, and their history stays.' });
     res.status(500).json({ error: err.message });
   }
 });
+
+// POST /api/users/:id/disable | /enable — S17-1: turn an account off instead of
+// deleting it. Never your own account (so at least one admin always stays on).
+async function setDisabled(req, res, off) {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Bad user id' });
+  if (id === req.user.id) return res.status(400).json({ error: "You can't turn off your own account." });
+  const client = await pool.connect();
+  let r;
+  try {
+    // One turn-off/on at a time, and the admin doing it must still be on —
+    // two admins turning each other off at the same moment can't leave none.
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(17017)');
+    const me = await client.query('SELECT disabled_at FROM users WHERE id=$1', [req.user.id]);
+    if (!me.rows[0] || me.rows[0].disabled_at) { await client.query('ROLLBACK'); return res.status(401).json({ error: 'This account is turned off — ask the owner.' }); }
+    r = await client.query(`UPDATE users SET disabled_at = ${off ? 'COALESCE(disabled_at, NOW())' : 'NULL'} WHERE id=$1 RETURNING id, username, role, disabled_at`, [id]);
+    if (!r.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'User not found' }); }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (err.code === '42703') return res.status(503).json({ error: 'This needs a database update first: run node backend/scripts/migrate-all.js in the Railway console.' });
+    return res.status(500).json({ error: err.message });
+  } finally { client.release(); }
+  try {
+    await logActivity(req, off ? 'user_disable' : 'user_enable', r.rows[0].username);
+    res.json({ ...r.rows[0], message: off ? `${r.rows[0].username} is turned off — they can no longer log in.` : `${r.rows[0].username} can log in again.` });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+}
+router.post('/users/:id/disable', auth, requireAdmin, (req, res) => setDisabled(req, res, true));
+router.post('/users/:id/enable', auth, requireAdmin, (req, res) => setDisabled(req, res, false));
 
 // ── AUDIT LOG (admin only) ────────────────────────
 router.get('/activity-log', auth, requireAdmin, async (req, res) => {

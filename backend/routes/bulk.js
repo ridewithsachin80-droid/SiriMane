@@ -64,7 +64,7 @@ router.post('/bulk/confirm', auth, json, wrap(async (req, res) => {
 // Staff need a name list to assign requests to; /users is admin-only and
 // carries more than a name. This is id + username, nothing else.
 router.get('/staff-list', auth, wrap(async (req, res) => {
-  const r = await pool.query(`SELECT id, username, role FROM users ORDER BY role, username`);
+  const r = await pool.query(`SELECT id, username, role FROM users u WHERE (to_jsonb(u)->>'disabled_at') IS NULL ORDER BY role, username`);   // S17-1: turned-off accounts aren't offered
   res.json(r.rows);
 }));
 
