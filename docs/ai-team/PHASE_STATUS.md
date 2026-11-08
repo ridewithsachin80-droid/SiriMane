@@ -116,3 +116,17 @@ Data note: existing residents whose phone was saved WITH spaces cannot log in to
 | S15.5-3 | Move-in wizard treats a missing answer from apiFetch (401 → redirect) as NOT saved; 429 carries status 429 and is reported as "refused, try in a minute" | DATA |
 | S15.5-4 | 12 gates green twice; independent review before merge | QA |
 Not in scope (owner decision): P-2 shared phones between two active residents.
+
+## Sprint 16 — owner decisions of 8 Nov 07:31 (criteria recorded BEFORE build)
+
+Context: owner released Sprints 15–15.5 to production (PR #8, `main` = 5f96b73). No migration was required.
+Owner decisions: (1) one resident per phone number · (3) force residents to change the default password · (4) separate login limiters · (5) upgrade bcrypt. Items (2) phone tidy and (6) "— select —" cleanup: explained; dry-run scripts await owner approval.
+
+| ID | Acceptance criterion | Review |
+|---|---|---|
+| S16-1 | Saving a resident (add, move-in wizard, edit) whose phone — compared as its last 10 digits — belongs to ANOTHER active resident is refused with a clear message naming that resident's room; a checked-out resident's number may be reused. The wizard checks at step 1, before any money step | DATA REQUIRED |
+| S16-2 | A resident who logs in with the default password (her phone number) must set a new one before seeing anything else; the new password cannot be her phone number; afterwards she is not asked again | SEC REQUIRED |
+| S16-3 | Staff and resident logins have separate failed-attempt limits: 10 wrong resident logins from one address do not block the warden's login, and vice versa | SEC |
+| S16-4 | bcrypt 5 → 6; every existing password hash still verifies (admin, staff, residents); `npm audit --omit=dev` shows no bcrypt/tar finding (D-15-3) | SEC, OPS (dependency upgrade approved by owner) |
+| S16-5 | Resident app: payment mode capitalised, month shown for every payment, Pay card shows the last RENT payment | UX |
+| S16-6 | 12 gates green twice on fresh DBs; independent review before merge to ai/test | QA |
