@@ -133,6 +133,17 @@ async function main() {
 
     // ── Complaints (resident portal) ──────────────────────────────────────
     r = await api('POST', '/guest-login', { mobile: guest.phone, password: guest.phone }); eq(r.status, 200, 'guest login (default password = mobile)'); guestTok = r.data.token;
+    // S16-2: that login must set a new password before anything else
+    eq(r.data.must_change_password, true, 'S16-2 default-password login is told to set a new password');
+    eq((await api('GET', '/guest-portal', null, guestTok)).status, 403, 'S16-2 SECURITY: the default-password token cannot read the portal');
+    eq((await api('POST', '/guest-complaint', { category: 'Other', description: 'x' }, guestTok)).status, 403, 'S16-2 SECURITY: …nor write anything');
+    eq((await api('POST', '/guest-change-password', { currentPassword: guest.phone, newPassword: '+91 ' + guest.phone }, guestTok)).status, 400, 'S16-2 her phone number (in any form) is refused as the new password');
+    r = await api('POST', '/guest-change-password', { currentPassword: '+91 ' + guest.phone, newPassword: 'Resident@2026' }, guestTok);
+    eq(r.status, 200, 'S16-2 she sets her own password (current typed as "+91 …" is accepted)'); guestTok = r.data.token;
+    eq((await api('GET', '/guest-portal', null, guestTok)).status, 200, 'S16-2 the new token works');
+    r = await api('POST', '/guest-login', { mobile: guest.phone, password: 'Resident@2026' });
+    eq(r.data.must_change_password, false, 'S16-2 logging in with her own password is not asked again');
+    eq((await api('POST', '/guest-login', { mobile: guest.phone, password: guest.phone })).status, 401, 'S16-2 SECURITY: the default no longer works');
     r = await api('POST', '/guest-complaint', { category: 'Wifi/Internet', description: 'Smoke: wifi down' }); eq(r.status, 401, 'guest-complaint needs guest token');
     r = await S('POST', '/guest-complaint', { category: 'Wifi/Internet', description: 'x' }); eq(r.status, 401, 'staff token is not a guest token');
     r = await G('POST', '/guest-complaint', { category: 'Wifi/Internet', description: '' }); eq(r.status, 400, 'blank guest complaint');
@@ -226,7 +237,10 @@ async function main() {
         // A-1: two sisters share a number — one saved "+91 …" (old data), one plain
         const sis = '8' + String(Date.now()).slice(-9);
         const sA = await A('POST', '/guests', { name: 'S155 Sister A', phone: sis, join_date: today, monthly_rent: 5000, deposit_amount: 0 });
-        const sB = await A('POST', '/guests', { name: 'S155 Sister B', phone: sis, join_date: today, monthly_rent: 5000, deposit_amount: 0 });
+        // S16-1 now refuses a second active resident on one number, so the pair is made the way OLD data has it
+        eq((await A('POST', '/guests', { name: 'S155 Sister B', phone: sis, join_date: today, monthly_rent: 5000, deposit_amount: 0 })).status, 409, 'S16-1 a second active resident on the same number is refused');
+        const sB = await A('POST', '/guests', { name: 'S155 Sister B', phone: '6' + sis.slice(1), join_date: today, monthly_rent: 5000, deposit_amount: 0 });
+        await pool.query('UPDATE guests SET phone=$1 WHERE id=$2', [sis, sB.data.id]);
         await pool.query('UPDATE guests SET phone=$1 WHERE id=$2', ['+91 ' + sis, sA.data.id]);
         // (i) both still on the default password: the exact saved text decides, as before 15.5
         let rr = await L('+91 ' + sis, '+91 ' + sis); eq(rr.status, 200, 'A-1 sister A (saved "+91 …") logs in typing "+91 …"'); eq(rr.data.guest && rr.data.guest.id, sA.data.id, 'A-1 …as sister A');
@@ -241,6 +255,52 @@ async function main() {
         rr = await L(sis, sis); eq(rr.status, 409, 'A-1 SECURITY: identical number and password → refused, not a random sister');
         ok(/warden/.test(rr.data.error || ''), 'A-1 the message tells her what to do');
         await A('DELETE', `/guests/${sA.data.id}`); await A('DELETE', `/guests/${sB.data.id}`);
+      }
+      // ── Sprint 16 ─────────────────────────────────────────────
+      {
+        // S16-1 one active resident per number
+        const n16 = '7' + String(Date.now()).slice(-9);
+        const room16 = (await A('GET', '/rooms')).data[0];
+        const a16 = await A('POST', '/guests', { name: 'S16 Owner', phone: n16, room_id: room16 && room16.id, join_date: today, monthly_rent: 5000, deposit_amount: 0 });
+        let r16 = await A('POST', '/guests', { name: 'S16 Copy', phone: n16.slice(0, 5) + ' ' + n16.slice(5), join_date: today, monthly_rent: 5000, deposit_amount: 0 });
+        eq(r16.status, 409, 'S16-1 the same number typed with a space is refused');
+        ok(/S16 Owner/.test(r16.data.error || ''), 'S16-1 the message names who has it');
+        r16 = await A('GET', `/guests/phone-check?phone=${encodeURIComponent('+91 ' + n16)}`);
+        ok(r16.data.taken === true && r16.data.by.id === a16.data.id, 'S16-1 phone-check finds the owner for "+91 …"');
+        eq((await A('GET', `/guests/phone-check?phone=${n16}&except=${a16.data.id}`)).data.taken, false, 'S16-1 phone-check ignores the resident being edited');
+        const b16 = await A('POST', '/guests', { name: 'S16 Other', phone: '6' + n16.slice(1), join_date: today, monthly_rent: 5000, deposit_amount: 0 });
+        eq((await A('PUT', `/guests/${b16.data.id}`, { ...b16.data, phone: n16 })).status, 409, 'S16-1 editing a number INTO a taken one is refused');
+        // An existing pair (old data) can still have its other details edited
+        await pool.query('UPDATE guests SET phone=$1 WHERE id=$2', [n16, b16.data.id]);
+        eq((await A('PUT', `/guests/${b16.data.id}`, { ...b16.data, phone: n16, monthly_rent: 5500 })).status, 200, 'S16-1 an existing shared pair can still be edited (number unchanged)');
+        // A checked-out resident's number can be reused
+        await pool.query('UPDATE guests SET is_active=false WHERE id IN ($1,$2)', [a16.data.id, b16.data.id]);
+        r16 = await A('POST', '/guests', { name: 'S16 New Owner', phone: n16, join_date: today, monthly_rent: 5000, deposit_amount: 0 });
+        eq(r16.status, 201, "S16-1 a checked-out resident's number can be given to a new resident");
+        const newOwnerId = r16.data.id;
+        eq((await A('PUT', `/guests/${a16.data.id}`, { ...a16.data, is_active: true })).status, 409, 'S16-1 re-activating someone onto a number now in use is refused');
+        for (const id of [a16.data.id, b16.data.id, newOwnerId]) await A('DELETE', `/guests/${id}`);
+
+        // S16-3 separate limiters: 10 wrong resident logins don't block staff from the same address
+        const XF = { 'Content-Type': 'application/json', 'X-Forwarded-For': '10.16.3.1' };
+        const tryLogin = async (path, body) => (await fetch(BASE + '/api' + path, { method: 'POST', headers: XF, body: JSON.stringify(body) })).status;
+        for (let i = 0; i < 10; i++) await tryLogin('/guest-login', { mobile: '9999999999', password: 'wrong' + i });
+        eq(await tryLogin('/guest-login', { mobile: '9999999999', password: 'wrong-again' }), 429, 'S16-3 the 11th wrong resident login is blocked');
+        eq(await tryLogin('/auth/login', { username: 'admin', password: process.env.ADMIN_PASSWORD || 'SiriMane@2024' }), 200, 'S16-3 SECURITY/OPS: the warden can still log in from the same address');
+
+        // S16-4 bcrypt 6 accepts passwords hashed by bcrypt 5 — through the real login routes.
+        // These two hashes were made by bcrypt 5.1.1 before the upgrade.
+        const BCRYPT5_STAFF = '$2b$06$8tWaK3Ny61dHhJxfVmV9peQm1mYVFa2foFUHMAj8y8lKFylYgTXqe';      // 'alpha-123'
+        const BCRYPT5_RESIDENT = '$2b$10$BlyBX.pewoDxSEJREM3JQuUKaduGnBnyDzdfTuXHr1l2aq4nx5nUy';     // 'päss wörd ₹'
+        eq(require('bcrypt/package.json').version.split('.')[0], '6', 'S16-4 bcrypt 6 is installed');
+        const u16 = (await A('POST', '/users', { username: 's16old', password: 'temporary-1', role: 'staff' })).data;
+        await pool.query('UPDATE users SET password_hash=$1 WHERE id=$2', [BCRYPT5_STAFF, u16.id]);
+        eq((await api('POST', '/auth/login', { username: 's16old', password: 'alpha-123' })).status, 200, 'S16-4 a staff password hashed by bcrypt 5 still logs in');
+        const g16 = (await A('POST', '/guests', { name: 'S16 Old Hash', phone: '8' + String(Date.now()).slice(-9), join_date: today, monthly_rent: 5000, deposit_amount: 0 })).data;
+        await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [BCRYPT5_RESIDENT, g16.id]);
+        r16 = await api('POST', '/guest-login', { mobile: g16.phone, password: 'päss wörd ₹' });
+        ok(r16.status === 200 && r16.data.must_change_password === false, 'S16-4 a resident password hashed by bcrypt 5 still logs in (non-ASCII too)');
+        await A('DELETE', `/users/${u16.id}`); await A('DELETE', `/guests/${g16.id}`);
       }
       for (const n of ['S151 Old Form', 'S151 Wizard', 'S151 Truthy']) { const g = (await A('GET', '/guests')).data.find(x => x.name === n); if (g) await A('DELETE', `/guests/${g.id}`); }
     }

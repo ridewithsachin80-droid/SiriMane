@@ -52,6 +52,7 @@ const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10
     await A_('POST', '/collections', { guest_id: g3.id, guest_name: g3.name, amount: owed(g3.id) - 1500, collection_date: today, collection_type: 'rent', payment_mode: 'cash' });
     await api('POST', '/collections', { guest_id: g2.id, guest_name: g2.name, amount: 3000, collection_date: today, collection_type: 'rent', payment_mode: 'cash' }, staffTok); // pending_approval
     r = await api('POST', '/guest-login', { mobile: g2.phone, password: g2.phone }); guestTok = r.data.token;
+    if (r.data.must_change_password) guestTok = (await api('POST', '/guest-change-password', { currentPassword: g2.phone, newPassword: 'Resident@2026' }, guestTok)).data.token;   // S16-2
     await api('POST', '/guest-upi-claim', { amount: 2000 }, guestTok); // pending_verification
     await api('POST', '/complaints', { category: 'Water', description: 'No water in bathroom' }, staffTok);
     await api('POST', '/complaints', { category: 'Food', description: 'Lunch was late' }, staffTok);

@@ -54,7 +54,9 @@ const SH = (t) => `<b data-xss=${t}>`;
   // 2 · Resident doors
   const gl = await j(await post('/guest-login', { mobile: phone, password: phone }, { 'Content-Type': 'application/json' }));
   ok(gl.token, 'resident can log in');
-  const GH = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + gl.token };
+  // S16-2: a default-password login must set its own password first
+  const gTok = gl.must_change_password ? (await j(await post('/guest-change-password', { currentPassword: phone, newPassword: 'Resident@2026' }, { 'Content-Type': 'application/json', Authorization: 'Bearer ' + gl.token }))).token : gl.token;
+  const GH = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + gTok };
   const c1 = await post('/guest-complaint', { category: `"'><b data-xss=cat>`, description: P('complaint-description') }, GH);
   ok(c1.status === 201, `resident complaint stored (${c1.status})`);
   const complaint = await j(c1);

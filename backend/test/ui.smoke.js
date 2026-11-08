@@ -36,8 +36,8 @@ ai.providers.groqText = async ({ user }) => {
 const app = require('../server');
 const pool = require('../db');
 let count = 0;
-const ok = (c, m) => { assert.ok(c, m); count++; };
-const eq = (a, b, m) => { assert.strictEqual(a, b, `${m} (got ${JSON.stringify(a)})`); count++; };
+const ok = (c, m) => { assert.ok(c, m); count++; if (process.env.GATE_LOG) require('fs').appendFileSync(process.env.GATE_LOG, String(m).replace(/[0-9]+/g, '#') + '\n'); };
+const eq = (a, b, m) => { assert.strictEqual(a, b, `${m} (got ${JSON.stringify(a)})`); count++; if (process.env.GATE_LOG) require('fs').appendFileSync(process.env.GATE_LOG, String(m).replace(/[0-9]+/g, '#') + '\n'); };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const SHOTS = path.join(__dirname, 'screenshots'); fs.mkdirSync(SHOTS, { recursive: true });
 
@@ -1132,12 +1132,18 @@ async function runAtWidth(browser, BASE, width) {
   await page.waitForFunction(w => document.body.innerText.includes(`Floor 9 only ${w}`), { timeout: 10000 }, width);
   ok(true, `${tag} a notice can be aimed at one floor`);
   const seenByResident = await page.evaluate(async (phone) => {
-    const l = await (await fetch('/api/guest-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mobile: phone, password: phone }) })).json();
+    // S16-2: her first login (first width) sets her own password; later widths use it
+    const login = pw => fetch('/api/guest-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mobile: phone, password: pw }) }).then(r => r.json());
+    let l = await login(phone);
+    if (!l.token) l = await login('Resident@' + phone.slice(-4));
     if (!l.token) return null;
+    if (l.must_change_password) l.token = (await (await fetch('/api/guest-change-password', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + l.token }, body: JSON.stringify({ currentPassword: phone, newPassword: 'Resident@' + phone.slice(-4) }) })).json()).token;
     const n = await (await fetch('/api/guest-notices', { headers: { Authorization: 'Bearer ' + l.token } })).json();
     return n.map(x => x.title);
   }, target.phone);
-  if (seenByResident) ok(!seenByResident.some(t => t.startsWith('Floor 9 only')), `${tag} PRIVACY: a resident on another floor never sees it`);
+  // Never skip silently: if she can't log in, the privacy check hasn't run — that's a failure (S16 review)
+  ok(Array.isArray(seenByResident), `${tag} the other-floor resident could log in for the privacy check`);
+  ok(!seenByResident.some(t => t.startsWith('Floor 9 only')), `${tag} PRIVACY: a resident on another floor never sees it`);
 
   // ── Sprint 12: bell, outbox, documents, maintenance, AI impact ─────────
   await page.evaluate(() => apiFetch('/notifications/sweep', { method: 'POST' }));

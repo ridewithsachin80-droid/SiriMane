@@ -213,6 +213,20 @@
   </div>
 
   <!-- LOGIN FORM -->
+  <!-- Sprint 16 (S16-2): first login with the default password → set your own -->
+  <div id="force-pw-section" class="hidden">
+    <div class="card">
+      <div class="card-h">🔐 Set your own password</div>
+      <div class="card-b">
+        <p class="text-muted" style="margin:0 0 12px">You logged in with your phone number. Anyone who knows your number could do the same, so please choose your own password now.</p>
+        <div id="fpw-alert" class="hidden"></div>
+        <div class="form-row"><label for="fpw-new">New password (at least 6 characters)</label><input type="password" id="fpw-new" autocomplete="new-password"></div>
+        <div class="form-row"><label for="fpw-confirm">Type it again</label><input type="password" id="fpw-confirm" autocomplete="new-password"></div>
+        <button class="btn btn-amber" id="fpw-btn" onclick="forcePasswordSave()">Save and continue</button>
+      </div>
+    </div>
+  </div>
+
   <div id="login-section">
     <div class="card">
       <div class="card-h">🔐 Guest Login</div>
@@ -523,8 +537,17 @@ async function guestLogin() {
 
     guestToken = data.token;
     guestData = data.guest;
-    sessionSave(guestToken, guestData, document.getElementById('login-remember')?.checked);
     al.classList.add('hidden');
+    if (data.must_change_password) {
+      // S16-2: this token only allows setting a password — not saved, so
+      // closing the app here means logging in again, never a half-open session.
+      forcePw = { current: password, remember: document.getElementById('login-remember')?.checked };
+      document.getElementById('login-section').classList.add('hidden');
+      document.getElementById('force-pw-section').classList.remove('hidden');
+      document.getElementById('fpw-new').focus();
+      return;
+    }
+    sessionSave(guestToken, guestData, document.getElementById('login-remember')?.checked);
     showPortal();
     loadGuestData().then(() => showTab('home'));
     showInstallBar();
@@ -759,7 +782,9 @@ function renderPayTab(g) {
   const due = balance < -0.5 ? Math.abs(balance) : 0;
   const credit = balance > 0.5 ? balance : 0;
   const pending = (g.payments || []).filter(p => p.status && p.status !== 'confirmed');
-  const lastConfirmed = (g.payments || []).filter(p => !p.status || p.status === 'confirmed')[0];
+  // S16-5: the Pay Rent card shows the last RENT payment, not a deposit
+  const confirmedPays = (g.payments || []).filter(p => !p.status || p.status === 'confirmed');
+  const lastConfirmed = confirmedPays.find(p => (p.collection_type || 'rent') === 'rent') || confirmedPays[0];
 
   const hero = due > 0
     ? `<div class="dues-hero">
@@ -874,8 +899,8 @@ function renderDetails(g) {
       <div class="pay-item">
         <div>
           <div style="font-weight:600;text-transform:capitalize">${escH(p.collection_type)}</div>
-          <div style="color:var(--p-text-muted);font-size:11px">${fmtDate(p.collection_date)} · ${escH(p.payment_mode)}</div>
-          ${p.collection_month ? `<div style="color:var(--p-text-light);font-size:11px">${escH(p.collection_month)}</div>` : ''}
+          <div style="color:var(--p-text-muted);font-size:11px">${fmtDate(p.collection_date)} · ${payModeH(p.payment_mode)}</div>
+          ${payMonthH(p) ? `<div class="pay-month" style="color:var(--p-text-light);font-size:11px">${payMonthH(p)}</div>` : ''}
         </div>
         <div style="text-align:right">
           <div class="text-green">${fmt(p.amount)}</div>
@@ -1036,6 +1061,28 @@ async function sendMessage() {
 }
 
 // ── CHANGE PASSWORD ───────────────────────────────
+let forcePw = null;
+async function forcePasswordSave() {
+  const al = document.getElementById('fpw-alert');
+  const n1 = document.getElementById('fpw-new').value, n2 = document.getElementById('fpw-confirm').value;
+  if (n1.length < 6) { showAl(al, 'At least 6 characters, please', 'danger'); return; }
+  if (n1 !== n2) { showAl(al, 'The two passwords do not match', 'danger'); return; }
+  const btn = document.getElementById('fpw-btn'); btn.disabled = true;
+  try {
+    const res = await fetch('/api/guest-change-password', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + guestToken }, body: JSON.stringify({ currentPassword: forcePw.current, newPassword: n1 }) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { showAl(al, data.error || 'Could not save. Try again.', 'danger'); return; }
+    guestToken = data.token;
+    sessionSave(guestToken, guestData, forcePw.remember);
+    forcePw = null;
+    document.getElementById('force-pw-section').classList.add('hidden');
+    showPortal();
+    loadGuestData().then(() => showTab('home'));
+    showInstallBar();
+  } catch (e) { showAl(al, 'Connection error. Try again.', 'danger'); }
+  finally { btn.disabled = false; }
+}
+
 async function changePassword() {
   const al = document.getElementById('pwd-alert');
   const current = document.getElementById('pwd-current').value;
@@ -1054,6 +1101,7 @@ async function changePassword() {
     });
     const data = await res.json();
     if (!res.ok) { showAl(al, data.error, 'danger'); return; }
+    if (data.token) { guestToken = data.token; try { sessionSave(guestToken, guestData, !!localStorage.getItem('guest_token')); } catch {} }
     document.getElementById('pwd-current').value = '';
     document.getElementById('pwd-new').value = '';
     document.getElementById('pwd-confirm').value = '';
@@ -1095,6 +1143,15 @@ function showAl(el, msg, type) {
   if (type === 'success') setTimeout(() => el.classList.add('hidden'), 3000);
 }
 function fmt(n) { return '₹' + parseFloat(n||0).toLocaleString('en-IN'); }
+// Sprint 16 (S16-5): mode and month read the same on every payment —
+// the automatic deposit stored "cash" and no month.
+function payModeH(m) { const x = String(m || ''); return escH(/^upi$/i.test(x) ? 'UPI' : x.charAt(0).toUpperCase() + x.slice(1)); }
+function payMonthH(p) {
+  const m = p.collection_month;
+  if (m && /^\d{4}-\d{2}$/.test(m)) { const [y, mo] = m.split('-').map(Number); return new Date(y, mo - 1, 1).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }); }
+  if (m) return escH(m);
+  return p.collection_date ? new Date(p.collection_date).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }) : '';
+}
 function escH(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); }
 function fmtDate(d) { if(!d) return '—'; return new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}); }
 </script>
