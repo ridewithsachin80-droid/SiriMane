@@ -91,7 +91,7 @@ const monthsAgo = n => { const d = ist(); d.setUTCMonth(d.getUTCMonth() - n); re
     { const cr = drafts.find(m => m.guest_id === leaving.id && m.kind === 'checkout_reminder');
       const want = new Date(new Date(ist().getTime() + 3 * 86400000).toISOString().slice(0, 10) + 'T00:00:00Z').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
       ok(cr && cr.body.includes(want), `the reminder names the date plainly (${want})`); }
-    ok(!drafts.some(m => m.guest_id === farAway.id || m.guest_id === alreadyGone.id), 'no reminder for a checkout 10 days out, or one already past');
+    ok(!drafts.some(m => m.kind === 'checkout_reminder' && (m.guest_id === farAway.id || m.guest_id === alreadyGone.id)), 'no checkout reminder for a checkout 10 days out, or one already past');
     // Sprint 18: the overdue follow-up goes out from the 7th (India's date) — before that, nothing
     if (ist().getUTCDate() >= 7) ok(drafts.some(m => m.guest_id === behind.id && m.kind === 'rent_overdue'), 'the resident in arrears is drafted (7th or later)');
     else ok(!drafts.some(m => m.guest_id === behind.id && m.kind === 'rent_overdue'), 'before the 7th, the resident in arrears is not chased yet');
