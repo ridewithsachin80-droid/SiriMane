@@ -297,7 +297,8 @@ async function main() {
           rb = await XL(nb, nb);
           ok(rb.status === 200 && rb.data.must_change_password === true, 'S16-2 F16-1 a stored password that is her own number still forces the change');
           // F16-1b: before 15.5 the first login hashed the number EXACTLY as typed
-          for (const fmt of [x => '+91 ' + x, x => x.slice(0, 5) + ' ' + x.slice(5), x => '91' + x, x => '0' + x]) {
+          for (const fmt of [x => '+91 ' + x, x => x.slice(0, 5) + ' ' + x.slice(5), x => '91' + x, x => '0' + x,
+                             x => x.slice(0, 5) + '.' + x.slice(5), x => '+91.' + x, x => x + '/', x => x + ' (s)']) {   // F16-1c
             const typed = fmt(nb);
             await pool.query('UPDATE guests SET phone=$1, password_hash=$2 WHERE id=$3', [typed.length <= 15 ? typed : nb, await require('bcrypt').hash(typed, 6), gb.id]);
             const rf = await XL(nb, typed);
