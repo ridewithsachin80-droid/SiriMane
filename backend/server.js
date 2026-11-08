@@ -32,7 +32,10 @@ app.use(rateLimit({
 // Login-specific limit: 10 attempts / 15 min per IP, on top of the global one,
 // so a password can't be guessed 200 times. Only failed-or-not attempts count
 // (skipSuccessfulRequests) — a warden who logs in normally is never blocked.
-const loginLimiter = rateLimit({
+// Sprint 16 (S16-3): staff and residents get SEPARATE counters. On the PG's
+// shared Wi-Fi every phone has the same public address, so residents' typos
+// used to lock the warden out (and the other way round).
+const makeLoginLimiter = () => rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
   standardHeaders: true,
@@ -40,8 +43,8 @@ const loginLimiter = rateLimit({
   skipSuccessfulRequests: true,
   message: { error: 'Too many login attempts. Please wait 15 minutes and try again.' }
 });
-app.use('/api/auth/login', loginLimiter);
-app.use('/api/guest-login', loginLimiter);
+app.use('/api/auth/login', makeLoginLimiter());
+app.use('/api/guest-login', makeLoginLimiter());
 
 // AI routes parse their own (larger) JSON body — mounted before the global
 // 10 kb parser so a bill photo is accepted there and nowhere else.

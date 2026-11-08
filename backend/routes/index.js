@@ -264,6 +264,14 @@ router.get('/guests', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// GET /api/guests/phone-check?phone=…&except=id — lets the move-in form warn at step 1
+router.get('/guests/phone-check', auth, async (req, res) => {
+  try {
+    const t = await phoneTakenBy(req.query.phone, parseInt(req.query.except, 10) || 0);
+    res.json(t ? { taken: true, by: { id: t.id, name: t.name, room_number: t.room_number }, message: phoneTakenMsg(t) } : { taken: false });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 router.get('/guests/:id', auth, async (req, res) => {
   try {
     const g = await pool.query(`SELECT g.*,r.room_number,r.monthly_rent as room_rent FROM guests g LEFT JOIN rooms r ON g.room_id=r.id WHERE g.id=$1`, [req.params.id]);
@@ -279,13 +287,34 @@ router.get('/guests/:id', auth, async (req, res) => {
 function normPhone(v) {
   if (v == null || v === '') return v;
   let d = String(v).replace(/\D/g, '');
-  // Indian mobiles: "+91 98…" and "098…" are the same 10-digit number the resident logs in with
+  // India: "+91 98…" and "098…" are the same 10-digit national number the
+  // resident logs in with. This is right for landlines too (0816 227 4455 →
+  // 8162274455, i.e. +91 816 227 4455).
   if (d.length === 12 && d.startsWith('91')) d = d.slice(2);
   else if (d.length === 11 && d.startsWith('0')) d = d.slice(1);
   return d;
 }
+// Sprint 16 (S16-1): one ACTIVE resident per phone number (owner decision,
+// 8 Nov). Compared as the last 10 digits so "+91 …" and "98765 43210" match.
+// A checked-out resident's number may be reused.
+async function phoneTakenBy(phone, exceptId) {
+  const key = String(normPhone(phone) || '').slice(-10);
+  if (key.length !== 10) return null;
+  const r = await pool.query(
+    `SELECT g.id, g.name, ro.room_number FROM guests g LEFT JOIN rooms ro ON ro.id = g.room_id
+     WHERE g.is_active = true AND g.id <> $2
+       AND right(regexp_replace(COALESCE(g.phone,''), '[^0-9]', '', 'g'), 10) = $1
+     ORDER BY g.id LIMIT 1`, [key, exceptId || 0]);
+  return r.rows[0] || null;
+}
+const phoneTakenMsg = (t) => `This phone number already belongs to ${t.name}${t.room_number ? ` (Room ${t.room_number})` : ''}. Each resident needs her own number.`;
+
 router.post('/guests', auth, async (req, res) => {
   if (req.body && req.body.phone != null) req.body.phone = normPhone(req.body.phone);
+  if (req.body && req.body.phone) {
+    try { const t = await phoneTakenBy(req.body.phone, 0); if (t) return res.status(409).json({ error: phoneTakenMsg(t) }); }
+    catch (err) { return res.status(500).json({ error: err.message }); }
+  }
   const { name,phone,email,emergency_contact,emergency_contact_name,id_proof_type,id_proof_number,room_id,bed_number,join_date,monthly_rent,deposit_amount,notes,address,expected_checkout } = req.body;
   if (!name || !join_date) return res.status(400).json({ error: 'Name and join date required' });
   try {
@@ -339,8 +368,21 @@ router.put('/guests/:id', auth, async (req, res) => {
   if (req.body && req.body.phone != null) req.body.phone = normPhone(req.body.phone);
   const { name,phone,email,emergency_contact,emergency_contact_name,room_id,bed_number,monthly_rent,deposit_amount,notes,leave_date,is_active,rent_effective_from,address,id_proof_type,id_proof_number,expected_checkout } = req.body;
   try {
-    const existing = await pool.query('SELECT monthly_rent,deposit_amount FROM guests WHERE id=$1', [req.params.id]);
+    const existing = await pool.query('SELECT monthly_rent,deposit_amount,phone,is_active FROM guests WHERE id=$1', [req.params.id]);
     if (!existing.rows[0]) return res.status(404).json({ error: 'Not found' });
+    // S16-1: refuse only when the number CHANGES to one another active
+    // resident has, or a checked-out resident is re-activated onto a taken
+    // number. Pairs that already exist are left alone so their other details
+    // can still be edited; the warden fixes those numbers by hand.
+    const oldKey = String(normPhone(existing.rows[0].phone) || '').slice(-10);
+    const newKey = phone != null ? String(phone).slice(-10) : oldKey;
+    // Postgres reads 'true', 't', 'yes', 'on', '1' as true too (review F16-2)
+    const asBool = v => v === true || v === 1 || (typeof v === 'string' && ['true', 't', 'yes', 'y', 'on', '1'].includes(v.trim().toLowerCase()));
+    const reactivating = existing.rows[0].is_active === false && is_active !== undefined && is_active !== null && asBool(is_active);
+    if (newKey && (newKey !== oldKey || reactivating)) {
+      const t = await phoneTakenBy(newKey, parseInt(req.params.id, 10));
+      if (t) return res.status(409).json({ error: phoneTakenMsg(t) });
+    }
     const oldRent = parseFloat(existing.rows[0].monthly_rent) || 0;
     const newRent = monthly_rent !== undefined && monthly_rent !== null ? parseFloat(monthly_rent) : oldRent;
     const oldDeposit = parseFloat(existing.rows[0].deposit_amount) || 0;
@@ -1360,8 +1402,10 @@ router.post('/guest-login', async (req, res) => {
         // her type the default the way her phone autofills it ("+91 …").
         return phoneLike && await bcrypt.compare(typedKey, g.password_hash);
       }
-      // No password set yet: the default is her mobile number, in any form
-      return password === mobile || typedKey === mobileKey;
+      // No password set yet: the default is her mobile number, typed in any
+      // PHONE form ("+91 98…", spaces, dashes). Not any string that happens to
+      // equal what she typed as the mobile (S16 review F16-1: "98…x" got in).
+      return phoneLike && typedKey === String(normPhone(g.phone) || '').slice(-10);
     };
     const matched = [];
     for (const g of r.rows) if (await accepts(g)) matched.push(g);
@@ -1383,9 +1427,22 @@ router.post('/guest-login', async (req, res) => {
       await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [hash, guest.id]);
     }
 
-    const token = auth.signToken({ guestId: guest.id, type: 'guest' }, { expiresIn: '24h' });
+    // S16-2: is she still on the default password? Decided from the
+    // CREDENTIAL that verified, not from how she typed it (review F16-1):
+    // no hash yet → default; a hash that is of her own number → default.
+    const guestKey = String(normPhone(guest.phone) || '').slice(-10);
+    const onDefault = !guest.password_hash
+      // what verified is her own number in some phone format ("+91 …", "0…") —
+      // before 15.5 the first login hashed it exactly as typed (review F16-1b)
+      || (phoneLike && guestKey.length === 10 && typedKey === guestKey)
+      // …or ANY password that contains her number (old hashes of "98765.43210",
+      // "+91.98…", "98…/", "98… (s)") — the rule change-password uses (F16-1c)
+      || (guestKey.length === 10 && String(password).replace(/\D/g, '').includes(guestKey))
+      || (guestKey.length === 10 && await bcrypt.compare(guestKey, guest.password_hash));
+    const token = auth.signToken({ guestId: guest.id, type: 'guest', ...(onDefault ? { pwc: 1 } : {}) }, { expiresIn: onDefault ? '1h' : '24h' });
     res.json({
       token,
+      must_change_password: onDefault,
       guest: {
         id: guest.id, name: guest.name, phone: guest.phone,
         room_number: guest.room_number, bed_number: guest.bed_number
@@ -1401,6 +1458,8 @@ const guestAuth = async (req, res, next) => {
     if (!token) return res.status(401).json({ error: 'No token' });
     const decoded = auth.verifyToken(token);
     if (decoded.type !== 'guest') return res.status(401).json({ error: 'Invalid token type' });
+    // S16-2: a default-password login may only set a new password
+    if (decoded.pwc && req.path !== '/guest-change-password') return res.status(403).json({ error: 'Please set your own password first.', must_change_password: true });
     const r = await pool.query('SELECT * FROM guests WHERE id=$1', [decoded.guestId]);
     if (!r.rows[0]) return res.status(401).json({ error: 'Guest not found' });
     req.guest = r.rows[0];
@@ -1445,16 +1504,26 @@ router.post('/guest-change-password', guestAuth, async (req, res) => {
   if (newPassword.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
   try {
     const g = req.guest;
+    const guestKey = String(normPhone(g.phone) || '').slice(-10);
+    const curKey = String(normPhone(currentPassword) || '').slice(-10);
+    const curPhoneLike = /^[\d\s+()-]{10,}$/.test(String(currentPassword));
     let valid = false;
     if (g.password_hash) {
-      valid = await bcrypt.compare(currentPassword, g.password_hash);
+      valid = await bcrypt.compare(currentPassword, g.password_hash)
+        || (curPhoneLike && await bcrypt.compare(curKey, g.password_hash));   // "+91 …" typed for the default
     } else {
-      valid = (currentPassword === g.phone);
+      valid = currentPassword === g.phone || (curPhoneLike && curKey === guestKey);
     }
     if (!valid) return res.status(401).json({ error: 'Current password is incorrect' });
+    // S16-2: the new password can't be her phone number (that's the default anyone could guess)
+    // …nor her number with a symbol added ("98….", "+91-98…") — review
+    if (guestKey.length === 10 && String(newPassword).replace(/\D/g, '').includes(guestKey)) return res.status(400).json({ error: 'Choose a password that is not your phone number.' });
+    if (newPassword === currentPassword) return res.status(400).json({ error: 'The new password must be different.' });
     const hash = await bcrypt.hash(newPassword, 10);
     await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [hash, g.id]);
-    res.json({ message: 'Password changed successfully' });
+    // A fresh, unrestricted token — the default-password one only allowed this call
+    const token = auth.signToken({ guestId: g.id, type: 'guest' }, { expiresIn: '24h' });
+    res.json({ message: 'Password changed successfully', token });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
