@@ -1378,6 +1378,7 @@ router.post('/users', auth, requireAdmin, async (req, res) => {
   if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
   { const why = staffPasswordProblem(password, username); if (why) return res.status(400).json({ error: why }); }   // S16.3: one rule for staff passwords
   // S16.4-4: "Warden" and "warden" are the same name
+  if (!USERNAME_RE.test(String(username).trim())) return res.status(400).json({ error: 'Use 3–30 letters, digits, dots, dashes or underscores.' });   // review: same rule as rename
   try { const c = await pool.query('SELECT 1 FROM users WHERE lower(username)=lower($1) LIMIT 1', [String(username).trim()]); if (c.rows[0]) return res.status(400).json({ error: 'Username already exists' }); }
   catch (err) { return res.status(500).json({ error: err.message }); }
   const finalRole = role === 'admin' ? 'admin' : 'staff';

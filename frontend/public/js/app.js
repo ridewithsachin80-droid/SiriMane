@@ -86,10 +86,11 @@ function navigate(page) {
   // instead of a blank page.
   return Promise.resolve().then(() => { drawSeq = seq; return pages[page](); }).then(() => { try { injectSubtabs(page); } catch (e) { console.error(e); } return seq === navSeq; }).catch(e => {
     console.error(e);
+    if (seq !== navSeq) return false;   // D16.4-b: she has moved on — don't paint this error over the new screen
     setContent(`<div class="card" style="padding:32px;text-align:center">
       <div style="font-size:32px">⚠️</div>
       <h3 style="margin:10px 0 6px">This screen could not load</h3>
-      <p class="text-muted" style="margin-bottom:16px">${(e && e.message) ? e.message : 'Unexpected error'}</p>
+      <p class="text-muted" style="margin-bottom:16px">${esc((e && e.message) ? e.message : 'Unexpected error')}</p>
       <button class="btn btn-primary" onclick="navigate('${page}')">↻ Retry</button>
     </div>`);
     return false;
@@ -161,6 +162,11 @@ async function loadComplaintsCount() {
 // must not draw over it (slow 4G: Home appearing on top of Rooms). Each
 // drawing function notes the navigation it started under; drawFor() returns
 // a setContent that does nothing once navigate() has moved on.
+// D16.4-a: a save that waits for the server, then refreshes the screen
+// (pgRooms() after "Save"), must not redraw it if she has moved on meanwhile.
+function refreshGate(seq) {
+  return (fn) => (seq === navSeq ? fn : () => undefined);
+}
 function drawFor(seq) {
   return (html) => {
     if (seq !== navSeq) return false;   // she has moved on — this screen is stale
@@ -237,16 +243,19 @@ function monthPicker(month, year, onChangeFn) {
 }
 
 function onPurchasesMonthChange(value) {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   const [y, m] = value.split('-').map(Number);
-  pgPurchases(m, y);
+  __ifHere(pgPurchases)(m, y);
 }
 function onCollectionsMonthChange(value) {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   const [y, m] = value.split('-').map(Number);
-  pgCollections(m, y);
+  __ifHere(pgCollections)(m, y);
 }
 function onReportsMonthChange(value) {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   const [y, m] = value.split('-').map(Number);
-  pgReports(m, y);
+  __ifHere(pgReports)(m, y);
 }
 
 // ── DASHBOARD ─────────────────────────────────────
@@ -357,16 +366,18 @@ function roomModal(r={}) {
 }
 
 async function saveRoom(id) {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   const al = document.getElementById('rm-alert');
   const d = { room_number:document.getElementById('rm-num').value.trim(), floor:document.getElementById('rm-floor').value, total_beds:document.getElementById('rm-beds').value, room_type:document.getElementById('rm-type').value, monthly_rent:document.getElementById('rm-rent').value||0, description:document.getElementById('rm-desc').value };
   if(!d.room_number) { showAlert(al,'Room number required'); return; }
-  try { if(id) await API.updateRoom(id,d); else await API.createRoom(d); closeModal(); pgRooms(); }
+  try { if(id) await API.updateRoom(id,d); else await API.createRoom(d); closeModal(); __ifHere(pgRooms)(); }
   catch(e) { showAlert(al,e.message); }
 }
 
 async function delRoom(id,num) {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   if(!confirm(`Delete Room ${num}?`)) return;
-  try { await API.deleteRoom(id); pgRooms(); } catch(e) { alert(e.message); }
+  try { await API.deleteRoom(id); __ifHere(pgRooms)(); } catch(e) { alert(e.message); }
 }
 
 // ── GUESTS ────────────────────────────────────────
@@ -578,6 +589,7 @@ function toggleRentEffectiveField() {
 }
 
 async function saveGuest(id) {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   const al = document.getElementById('gf-alert');
   const rentEffectiveEl = document.getElementById('gf-rent-effective');
   const d = {
@@ -598,7 +610,7 @@ async function saveGuest(id) {
   };
   if(!d.name) { showAlert(al,'Name is required'); return; }
   if(!d.join_date) { showAlert(al,'Check-in date required'); return; }
-  try { if(id) await API.updateGuest(id,d); else await API.createGuest(d); closeModal(); pgGuests(); }
+  try { if(id) await API.updateGuest(id,d); else await API.createGuest(d); closeModal(); __ifHere(pgGuests)(); }
   catch(e) { showAlert(al,e.message); }
 }
 
@@ -747,6 +759,7 @@ async function roomShiftModal(guestId, guestName) {
 }
 
 async function saveRoomShift(guestId) {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   const al = document.getElementById('rs-alert');
   const d = {
     room_id: document.getElementById('rs-room').value,
@@ -756,7 +769,7 @@ async function saveRoomShift(guestId) {
   };
   if (!d.room_id) { showAlert(al, 'Select the new room'); return; }
   if (!d.effective_from) { showAlert(al, 'Effective date is required'); return; }
-  try { await API.shiftGuestRoom(guestId, d); closeModal(); pgGuests(); }
+  try { await API.shiftGuestRoom(guestId, d); closeModal(); __ifHere(pgGuests)(); }
   catch(e) { showAlert(al, e.message); }
 }
 
@@ -770,6 +783,7 @@ function updateRefundPreview(deposit) {
 }
 
 async function submitCheckout(id) {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   const al = document.getElementById('co-alert');
   const d = {
     leave_date: document.getElementById('co-date').value,
@@ -782,7 +796,7 @@ async function submitCheckout(id) {
   try {
     await API.checkoutGuestWithRefund(id, d);
     closeModal();
-    pgGuests();
+    __ifHere(pgGuests)();
   } catch(e) { showAlert(al, e.message); }
 }
 
@@ -855,10 +869,11 @@ function menuModal(preDay='') {
 }
 
 async function saveMenu() {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   const al = document.getElementById('mn-alert');
   const d = { day_of_week:document.getElementById('mn-day').value, meal_type:document.getElementById('mn-meal').value, items:document.getElementById('mn-items').value.trim() };
   if(!d.items) { showAlert(al,'Enter menu items'); return; }
-  try { await API.saveMenu(d); closeModal(); pgMenu(); } catch(e) { showAlert(al,e.message); }
+  try { await API.saveMenu(d); closeModal(); __ifHere(pgMenu)(); } catch(e) { showAlert(al,e.message); }
 }
 
 // ── DAILY CHECKLIST ───────────────────────────────
@@ -912,8 +927,9 @@ async function pgChecklist(date) {
 }
 
 async function toggleChecklistItem(itemId, checked) {
-  try { await API.toggleChecklistItem(itemId, checklistCurrentDate, checked); pgChecklist(checklistCurrentDate); }
-  catch(e) { alert(e.message); pgChecklist(checklistCurrentDate); }
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
+  try { await API.toggleChecklistItem(itemId, checklistCurrentDate, checked); __ifHere(pgChecklist)(checklistCurrentDate); }
+  catch(e) { alert(e.message); __ifHere(pgChecklist)(checklistCurrentDate); }
 }
 
 function currentYearMonth() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; }
@@ -1108,6 +1124,7 @@ function complaintModal() {
 }
 
 async function saveComplaint() {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   const al = document.getElementById('cp-alert');
   const description = document.getElementById('cp-desc').value.trim();
   if (!description) { showAlert(al, 'Enter a description'); return; }
@@ -1115,21 +1132,23 @@ async function saveComplaint() {
     await API.createComplaint({ category: document.getElementById('cp-category').value, guest_name: document.getElementById('cp-room').value.trim() || null, description, source: window.complaintSource || 'manual',
       priority: window.complaintPriority || undefined, likely_issue: window.complaintLikely || undefined });
     window.complaintSource = 'manual'; window.complaintPriority = undefined; window.complaintLikely = undefined;
-    closeModal(); pgComplaints(complaintsCurrentFilter); loadComplaintsCount();
+    closeModal(); __ifHere(pgComplaints)(complaintsCurrentFilter); loadComplaintsCount();
   } catch(e) { showAlert(al, e.message); }
 }
 
 async function saveComplaintStatus(id) {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   const al = document.getElementById('cps-alert');
   try {
     await API.updateComplaint(id, { status: document.getElementById('cps-status').value, resolution_notes: document.getElementById('cps-notes').value.trim() || null });
-    closeModal(); pgComplaints(complaintsCurrentFilter); loadComplaintsCount();
+    closeModal(); __ifHere(pgComplaints)(complaintsCurrentFilter); loadComplaintsCount();
   } catch(e) { showAlert(al, e.message); }
 }
 
 async function deleteComplaint(id) {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   if (!confirm('Delete this complaint record?')) return;
-  try { await API.deleteComplaint(id); pgComplaints(complaintsCurrentFilter); loadComplaintsCount(); }
+  try { await API.deleteComplaint(id); __ifHere(pgComplaints)(complaintsCurrentFilter); loadComplaintsCount(); }
   catch(e) { alert(e.message); }
 }
 
@@ -1240,13 +1259,15 @@ function filterPayments() {
 }
 
 function onPaymentsMonthChange(value) {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   const [y, m] = value.split('-').map(Number);
-  pgPayments(m, y);
+  __ifHere(pgPayments)(m, y);
 }
 
 async function delCollectionFromPayments(id) {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   if(!confirm('Delete this record?')) return;
-  try { await API.deleteCollection(id); pgPayments(paymentsCurrentMonth, paymentsCurrentYear); } catch(e) { alert(e.message); }
+  try { await API.deleteCollection(id); __ifHere(pgPayments)(paymentsCurrentMonth, paymentsCurrentYear); } catch(e) { alert(e.message); }
 }
 
 // ── GUEST MESSAGES (Announcements) ───────────────
@@ -1320,18 +1341,20 @@ function announcementModal() {
 }
 
 async function saveAnnouncement() {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   const al = document.getElementById('an-alert');
   const tt = document.getElementById('an-target-type')?.value || 'all';
   const d = { title:document.getElementById('an-title').value.trim(), message:document.getElementById('an-msg').value.trim(), priority:document.getElementById('an-priority').value,
     target_type: tt, target_value: tt === 'all' ? null : (document.getElementById('an-target-value')?.value || '').trim() };
   if (tt !== 'all' && !d.target_value) { showAlert(al, 'Say which floor or room this is for'); return; }
   if(!d.title||!d.message) { showAlert(al,'Title and message required'); return; }
-  try { await API.createAnnouncement(d); closeModal(); pgAnnouncements(); } catch(e) { showAlert(al,e.message); }
+  try { await API.createAnnouncement(d); closeModal(); __ifHere(pgAnnouncements)(); } catch(e) { showAlert(al,e.message); }
 }
 
 async function delAnnouncement(id) {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   if(!confirm('Delete this message?')) return;
-  try { await API.deleteAnnouncement(id); pgAnnouncements(); } catch(e) { alert(e.message); }
+  try { await API.deleteAnnouncement(id); __ifHere(pgAnnouncements)(); } catch(e) { alert(e.message); }
 }
 
 // ── INBOX ─────────────────────────────────────────
@@ -1398,14 +1421,16 @@ async function viewInboxMsg(m) {
 }
 
 async function replyMsg(id) {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   const reply = document.getElementById('ib-reply').value.trim();
   if(!reply) { showAlert(document.getElementById('ib-alert'),'Write a reply'); return; }
-  try { await API.replyInbox(id,reply); closeModal(); pgInbox(); } catch(e) { showAlert(document.getElementById('ib-alert'),e.message); }
+  try { await API.replyInbox(id,reply); closeModal(); __ifHere(pgInbox)(); } catch(e) { showAlert(document.getElementById('ib-alert'),e.message); }
 }
 
 async function delInboxMsg(id) {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   if(!confirm('Delete this message?')) return;
-  try { await API.deleteInbox(id); closeModal(); pgInbox(); } catch(e) { alert(e.message); }
+  try { await API.deleteInbox(id); closeModal(); __ifHere(pgInbox)(); } catch(e) { alert(e.message); }
 }
 
 // ── PURCHASES (Expenses) ──────────────────────────
@@ -1516,9 +1541,10 @@ async function pgPurchases(month, year, from, to) {
 }
 
 function onPurchasesRangeChange() {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   const from = document.getElementById('pu-from')?.value;
   const to = document.getElementById('pu-to')?.value;
-  if (from && to) pgPurchases(null, null, from, to);
+  if (from && to) __ifHere(pgPurchases)(null, null, from, to);
 }
 
 function purchaseModal() {
@@ -1632,11 +1658,13 @@ async function exportPurchasesPdf() {
 }
 
 async function confirmPendingPurchase(id) {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   if(!confirm('Approve this purchase as confirmed spend?')) return;
-  try { await API.confirmPurchase(id); pgPurchases(purchasesCurrentMonth, purchasesCurrentYear); } catch(e) { alert(e.message); }
+  try { await API.confirmPurchase(id); __ifHere(pgPurchases)(purchasesCurrentMonth, purchasesCurrentYear); } catch(e) { alert(e.message); }
 }
 
 async function savePurchase() {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   const al = document.getElementById('pu-alert');
   const d = { amount:document.getElementById('pu-amt').value, purchase_date:document.getElementById('pu-date').value, category:document.getElementById('pu-cat').value, description:document.getElementById('pu-desc').value, paid_to:document.getElementById('pu-paid').value, payment_mode:document.getElementById('pu-mode').value, source: window.purchaseSource || 'manual' };
   if(!d.amount) { showAlert(al,'Amount required'); return; }
@@ -1646,13 +1674,14 @@ async function savePurchase() {
     // Jump to whichever month the purchase was actually dated, so it's
     // immediately visible instead of vanishing into a different month's view.
     const dt = d.purchase_date ? new Date(d.purchase_date) : new Date();
-    pgPurchases(dt.getMonth()+1, dt.getFullYear());
+    __ifHere(pgPurchases)(dt.getMonth()+1, dt.getFullYear());
   } catch(e) { showAlert(al,e.message); }
 }
 
 async function delPurchase(id) {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   if(!confirm('Delete?')) return;
-  try { await API.deletePurchase(id); pgPurchases(purchasesCurrentMonth, purchasesCurrentYear); } catch(e) { alert(e.message); }
+  try { await API.deletePurchase(id); __ifHere(pgPurchases)(purchasesCurrentMonth, purchasesCurrentYear); } catch(e) { alert(e.message); }
 }
 
 // ── VOICE INPUT FOR PURCHASES ──────────────────────
@@ -1906,13 +1935,15 @@ async function pgCollections(month, year, from, to) {
 // range once both ends are filled in — a single date on its own isn't a
 // usable range, so we just wait for the second one instead of erroring.
 function onCollectionsRangeChange() {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   const from = document.getElementById('coll-from')?.value;
   const to = document.getElementById('coll-to')?.value;
-  if (from && to) pgCollections(null, null, from, to);
+  if (from && to) __ifHere(pgCollections)(null, null, from, to);
 }
 
 function clearCollectionsRange() {
-  pgCollections();
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
+  __ifHere(pgCollections)();
 }
 
 function renderCollectionRows(list) {
@@ -2037,6 +2068,7 @@ async function collectionModal(guestId=null, guestName='') {
 }
 
 async function saveCollection() {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   const al = document.getElementById('cl-alert');
   const guestSel = document.getElementById('cl-guest');
   const guestId = guestSel.value;
@@ -2051,19 +2083,21 @@ async function saveCollection() {
     // wherever the modal was actually opened from.
     const dt = d.collection_date ? new Date(d.collection_date) : new Date();
     if (collectionModalGuestId) viewGuest(collectionModalGuestId);
-    else if (currentPage === 'payments') pgPayments(dt.getMonth()+1, dt.getFullYear());
-    else pgCollections(dt.getMonth()+1, dt.getFullYear());
+    else if (currentPage === 'payments') __ifHere(pgPayments)(dt.getMonth()+1, dt.getFullYear());
+    else __ifHere(pgCollections)(dt.getMonth()+1, dt.getFullYear());
   } catch(e) { showAlert(al,e.message); }
 }
 
 async function delCollection(id) {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   if(!confirm('Delete this record?')) return;
-  try { await API.deleteCollection(id); pgCollections(collectionsCurrentMonth, collectionsCurrentYear); } catch(e) { alert(e.message); }
+  try { await API.deleteCollection(id); __ifHere(pgCollections)(collectionsCurrentMonth, collectionsCurrentYear); } catch(e) { alert(e.message); }
 }
 
 async function confirmPendingCollection(id) {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   if(!confirm('Confirm this payment actually arrived in your bank/UPI app?')) return;
-  try { await API.confirmCollection(id); pgCollections(collectionsCurrentMonth, collectionsCurrentYear); } catch(e) { alert(e.message); }
+  try { await API.confirmCollection(id); __ifHere(pgCollections)(collectionsCurrentMonth, collectionsCurrentYear); } catch(e) { alert(e.message); }
 }
 
 // ── RENT DUE TRACKER ──────────────────────────────
@@ -2371,7 +2405,8 @@ function switchReportsToRange() {
 }
 
 function switchReportsToMonth() {
-  pgReports();
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
+  __ifHere(pgReports)();
 }
 
 function applyReportsRange() {
@@ -2698,6 +2733,7 @@ function fixedAssetModal() {
 }
 
 async function saveFixedAsset() {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   const al = document.getElementById('fa-alert');
   const d = {
     name: document.getElementById('fa-name').value.trim(),
@@ -2707,13 +2743,14 @@ async function saveFixedAsset() {
     notes: document.getElementById('fa-notes').value
   };
   if (!d.name || !d.value || !d.purchase_date) { showAlert(al, 'Name, value, and date are required'); return; }
-  try { await API.createFixedAsset(d); closeModal(); pgBalanceSheet(balanceSheetAsOf); }
+  try { await API.createFixedAsset(d); closeModal(); __ifHere(pgBalanceSheet)(balanceSheetAsOf); }
   catch(e) { showAlert(al, e.message); }
 }
 
 async function delFixedAsset(id) {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   if (!confirm('Remove this fixed asset?')) return;
-  try { await API.deleteFixedAsset(id); pgBalanceSheet(balanceSheetAsOf); } catch(e) { alert(e.message); }
+  try { await API.deleteFixedAsset(id); __ifHere(pgBalanceSheet)(balanceSheetAsOf); } catch(e) { alert(e.message); }
 }
 
 function capitalModal() {
@@ -2734,6 +2771,7 @@ function capitalModal() {
 }
 
 async function saveCapitalTransaction() {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   const al = document.getElementById('cap-alert');
   const d = {
     amount: document.getElementById('cap-amt').value,
@@ -2741,13 +2779,14 @@ async function saveCapitalTransaction() {
     note: document.getElementById('cap-note').value
   };
   if (!d.amount || !d.transaction_date) { showAlert(al, 'Amount and date are required'); return; }
-  try { await API.createCapitalTransaction(d); closeModal(); pgBalanceSheet(balanceSheetAsOf); }
+  try { await API.createCapitalTransaction(d); closeModal(); __ifHere(pgBalanceSheet)(balanceSheetAsOf); }
   catch(e) { showAlert(al, e.message); }
 }
 
 async function delCapitalTransaction(id) {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   if (!confirm('Remove this capital transaction?')) return;
-  try { await API.deleteCapitalTransaction(id); pgBalanceSheet(balanceSheetAsOf); } catch(e) { alert(e.message); }
+  try { await API.deleteCapitalTransaction(id); __ifHere(pgBalanceSheet)(balanceSheetAsOf); } catch(e) { alert(e.message); }
 }
 
 // ── ADMIN (Staff / Audit Log / Deposit Refunds) ───
@@ -3395,7 +3434,8 @@ function showCollectDone(g, amount, saved) {
 
 // Entry point from Rent Due's per-resident "Collect" button.
 async function collectFrom(guestId) {
-  await pgCollect();
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
+  await __ifHere(pgCollect)();
   selectCollectGuest(guestId);
 }
 
@@ -4745,11 +4785,13 @@ function roomSheet(id) {
     </div></div>`);
 }
 async function setRoomStatus(id, status) {
-  try { await apiFetch(`/rooms/${id}/status`, { method: 'PUT', body: { status } }); closeModal(); toast(`Room marked ${status}`, 'ok'); pgRoomMap(); }
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
+  try { await apiFetch(`/rooms/${id}/status`, { method: 'PUT', body: { status } }); closeModal(); toast(`Room marked ${status}`, 'ok'); __ifHere(pgRoomMap)(); }
   catch (e) { const a = document.getElementById('rs-alert'); if (a) showAlert(a, e.message); else toast(e.message); }
 }
 async function markInspected(id) {
-  try { await apiFetch(`/rooms/${id}/status`, { method: 'PUT', body: { last_inspected: nowDate() } }); closeModal(); toast('Inspection recorded', 'ok'); pgRoomMap(); }
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
+  try { await apiFetch(`/rooms/${id}/status`, { method: 'PUT', body: { last_inspected: nowDate() } }); closeModal(); toast('Inspection recorded', 'ok'); __ifHere(pgRoomMap)(); }
   catch (e) { toast(e.message); }
 }
 
@@ -4973,16 +5015,18 @@ function renderClosing(t) {
     <div id="close-alert" class="alert alert-danger hidden" style="margin-top:10px"></div>`;
 }
 async function closeDay(date) {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   const v = id => Number(document.getElementById(id)?.value || 0);
   try {
     const r = await apiFetch('/day-closing', { method: 'POST', body: { date, counted: { cash: v('close-cash'), upi: v('close-upi'), bank: v('close-bank') }, note: document.getElementById('close-note')?.value.trim() || undefined } });
     toast(r.variances.length ? `Day closed with ${r.variances.length} variance` : 'Day closed — everything matched', 'ok');
-    pgFinanceOverview();
+    __ifHere(pgFinanceOverview)();
   } catch (e) { const a = document.getElementById('close-alert'); if (a) showAlert(a, e.message); else toast(e.message); }
 }
 async function reopenDay(date) {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   if (!confirm('Reopen this day? New entries will be allowed against it again.')) return;
-  try { await apiFetch('/day-closing/reopen', { method: 'POST', body: { date } }); toast('Day reopened', 'ok'); pgFinanceOverview(); }
+  try { await apiFetch('/day-closing/reopen', { method: 'POST', body: { date } }); toast('Day reopened', 'ok'); __ifHere(pgFinanceOverview)(); }
   catch (e) { toast(e.message); }
 }
 
@@ -5032,7 +5076,8 @@ async function pgVisitors() {
   `);
 }
 async function visitorAction(id, action) {
-  try { await apiFetch(`/visitors/${id}`, { method: 'PUT', body: { action } }); toast('Updated', 'ok'); pgVisitors(); }
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
+  try { await apiFetch(`/visitors/${id}`, { method: 'PUT', body: { action } }); toast('Updated', 'ok'); __ifHere(pgVisitors)(); }
   catch (e) { toast(e.message); }
 }
 
@@ -5166,9 +5211,11 @@ async function pgOutboxBulk() {
     { action: 'skip_drafts', label: 'Skip', icon: 'x' }
   ]);
 }
-async function draftOutbox() { try { const r = await apiFetch('/outbox/draft', { method: 'POST' }); toast(r.drafted ? `${r.drafted} drafted` : 'Nothing due right now', 'ok'); pgOutbox(); } catch (e) { toast(e.message); } }
+async function draftOutbox() {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */  try { const r = await apiFetch('/outbox/draft', { method: 'POST' }); toast(r.drafted ? `${r.drafted} drafted` : 'Nothing due right now', 'ok'); __ifHere(pgOutbox)(); } catch (e) { toast(e.message); } }
 async function markSent(id) { try { await apiFetch(`/outbox/${id}/sent`, { method: 'POST' }); setTimeout(pgOutbox, 600); } catch (e) { toast(e.message); } }
-async function skipMessage(id) { try { await apiFetch(`/outbox/${id}/skip`, { method: 'POST' }); pgOutbox(); } catch (e) { toast(e.message); } }
+async function skipMessage(id) {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */  try { await apiFetch(`/outbox/${id}/skip`, { method: 'POST' }); __ifHere(pgOutbox)(); } catch (e) { toast(e.message); } }
 
 // ── Recurring maintenance ───────────────────────────────────────
 async function pgMaintenance() {
@@ -5202,16 +5249,19 @@ function maintenanceModal() {
     </div></div>`);
 }
 async function saveMaintenance() {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   const al = document.getElementById('mt-alert');
   try {
     await apiFetch('/maintenance-schedule', { method: 'POST', body: {
       task: document.getElementById('mt-task').value.trim(), vendor: document.getElementById('mt-vendor').value.trim(),
       every_days: document.getElementById('mt-days').value, last_done: document.getElementById('mt-last').value || null } });
-    closeModal(); pgMaintenance();
+    closeModal(); __ifHere(pgMaintenance)();
   } catch (e) { showAlert(al, e.message); }
 }
-async function markMaintenanceDone(id) { try { await apiFetch(`/maintenance-schedule/${id}/done`, { method: 'POST', body: { date: nowDate() } }); toast('Recorded', 'ok'); pgMaintenance(); } catch (e) { toast(e.message); } }
-async function removeMaintenance(id) { if (!confirm('Remove this recurring task?')) return; try { await apiFetch(`/maintenance-schedule/${id}`, { method: 'DELETE' }); pgMaintenance(); } catch (e) { toast(e.message); } }
+async function markMaintenanceDone(id) {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */  try { await apiFetch(`/maintenance-schedule/${id}/done`, { method: 'POST', body: { date: nowDate() } }); toast('Recorded', 'ok'); __ifHere(pgMaintenance)(); } catch (e) { toast(e.message); } }
+async function removeMaintenance(id) {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */  if (!confirm('Remove this recurring task?')) return; try { await apiFetch(`/maintenance-schedule/${id}`, { method: 'DELETE' }); __ifHere(pgMaintenance)(); } catch (e) { toast(e.message); } }
 
 // ── Documents (Resident 360 → Documents) ────────────────────────
 async function loadResidentDocs(guestId) {

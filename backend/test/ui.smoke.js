@@ -1051,6 +1051,32 @@ async function runAtWidth(browser, BASE, width) {
       ok(d157.tiles > 0 && d157.page === 'rooms', `${tag} D-15-7 a slow "${slowPage}" did not draw over Rooms (${d157.tiles} tiles)`);
       await page.evaluate(() => { apiFetch = window.__origApiFetch; });
     }
+    // D16.4-a: a save that answers late must not redraw the screen she left
+    await page.evaluate(() => navigate('outbox')); await page.waitForFunction(() => currentPage === 'outbox', { timeout: 8000 });
+    await new Promise(r => setTimeout(r, 600));
+    await page.evaluate(() => {
+      apiFetch = (path, opts) => path.startsWith('/outbox/draft') ? new Promise(r => setTimeout(r, 1500)).then(() => window.__origApiFetch(path, opts)) : window.__origApiFetch(path, opts);
+      draftOutbox(); navigate('rooms');
+    });
+    await page.waitForSelector('.room-tile', { timeout: 8000 });
+    await new Promise(r => setTimeout(r, 2500));
+    ok(await page.evaluate(() => document.querySelectorAll('.room-tile').length > 0 && currentPage === 'rooms'), `${tag} D16.4-a a late save on Outbox did not redraw Outbox over Rooms`);
+    // D16.4-b: a slow screen that FAILS after she moved on must not paint its error card
+    await page.evaluate(() => {
+      // The screen itself throws late (its own try/catch didn't catch it), so the
+      // failure reaches navigate's error card — the path D16.4-b guards.
+      window.__origPgPurchases = pgPurchases;
+      pgPurchases = () => new Promise((_, rej) => setTimeout(() => rej(new Error('Network down')), 1500));
+      navigate('purchases'); navigate('rooms');
+    });
+    await page.waitForSelector('.room-tile', { timeout: 8000 });
+    await new Promise(r => setTimeout(r, 2500));
+    ok(await page.evaluate(() => document.querySelectorAll('.room-tile').length > 0 && !/could not load/.test(document.getElementById('page-content').textContent)), `${tag} D16.4-b a late failure on Purchases did not paint its error over Rooms`);
+    // …and when she is still on the screen, the error card does show (the boundary still works)
+    await page.evaluate(() => navigate('purchases'));
+    await page.waitForFunction(() => /could not load/.test(document.getElementById('page-content').textContent), { timeout: 8000 });
+    ok(await page.evaluate(() => /Network down/.test(document.getElementById('page-content').textContent)), `${tag} D16.4-b the error card still shows when she stays on the failing screen`);
+    await page.evaluate(() => { pgPurchases = window.__origPgPurchases; apiFetch = window.__origApiFetch; });
   }
   // Leaving-soon filter
   await page.evaluate(() => navigate('guests'));

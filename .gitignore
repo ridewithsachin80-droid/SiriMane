@@ -1,5 +1,5 @@
 # dependencies — Railway runs `cd backend && npm install` at build time
-node_modules/
+node_modules
 
 # local test-gate output (screenshots, scratch logs)
 backend/test/screenshots/
