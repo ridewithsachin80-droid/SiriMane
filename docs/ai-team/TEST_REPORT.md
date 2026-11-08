@@ -255,3 +255,18 @@ Process note: two early sweeps (1 am / 14:00) were contaminated by an earlier fa
 
 Backlog from this sprint: visitors' `expected_at` is stored as India wall-clock (typed by the resident) while `checked_in_at` is UTC wall-clock — handled per column here, but should be unified · quick-entry category guesses learn from purchases other suites saved (order-dependent test; G-1) · `CURRENT_DATE` remains only as column defaults (`collections.collection_date`, `purchases.purchase_date`, `room_inspections.inspected_on`) — every insert in the app passes the date explicitly (scanned), so the default is never used.
 **Implementer gates on f5ea735 (12/12 each, run one at a time):** 01:00 IST on 1 Dec 2,793 · 14:00 IST 2,791 · 23:45 IST 2,791 · real clock (≈02:10 and 02:15 IST, inside the window) 2,791 ×2. (ui has two extra assertions on the 1st of a month.)
+
+### Sprint 18 — independent review round 1: **BLOCK** (4a2ebac) → fixes 85b11d1
+- **Blocker:** POST /collections and /purchases with a blank date used `new Date()` (UTC date) — and a blank-date collection skipped the closed-day lock (measured: stored on a closed 30 Nov at 01:00 IST on 1 Dec, 201). Now India's today, and the lock checks it. My "every insert passes the date explicitly" claim was wrong: the scan only looked for omitted columns, not `x || new Date()` fallbacks.
+- Should-fix: the ledger end month used local getters on a shifted instant — right only with Node in UTC (wrong from 18:30 IST on the last day with Node in IST). Now built from India's date string; verified identical with Node TZ=UTC and TZ=Asia/Kolkata at 23:30 IST 30 Nov (Sep–Nov) and 01:00 / 06:00 IST 1 Dec (Sep–Dec). server.js pins TZ=UTC.
+- Should-fix: dashboard month income and the UPI claim date had no test (mutations survived) — tests added; mutations R1–R3 now caught. Rent-due PDF "As of" in India's date. Screens on a non-India phone: one ui pass on America/New_York (R4 caught). Checkout reminders: +10 days and past dates not drafted; date named plainly.
+
+**MONEY — more before/after (measured on sample rows, UTC session like Railway, event at 01:00 IST on 1 Dec)**
+| Case | Before | After |
+|---|---|---|
+| Deposit refund saved at 01:00 IST 1 Dec — its day | 2026-11-30 | 2026-12-01 |
+| Owner report refunds, November / December (₹4,000 refund) | ₹4,000 / ₹0 | ₹0 / ₹4,000 |
+| Balance sheet as of 30 Nov includes that refund | yes | no (it happened on 1 Dec) |
+| Dashboard "income this month" (₹5,000 on 20 Nov, ₹6,000 on 1 Dec) | ₹5,000 (November) | ₹6,000 (December) |
+| Resident UPI claim date | 2026-11-30 | 2026-12-01 — status `pending_verification` either way, never income |
+| Collection / purchase saved with a blank date | 2026-11-30, could land in a closed day | 2026-12-01; refused if that day is closed |
