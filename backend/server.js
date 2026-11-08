@@ -39,12 +39,20 @@ const CSP_BASE = {
   "form-action": ["'self'"],
   "frame-ancestors": ["'none'"]
 };
-const GA = ["https://www.googletagmanager.com", "https://*.googletagmanager.com", "https://*.google-analytics.com", "https://*.analytics.google.com"];
-function cspHeader(extra) {
-  return Object.entries(CSP_BASE).map(([k, v]) => [k, ...v, ...((extra && extra[k]) || [])].join(' ')).join('; ');
+// Google's published CSP list for Google Analytics with Ads-related features
+// (developers.google.com/tag-platform/security/guides/csp). This property is
+// linked to a Google Ads account, so gtag also sends to www.google.com/g/collect
+// — blocked in production on 9 Nov until these were added. google.co.in is
+// India's Google domain (CSP can't wildcard the TLD).
+const GA = ["https://www.googletagmanager.com", "https://*.googletagmanager.com", "https://*.google-analytics.com", "https://*.analytics.google.com",
+  "https://*.google.com", "https://*.google.co.in", "https://*.g.doubleclick.net"];
+function cspHeader(extra, replace) {
+  return Object.entries(CSP_BASE).map(([k, v]) => [k, ...((replace && replace[k]) || v), ...((extra && extra[k]) || [])].join(' ')).join('; ');
 }
 const CSP_APP = cspHeader();
-const CSP_HOME = cspHeader({ "script-src": ["https://www.googletagmanager.com"], "connect-src": GA, "img-src": GA });
+const CSP_HOME = cspHeader(
+  { "script-src": ["https://www.googletagmanager.com"], "connect-src": [...GA, "https://pagead2.googlesyndication.com"], "img-src": GA },
+  { "frame-src": ["https://www.googletagmanager.com"] });   // 'none' can't be combined with a host
 // Every response gets the strict app policy. Only the handlers that actually
 // send home.html (below) switch to the home policy — so no spelling of a URL
 // (e.g. /MANAGEMENT, which Express matches case-insensitively) can serve a
