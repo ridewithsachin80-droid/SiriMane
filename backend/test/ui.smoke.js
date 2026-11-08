@@ -45,6 +45,7 @@ async function runAtWidth(browser, BASE, width) {
   // Fresh browser context per width so the 360px login doesn't carry over.
   const ctx = await browser.createBrowserContext();
   const page = await ctx.newPage();
+  if (require('./fakeclock').active) await page.evaluateOnNewDocument(require('./fakeclock').pageClock);   // Sprint 18: faked clock
   await page.setViewport({ width, height: 780, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
   const jsErrors = [];
   page.on('pageerror', e => jsErrors.push(e.message));

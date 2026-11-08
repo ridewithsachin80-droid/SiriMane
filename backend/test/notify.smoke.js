@@ -111,7 +111,7 @@ const monthsAgo = n => { const d = ist(); d.setUTCMonth(d.getUTCMonth() - n); re
     r = await S('PUT', `/guests/${behind.id}/documents`, { doc_type: 'Agreement', status: 'expired' });
     eq(r.status, 200, 'and can be changed'); eq((await S('GET', `/guests/${behind.id}/documents`)).data.filter(d => d.doc_type === 'Agreement').length, 1, 'without creating a second row');
     // An expiring document raises exactly one notification
-    await pool.query(`UPDATE resident_documents SET expires_on = CURRENT_DATE + 10, status='verified' WHERE guest_id=$1`, [behind.id]);
+    await pool.query(`UPDATE resident_documents SET expires_on = (NOW() AT TIME ZONE 'Asia/Kolkata')::date + 10, status='verified' WHERE guest_id=$1`, [behind.id]);
     await pool.query(`DELETE FROM notifications WHERE dedupe_key LIKE 'doc:%'`);
     await S('POST', '/notifications/sweep');
     const docAlerts = (await S('GET', '/notifications')).data.items.filter(n => /expires soon|has expired/.test(n.title));

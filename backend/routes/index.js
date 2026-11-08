@@ -107,7 +107,11 @@ async function computeGuestLedger(guest) {
   }
 
   const joinDate = new Date(guest.join_date);
-  const endDate = guest.leave_date ? new Date(guest.leave_date) : new Date();
+  // Sprint 18 (MONEY, called out): the ledger runs to THIS month in India. The
+  // server's clock is UTC, so between 00:00 and 05:30 IST on the 1st the new
+  // month's rent used to appear only at 05:30. Month maths below reads the
+  // Date's UTC fields (Railway runs Node in UTC), so the IST instant is shifted.
+  const endDate = guest.leave_date ? new Date(guest.leave_date) : new Date(Date.now() + 5.5 * 3600 * 1000);
   if (isNaN(joinDate.getTime())) return { ledger: [], currentBalance: 0 };
 
   let cursor = new Date(joinDate.getFullYear(), joinDate.getMonth(), 1);
@@ -183,8 +187,8 @@ router.get('/dashboard', auth, async (req, res) => {
       pool.query('SELECT COUNT(*) FROM guests WHERE is_active=true'),
       pool.query(`SELECT COUNT(*) as total_rooms, COALESCE(SUM(total_beds),0) as total_beds FROM rooms WHERE is_active=true`),
       pool.query(`SELECT COALESCE(SUM(r.total_beds - COALESCE(occ.occupied,0)),0) as available FROM rooms r LEFT JOIN (SELECT room_id, COUNT(*) as occupied FROM guests WHERE is_active=true AND room_id IS NOT NULL GROUP BY room_id) occ ON r.id=occ.room_id WHERE r.is_active=true`),
-      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND status='confirmed' AND DATE_TRUNC('month',collection_date)=DATE_TRUNC('month',NOW())`),
-      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM purchases WHERE is_deleted=false AND status='confirmed' AND DATE_TRUNC('month',purchase_date)=DATE_TRUNC('month',NOW())`),
+      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND status='confirmed' AND DATE_TRUNC('month',collection_date)=DATE_TRUNC('month',${IST_TODAY_SQL})`   /* Sprint 18: this month in India */),
+      pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM purchases WHERE is_deleted=false AND status='confirmed' AND DATE_TRUNC('month',purchase_date)=DATE_TRUNC('month',${IST_TODAY_SQL})`),
       pool.query(`SELECT g.*,r.room_number FROM guests g LEFT JOIN rooms r ON g.room_id=r.id WHERE g.is_active=true ORDER BY g.created_at DESC LIMIT 5`),
       pool.query(`SELECT c.*,g.name as guest_name FROM collections c LEFT JOIN guests g ON c.guest_id=g.id WHERE c.is_deleted=false AND c.status='confirmed' ORDER BY c.collection_date DESC LIMIT 5`),
       pool.query(`SELECT g.id, g.name, g.monthly_rent, r.room_number, r.monthly_rent as room_rent FROM guests g LEFT JOIN rooms r ON g.room_id=r.id WHERE g.is_active=true AND g.rent_variance_approved=false`),
@@ -1689,7 +1693,7 @@ router.post('/guest-upi-claim', guestAuth, async (req, res) => {
     const g = req.guest;
     const r = await pool.query(
       `INSERT INTO collections(guest_id, guest_name, amount, collection_date, collection_type, payment_mode, status, reported_by_guest, description)
-       VALUES($1,$2,$3,NOW(),'rent','UPI','pending_verification',true,'Self-reported by resident via UPI link') RETURNING *`,
+       VALUES($1,$2,$3,${IST_TODAY_SQL},'rent','UPI','pending_verification',true,'Self-reported by resident via UPI link') RETURNING *`   /* Sprint 18: India's date (was the UTC date) */,
       [g.id, g.name, amt]
     );
     res.status(201).json(r.rows[0]);

@@ -99,7 +99,7 @@ const monthsAgo = n => { const d = ist(); d.setUTCMonth(d.getUTCMonth() - n); re
     ok(occ2.next7.low <= occ.next7.low, 'and pulls the low end down');
 
     // ── KPIs, recomputed here from raw rows ────────────────────────────────
-    await pool.query(`INSERT INTO purchases(amount,category,description,purchase_date,paid_to,payment_mode,created_by,status) VALUES(3000,'Groceries','Rice',CURRENT_DATE,'Store','cash',1,'confirmed')`);
+    await pool.query(`INSERT INTO purchases(amount,category,description,purchase_date,paid_to,payment_mode,created_by,status) VALUES(3000,'Groceries','Rice',(NOW() AT TIME ZONE 'Asia/Kolkata')::date,'Store','cash',1,'confirmed')`);
     r = await A('GET', '/finance/kpis'); eq(r.status, 200, 'kpis');
     const k = r.data;
     const rawIncome = (await pool.query(`SELECT COALESCE(SUM(amount),0)::float AS t FROM collections WHERE is_deleted=false AND status='confirmed' AND to_char(collection_date,'YYYY-MM')=$1`, [thisMonth()])).rows[0].t;
@@ -116,10 +116,10 @@ const monthsAgo = n => { const d = ist(); d.setUTCMonth(d.getUTCMonth() - n); re
     eq(k.expenses, Math.round(rep.totalExpenses), 'MONEY: KPI expenses equal the Reports screen');
 
     // ── Expense insight ────────────────────────────────────────────────────
-    await pool.query(`INSERT INTO purchases(amount,category,description,purchase_date,paid_to,payment_mode,created_by,status) VALUES(3000,'Groceries','Rice again',CURRENT_DATE,'Store','cash',1,'confirmed')`);
-    for (let i = 0; i < 4; i++) await pool.query(`INSERT INTO purchases(amount,category,description,purchase_date,paid_to,payment_mode,created_by,status) VALUES($1,'Milk','hist',CURRENT_DATE - ($2||' days')::interval,'Dairy','cash',1,'confirmed')`, [500, 60 + i * 10]);
-    await pool.query(`INSERT INTO purchases(amount,category,description,purchase_date,paid_to,payment_mode,created_by,status) VALUES(4000,'Milk','spike',CURRENT_DATE,'Dairy','cash',1,'confirmed')`);
-    for (let i = 1; i <= 3; i++) await pool.query(`INSERT INTO purchases(amount,category,description,purchase_date,paid_to,payment_mode,created_by,status) VALUES(9000,'Electricity','bill',CURRENT_DATE - ($1||' months')::interval,'BESCOM','upi',1,'confirmed')`, [i]);
+    await pool.query(`INSERT INTO purchases(amount,category,description,purchase_date,paid_to,payment_mode,created_by,status) VALUES(3000,'Groceries','Rice again',(NOW() AT TIME ZONE 'Asia/Kolkata')::date,'Store','cash',1,'confirmed')`);
+    for (let i = 0; i < 4; i++) await pool.query(`INSERT INTO purchases(amount,category,description,purchase_date,paid_to,payment_mode,created_by,status) VALUES($1,'Milk','hist',(NOW() AT TIME ZONE 'Asia/Kolkata')::date - ($2||' days')::interval,'Dairy','cash',1,'confirmed')`, [500, 60 + i * 10]);
+    await pool.query(`INSERT INTO purchases(amount,category,description,purchase_date,paid_to,payment_mode,created_by,status) VALUES(4000,'Milk','spike',(NOW() AT TIME ZONE 'Asia/Kolkata')::date,'Dairy','cash',1,'confirmed')`);
+    for (let i = 1; i <= 3; i++) await pool.query(`INSERT INTO purchases(amount,category,description,purchase_date,paid_to,payment_mode,created_by,status) VALUES(9000,'Electricity','bill',(NOW() AT TIME ZONE 'Asia/Kolkata')::date - ($1||' months')::interval,'BESCOM','upi',1,'confirmed')`, [i]);
     r = await A('GET', '/finance/expenses'); eq(r.status, 200, 'expense insight');
     ok(r.data.duplicates.some(d => d.amount === 3000), 'the same amount to the same vendor within 3 days is flagged');
     ok(r.data.spikes.some(s => s.amount === 4000 && s.category === 'Milk'), 'a purchase over twice the category average is flagged');
