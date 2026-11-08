@@ -32,7 +32,8 @@ const ORDER = [
   'migrate-resident-experience.js', // Sprint 11: meal ratings, visitors, targeted notices, satisfaction
   'migrate-notify-docs.js',     // Sprint 12: notifications, outbox, documents, maintenance schedule
   'migrate-room-360.js',        // Sprint 13: room_inspections
-  'migrate-guest-messages.js'   // Sprint 16.3: inbox_messages.guest_id (her messages + replies)
+  'migrate-guest-messages.js',  // Sprint 16.3: inbox_messages.guest_id (her messages + replies)
+  'migrate-staff-disable.js'    // Sprint 17: users.disabled_at (turn an account off instead of deleting it)
 ];
 
 let failed = false;

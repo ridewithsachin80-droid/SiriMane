@@ -102,7 +102,7 @@ async function assignCandidates(ids, args) {
   const to = Number(args.assigned_to);
   const [reqs, staff] = await Promise.all([
     pool.query(`SELECT c.id, c.category, c.room_number, c.status, c.assigned_to, c.description FROM complaints c WHERE c.id = ANY($1)`, [ids]),
-    Number.isInteger(to) ? pool.query(`SELECT id, username FROM users WHERE id=$1`, [to]) : Promise.resolve({ rows: [] })
+    Number.isInteger(to) ? pool.query(`SELECT id, username FROM users u WHERE id=$1 AND (to_jsonb(u)->>'disabled_at') IS NULL`, [to]) : Promise.resolve({ rows: [] })
   ]);
   if (!staff.rows[0]) { const e = new Error('Choose a staff member to assign to'); e.status = 400; throw e; }
   const eligible = [], skipped = [];

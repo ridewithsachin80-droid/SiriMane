@@ -164,6 +164,14 @@ async function loadComplaintsCount() {
 // a setContent that does nothing once navigate() has moved on.
 // D16.4-a: a save that waits for the server, then refreshes the screen
 // (pgRooms() after "Save"), must not redraw it if she has moved on meanwhile.
+// S17-3: a room change refreshes the room view she is on — the map or the
+// table (whichever was drawn last; the Map/Table buttons switch without
+// navigating) — and nothing if Room 360 was opened from another screen.
+let roomsMode = 'map';
+function roomView() {
+  if (currentPage !== 'rooms' && currentPage !== 'rooms-table') return () => undefined;
+  return roomsMode === 'table' ? pgRooms : pgRoomMap;
+}
 function refreshGate(seq) {
   // Still on the same screen — including when she tapped that screen again
   // during the save — refresh it; moved elsewhere, skip it.
@@ -266,6 +274,7 @@ let roomsListCache = [];
 
 async function pgRooms() {
   const __draw = drawFor(drawSeq);   // D-15-7: draw only while this screen is still the one showing
+  roomsMode = 'table';   // S17-3 review: the "Table" button calls this directly (currentPage stays 'rooms')
   loading();
   document.getElementById('topbar-actions').innerHTML = '';   // Sprint 15: the button lives on the page itself
   try {
@@ -373,14 +382,14 @@ async function saveRoom(id) {
   const al = document.getElementById('rm-alert');
   const d = { room_number:document.getElementById('rm-num').value.trim(), floor:document.getElementById('rm-floor').value, total_beds:document.getElementById('rm-beds').value, room_type:document.getElementById('rm-type').value, monthly_rent:document.getElementById('rm-rent').value||0, description:document.getElementById('rm-desc').value };
   if(!d.room_number) { showAlert(al,'Room number required'); return; }
-  try { if(id) await API.updateRoom(id,d); else await API.createRoom(d); closeModal(); __ifHere(pgRooms)(); }
+  try { if(id) await API.updateRoom(id,d); else await API.createRoom(d); closeModal(); __ifHere(roomView())(); }
   catch(e) { showAlert(al,e.message); }
 }
 
 async function delRoom(id,num) {
   const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
   if(!confirm(`Delete Room ${num}?`)) return;
-  try { await API.deleteRoom(id); __ifHere(pgRooms)(); } catch(e) { alert(e.message); }
+  try { await API.deleteRoom(id); __ifHere(roomView())(); } catch(e) { alert(e.message); }
 }
 
 // ── GUESTS ────────────────────────────────────────
@@ -2923,11 +2932,11 @@ async function renderAdminStaffTab() {
           <table>
             <thead><tr><th>USERNAME</th><th>ROLE</th><th>CREATED</th><th>ACTIONS</th></tr></thead>
             <tbody id="staff-tb">
-              ${users.map(u=>`<tr data-search="${esc(u.username.toLowerCase())} ${u.role.toLowerCase()}">
-                <td><strong>${esc(u.username)}</strong></td>
+              ${users.map(u=>`<tr data-search="${esc(u.username.toLowerCase())} ${u.role.toLowerCase()}"${u.disabled_at?' class="staff-off" style="opacity:.6"':''}>
+                <td><strong>${esc(u.username)}</strong>${u.disabled_at?' <span class="badge badge-gray">Turned off</span>':''}</td>
                 <td><span class="badge ${u.role==='admin'?'badge-purple':'badge-blue'}">${u.role}</span></td>
                 <td>${fmtDate(u.created_at)}</td>
-                <td><button class="btn btn-outline btn-sm" onclick="userPasswordModal(${u.id},${jsAttr(u.username)})">Password</button> <button class="btn btn-outline btn-sm" onclick="userRenameModal(${u.id},${jsAttr(u.username)})">Rename</button> ${u.username!==JSON.parse(localStorage.getItem('sm_user')||'{}').username?`<button class="btn btn-danger btn-sm btn-icon" onclick="delStaffUser(${u.id},${jsAttr((u.username))})">✕</button>`:'<span class="text-muted">You</span>'}</td>
+                <td><button class="btn btn-outline btn-sm" onclick="userPasswordModal(${u.id},${jsAttr(u.username)})">Password</button> <button class="btn btn-outline btn-sm" onclick="userRenameModal(${u.id},${jsAttr(u.username)})">Rename</button> ${u.username!==JSON.parse(localStorage.getItem('sm_user')||'{}').username?`${u.disabled_at?`<button class="btn btn-outline btn-sm" onclick="setStaffOff(${u.id},${jsAttr(u.username)},false)">Turn on</button>`:`<button class="btn btn-outline btn-sm" onclick="setStaffOff(${u.id},${jsAttr(u.username)},true)">Turn off</button>`} <button class="btn btn-danger btn-sm" onclick="delStaffUser(${u.id},${jsAttr((u.username))})">Remove</button>`:'<span class="text-muted">You</span>'}</td>
               </tr>`).join('')}
             </tbody>
           </table>
@@ -3021,6 +3030,19 @@ async function saveStaffUser() {
   if (!d.username || !d.password) { showAlert(al, 'Username and password required'); return; }
   try { await API.createUser(d); closeModal(); renderAdminPage(); }
   catch(e) { showAlert(al, e.message); }
+}
+
+// S17-1: turn an account off (can't log in, history kept) or back on
+async function setStaffOff(id, username, off) {
+  const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */
+  if (off && !confirm(`Turn off "${username}"? They will be logged out and can't log in until you turn the account on again. Everything they entered stays.`)) return;
+  try {
+    const r = off ? await API.disableUser(id) : await API.enableUser(id);
+    if (!r) return;   // session ended — the login screen is already showing
+    staffUsersCache = null;   // S17-1 review: the request sheet's "Assigned to" list must see the change
+    toast(r.message, 'ok');
+    if (adminActiveTab === 'staff') __ifHere(renderAdminStaffTab)();
+  } catch (e) { toast(e.message); }
 }
 
 async function delStaffUser(id, username) {
@@ -4728,6 +4750,7 @@ function openWizardFromCopilot(w) {
 let roomMapCache = null;
 async function pgRoomMap() {
   const __draw = drawFor(drawSeq);   // D-15-7: draw only while this screen is still the one showing
+  roomsMode = 'map';
   skeleton('cards');
   document.getElementById('topbar-actions').innerHTML = isAdmin()
     ? `<button class="btn btn-primary btn-sm" onclick="roomModal()">${icon('plus')} Add room</button>` : '';
@@ -4790,12 +4813,12 @@ function roomSheet(id) {
 }
 async function setRoomStatus(id, status) {
   const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
-  try { await apiFetch(`/rooms/${id}/status`, { method: 'PUT', body: { status } }); closeModal(); toast(`Room marked ${status}`, 'ok'); __ifHere(pgRoomMap)(); }
+  try { await apiFetch(`/rooms/${id}/status`, { method: 'PUT', body: { status } }); closeModal(); toast(`Room marked ${status}`, 'ok'); __ifHere(roomView())(); }
   catch (e) { const a = document.getElementById('rs-alert'); if (a) showAlert(a, e.message); else toast(e.message); }
 }
 async function markInspected(id) {
   const __ifHere = refreshGate(navSeq); /* D16.4-a: refresh a screen only if she is still on it */ 
-  try { await apiFetch(`/rooms/${id}/status`, { method: 'PUT', body: { last_inspected: nowDate() } }); closeModal(); toast('Inspection recorded', 'ok'); __ifHere(pgRoomMap)(); }
+  try { await apiFetch(`/rooms/${id}/status`, { method: 'PUT', body: { last_inspected: nowDate() } }); closeModal(); toast('Inspection recorded', 'ok'); __ifHere(roomView())(); }
   catch (e) { toast(e.message); }
 }
 
@@ -4833,7 +4856,7 @@ function renderRequestSheet(d, staff) {
         <div class="form-group"><label>Status</label><select id="rq-status">${['open', 'assigned', 'in_progress', 'resolved', 'closed'].map(x => `<option value="${esc(x)}" ${r.status === x ? 'selected' : ''}>${x.replace('_', ' ')}</option>`).join('')}</select></div>
         <div class="form-group"><label>Priority</label><select id="rq-priority">${['low', 'medium', 'high'].map(x => `<option value="${esc(x)}" ${r.priority === x ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
       </div>
-      ${staff.length ? `<div class="form-group"><label>Assigned to</label><select id="rq-assign"><option value="">— nobody —</option>${staff.map(u => `<option value="${u.id}" ${String(r.assigned_to) === String(u.id) ? 'selected' : ''}>${esc(u.username)}</option>`).join('')}</select></div>` : ''}
+      ${staff.length ? `<div class="form-group"><label>Assigned to</label><select id="rq-assign"><option value="">— nobody —</option>${staff.filter(u => !u.disabled_at || String(r.assigned_to) === String(u.id)).map(u => `<option value="${u.id}" ${String(r.assigned_to) === String(u.id) ? 'selected' : ''}>${esc(u.username)}${u.disabled_at ? ' (turned off)' : ''}</option>`).join('')}</select></div>` : ''}
       <div class="form-group"><label>Resolution note</label><textarea id="rq-note" rows="2" placeholder="What was done">${esc(r.resolution_notes || '')}</textarea></div>
       <button class="btn btn-primary" style="width:100%" onclick="saveRequest(${r.id})">Save</button>
 

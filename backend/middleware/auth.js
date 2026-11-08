@@ -52,9 +52,13 @@ const auth = async (req, res, next) => {
     const token = req.headers.authorization?.split(' ')[1];
     if (!token) return res.status(401).json({ error: 'No token' });
     const decoded = verifyToken(token);
-    const result = await pool.query('SELECT id,username,role FROM users WHERE id=$1', [decoded.userId]);
+    // S17-1: a turned-off account stops at its next request. to_jsonb() reads
+    // disabled_at if the column exists and NULL if the migration hasn't run yet.
+    const result = await pool.query(`SELECT id, username, role, (to_jsonb(u)->>'disabled_at') IS NOT NULL AS off FROM users u WHERE id=$1`, [decoded.userId]);
     if (!result.rows[0]) return res.status(401).json({ error: 'User not found' });
-    req.user = result.rows[0];
+    if (result.rows[0].off) return res.status(401).json({ error: 'This account is turned off — ask the owner.' });
+    const { off, ...user } = result.rows[0];
+    req.user = user;
     next();
   } catch (err) {
     return res.status(401).json({ error: 'Invalid token' });

