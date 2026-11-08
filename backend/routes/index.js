@@ -1431,7 +1431,11 @@ router.post('/guest-login', async (req, res) => {
     // CREDENTIAL that verified, not from how she typed it (review F16-1):
     // no hash yet → default; a hash that is of her own number → default.
     const guestKey = String(normPhone(guest.phone) || '').slice(-10);
-    const onDefault = !guest.password_hash || (guestKey.length === 10 && await bcrypt.compare(guestKey, guest.password_hash));
+    const onDefault = !guest.password_hash
+      // what verified is her own number in some phone format ("+91 …", "0…") —
+      // before 15.5 the first login hashed it exactly as typed (review F16-1b)
+      || (phoneLike && guestKey.length === 10 && typedKey === guestKey)
+      || (guestKey.length === 10 && await bcrypt.compare(guestKey, guest.password_hash));
     const token = auth.signToken({ guestId: guest.id, type: 'guest', ...(onDefault ? { pwc: 1 } : {}) }, { expiresIn: onDefault ? '1h' : '24h' });
     res.json({
       token,
@@ -1509,8 +1513,8 @@ router.post('/guest-change-password', guestAuth, async (req, res) => {
     }
     if (!valid) return res.status(401).json({ error: 'Current password is incorrect' });
     // S16-2: the new password can't be her phone number (that's the default anyone could guess)
-    const newKey = String(normPhone(newPassword) || '').slice(-10);
-    if (/^[\d\s+()-]+$/.test(String(newPassword)) && newKey === guestKey) return res.status(400).json({ error: 'Choose a password that is not your phone number.' });
+    // …nor her number with a symbol added ("98….", "+91-98…") — review
+    if (guestKey.length === 10 && String(newPassword).replace(/\D/g, '').includes(guestKey)) return res.status(400).json({ error: 'Choose a password that is not your phone number.' });
     if (newPassword === currentPassword) return res.status(400).json({ error: 'The new password must be different.' });
     const hash = await bcrypt.hash(newPassword, 10);
     await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [hash, g.id]);

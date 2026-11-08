@@ -296,6 +296,18 @@ async function main() {
           await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [await require('bcrypt').hash(nb, 6), gb.id]);
           rb = await XL(nb, nb);
           ok(rb.status === 200 && rb.data.must_change_password === true, 'S16-2 F16-1 a stored password that is her own number still forces the change');
+          // F16-1b: before 15.5 the first login hashed the number EXACTLY as typed
+          for (const fmt of [x => '+91 ' + x, x => x.slice(0, 5) + ' ' + x.slice(5), x => '91' + x, x => '0' + x]) {
+            const typed = fmt(nb);
+            await pool.query('UPDATE guests SET phone=$1, password_hash=$2 WHERE id=$3', [typed.length <= 15 ? typed : nb, await require('bcrypt').hash(typed, 6), gb.id]);
+            const rf = await XL(nb, typed);
+            ok(rf.status === 200 && rf.data.must_change_password === true, `S16-2 F16-1b SECURITY: an old hash of "${typed}" still forces the change`);
+          }
+          // …and her number with a symbol added is not accepted as a NEW password
+          await pool.query('UPDATE guests SET phone=$1, password_hash=NULL WHERE id=$2', [nb, gb.id]);
+          const rt = await XL(nb, nb);
+          eq((await api('POST', '/guest-change-password', { currentPassword: nb, newPassword: nb + '.' }, rt.data.token)).status, 400, 'S16-2 her number plus a dot is refused as the new password');
+          eq((await api('POST', '/guest-change-password', { currentPassword: nb, newPassword: 'pg-' + nb }, rt.data.token)).status, 400, 'S16-2 …and with a prefix');
           await A('DELETE', `/guests/${gb.id}`);
         }
         // S16-3 separate limiters: 10 wrong resident logins don't block staff from the same address
