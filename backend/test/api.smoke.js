@@ -335,6 +335,17 @@ async function main() {
           for (let i = 1; i <= 20; i++) await sl(i, 's162staff', 'nope' + i);
           eq(await sl(21, 'S162STAFF ', 'nope-21'), 429, 'S16.2-1 SECURITY: the 21st wrong staff password is blocked (username case/space does not reset it)');
           eq(await sl(22, 'admin', process.env.ADMIN_PASSWORD || 'SiriMane@2024'), 200, 'S16.2-2 the admin is not affected by another username\'s limit');
+          // S16.3-4: each pause is on the bell, once, with only the last 4 digits of her number
+          const bell = (await pool.query(`SELECT title, for_role FROM notifications WHERE dedupe_key LIKE 'lockout:%' ORDER BY id`)).rows;
+          const resB = bell.filter(b => b.title.includes('ending ' + victim.slice(-4)));
+          ok(resB.length === 1 && resB[0].for_role === 'staff', `S16.3-4 the warden is told once that a resident login was paused (${resB.length})`);
+          ok(!bell.some(b => b.title.includes(victim)), 'S16.3-4 PRIVACY: the full phone number is not on the bell');
+          ok(bell.some(b => b.title.includes('s162staff') && b.for_role === 'admin'), 'S16.3-4 the admin is told a staff login was paused');
+          // S16.4-2: 21 tries at a username that does NOT exist → paused, but nothing on the bell
+          const ghost = 'ghost<b>' + 'x'.repeat(60);
+          for (let i = 1; i <= 21; i++) await fetch(BASE + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': '203.0.113.' + (100 + i) }, body: JSON.stringify({ username: ghost, password: 'nope' + i }) });
+          await new Promise(r => setTimeout(r, 300));
+          ok(!(await pool.query(`SELECT 1 FROM notifications WHERE title LIKE '%ghost%'`)).rows.length, 'S16.4-2 SECURITY: a made-up username never reaches the admin\'s bell');
           await A('DELETE', `/users/${su.id}`); await A('DELETE', `/guests/${gv.id}`);
         }
         // S16-4 bcrypt 6 accepts passwords hashed by bcrypt 5 — through the real login routes.
@@ -350,6 +361,71 @@ async function main() {
         r16 = await api('POST', '/guest-login', { mobile: g16.phone, password: 'päss wörd ₹' });
         ok(r16.status === 200 && r16.data.must_change_password === false, 'S16-4 a resident password hashed by bcrypt 5 still logs in (non-ASCII too)');
         await A('DELETE', `/users/${u16.id}`); await A('DELETE', `/guests/${g16.id}`);
+      }
+      // ── Sprint 16.3: account management ──────────────────────
+      {
+        const LX = (ip) => ({ 'Content-Type': 'application/json', 'X-Forwarded-For': '192.0.2.' + ip });
+        const login = async (u, p, ip) => { const r = await fetch(BASE + '/api/auth/login', { method: 'POST', headers: LX(ip), body: JSON.stringify({ username: u, password: p }) }); return { status: r.status, data: await r.json().catch(() => ({})) }; };
+        const t163 = (await A('POST', '/users', { username: 's163user', password: 'First-Pass-1', role: 'staff' })).data;
+        const tok = (await login('s163user', 'First-Pass-1', 1)).data.token;
+        // S16.3-1 own password
+        eq((await api('POST', '/auth/change-password', { currentPassword: 'First-Pass-1', newPassword: 'short' }, tok)).status, 400, 'S16.3-1 a new password under 8 characters is refused');
+        eq((await api('POST', '/auth/change-password', { currentPassword: 'First-Pass-1', newPassword: 'S163USER' }, tok)).status, 400, 'S16.3-1 the username is refused as a password');
+        eq((await api('POST', '/auth/change-password', { currentPassword: 'wrong-one', newPassword: 'Second-Pass-2' }, tok)).status, 401, 'S16.3-1 the current password is required');
+        eq((await api('POST', '/auth/change-password', { currentPassword: 'First-Pass-1', newPassword: 'Second-Pass-2' }, tok)).status, 200, 'S16.3-1 staff can change their own password');
+        eq((await login('s163user', 'Second-Pass-2', 2)).status, 200, 'S16.3-1 …and log in with it');
+        // S16.3-2 admin sets a password, renames
+        eq((await api('POST', `/users/${t163.id}/password`, { password: 'Third-Pass-3' }, tok)).status, 403, 'S16.3-2 SECURITY: staff cannot set another account\'s password');
+        eq((await A('POST', `/users/${t163.id}/password`, { password: 'abc' })).status, 400, 'S16.3-2 admin-set password follows the 8-character rule');
+        eq((await A('POST', `/users/${t163.id}/password`, { password: 'Third-Pass-3' })).status, 200, 'S16.3-2 admin sets a new password');
+        eq((await login('s163user', 'Second-Pass-2', 3)).status, 401, 'S16.3-2 the old password stops working');
+        eq((await login('s163user', 'Third-Pass-3', 4)).status, 200, 'S16.3-2 the new one works');
+        eq((await A('PUT', `/users/${t163.id}/username`, { username: 'ADMIN' })).status, 400, 'S16.3-2 a name taken in another case is refused');
+        eq((await A('PUT', `/users/${t163.id}/username`, { username: 'a b<c>' })).status, 400, 'S16.3-2 odd characters are refused');
+        eq((await A('POST', '/users', { username: 'x<img src=x>', password: 'Long-Enough-1', role: 'staff' })).status, 400, 'S16.4 a new account with odd characters in its name is refused');
+        eq((await A('POST', '/users', { username: 'ab', password: 'Long-Enough-1', role: 'staff' })).status, 400, 'S16.4 a new account name under 3 characters is refused');
+        { const rn = await A('POST', '/users', { username: 16412345, password: 'Long-Enough-1', role: 'staff' });
+          eq(rn.status, 201, 'S16.4 a numeric username is treated as text (no server error)');
+          if (rn.data && rn.data.id) await A('DELETE', `/users/${rn.data.id}`); }
+        eq((await api('PUT', `/users/${t163.id}/username`, { username: 's163self' }, tok)).status, 403, 'S16.3-2 SECURITY: staff cannot rename accounts');
+        let r163 = await A('PUT', `/users/${t163.id}/username`, { username: 's163renamed' });
+        eq(r163.status, 200, 'S16.3-2 admin renames an account');
+        eq((await api('GET', '/auth/me', null, tok)).status, 200, 'S16.3-2 an open session keeps working after the rename');
+        eq((await login('s163renamed', 'Third-Pass-3', 5)).status, 200, 'S16.3-2 the new name logs in');
+        eq((await login('s163user', 'Third-Pass-3', 6)).status, 401, 'S16.3-2 the old name no longer does');
+        ok((await pool.query(`SELECT 1 FROM activity_log WHERE action='user_rename' AND details='s163user → s163renamed'`)).rows.length === 1, 'S16.4-4 the audit log records old → new');
+        eq((await A('POST', '/users', { username: 'S163RENAMED', password: 'Other-Pass-1', role: 'staff' })).status, 400, 'S16.4-4 creating a name that exists in another case is refused');
+        const audit = (await pool.query(`SELECT action FROM activity_log WHERE action IN ('user_password_reset','user_rename','password_change') ORDER BY id`)).rows.map(x => x.action);
+        ok(audit.includes('user_password_reset') && audit.includes('user_rename') && audit.includes('password_change'), 'S16.3-2 all three are in the Audit Log');
+        r163 = await A('DELETE', `/users/${t163.id}`);
+        ok(r163.status === 409 && /set a new password/.test(r163.data.error || ''), 'S16.3 deleting an account with history is refused with a clear way out (not a database error)');
+        // S16.3-3 reset a resident's app login
+        const n163 = '9' + String(Date.now()).slice(-9);
+        const g163 = (await A('POST', '/guests', { name: 'S163 Resident', phone: n163, join_date: today, monthly_rent: 5000, deposit_amount: 0 })).data;
+        await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [await require('bcrypt').hash('Her-Own-1', 6), g163.id]);
+        eq((await S('POST', `/guests/${g163.id}/reset-login`)).status, 200, 'S16.3-3 the warden (staff) can reset a resident\'s app login');
+        ok((await pool.query(`SELECT 1 FROM notifications WHERE for_role='admin' AND title LIKE '%reset S163 Resident''s app login%'`)).rows.length === 1, 'S16.4-3 the admin is told who reset whose login');
+        let gl163 = await fetch(BASE + '/api/guest-login', { method: 'POST', headers: LX(7), body: JSON.stringify({ mobile: n163, password: n163 }) }).then(r => r.json());
+        eq(gl163.must_change_password, true, 'S16.3-3 she logs in with her number and must set her own password');
+        eq((await api('POST', `/guests/${g163.id}/reset-login`)).status, 401, 'S16.3-3 SECURITY: needs a staff login');
+        // S16.3-7 her messages and the replies
+        const tokG = (await api('POST', '/guest-change-password', { currentPassword: n163, newPassword: 'Her-New-2' }, gl163.token)).data.token;
+        eq((await api('POST', '/guest-my-message', { message: 'Geyser not working', subject: 'Water', guest_name: 'Someone Else' }, tokG)).status, 200, 'S16.3-7 she sends a message from the app');
+        const inb = (await pool.query(`SELECT * FROM inbox_messages WHERE guest_id=$1`, [g163.id])).rows;
+        ok(inb.length === 1 && inb[0].guest_name === 'S163 Resident', 'S16.3-7 SECURITY: linked to her account, with her name from her record (not the form)');
+        await A('PUT', `/inbox/${inb[0].id}/reply`, { reply: 'Plumber coming at 5 pm' });
+        let mine = (await api('GET', '/guest-my-messages', null, tokG)).data;
+        ok(mine.ready === true && mine.messages[0].reply === 'Plumber coming at 5 pm', 'S16.3-7 she sees the reply');
+        const other = (await api('POST', '/guest-login', { mobile: guest.phone, password: 'Resident@2026' })).data.token;
+        ok(other && !(await api('GET', '/guest-my-messages', null, other)).data.messages.some(m => m.id === inb[0].id), 'S16.3-7 PRIVACY: another resident never sees it');
+        eq((await api('GET', '/guest-my-messages')).status, 401, 'S16.3-7 SECURITY: needs her login');
+        // Before the owner runs the migration (column missing): sending still works, the list says "soon"
+        await pool.query('ALTER TABLE inbox_messages DROP COLUMN guest_id');
+        eq((await api('POST', '/guest-my-message', { message: 'Before migration' }, tokG)).status, 200, 'S16.3-7 before the migration, sending still works');
+        mine = (await api('GET', '/guest-my-messages', null, tokG)).data;
+        ok(mine.ready === false && mine.messages.length === 0, 'S16.3-7 before the migration, the list says replies will appear soon');
+        await pool.query('ALTER TABLE inbox_messages ADD COLUMN IF NOT EXISTS guest_id INTEGER REFERENCES guests(id) ON DELETE SET NULL');
+        await A('DELETE', `/guests/${g163.id}`);
       }
       for (const n of ['S151 Old Form', 'S151 Wizard', 'S151 Truthy']) { const g = (await A('GET', '/guests')).data.find(x => x.name === n); if (g) await A('DELETE', `/guests/${g.id}`); }
     }

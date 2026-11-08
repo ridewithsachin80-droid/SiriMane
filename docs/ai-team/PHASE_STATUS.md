@@ -154,3 +154,31 @@ Evidence (owner, PowerShell from home internet, 8 Nov 12:05, production = 16.1):
 | ID | Acceptance criterion | Review |
 |---|---|---|
 | S16.2.1-1 | The per-address limit keys on `req.ip` again (X-Real-IP removed, per reviewer: keep it only if proven per-client and unforgeable — not proven, and not needed); per-account limits unchanged | SEC |
+
+## Sprint 16.3 — account management (criteria recorded before build)
+Owner, 8 Nov 12:31: "you don't need my permission to start building after you got what you need" — standing rule recorded in HANDOFF; releases, money, paid services, renames/deletions and data changes still need him.
+Released before this sprint: 16.2 + 16.2.1 (PR #14, main = 76beb18). Production Serverless switched OFF by owner (in-process jobs need an always-on container); replicas = 1.
+
+| ID | Acceptance criterion | Review |
+|---|---|---|
+| S16.3-1 | Admin and staff can change their own password from a "My password" button: current password required; new ≥ 8 characters, not the username, different from current; clear message | SEC |
+| S16.3-2 | Admin can set a new password for any staff/admin account (≥ 8 chars) and rename any username (3–30 of letters, digits, . _ -; unique, case-insensitive); both logged in the Audit Log; sessions keep working after a rename | SEC REQUIRED |
+| S16.3-3 | Staff or admin can reset a resident's app login: her password goes back to her phone number and she must set her own at the next login; audit-logged | SEC |
+| S16.3-4 | When a per-account login pause trips, a bell notification appears (resident → warden, staff/admin → admin) once per account per window, showing only the last 4 digits of a resident's number | SEC/UX |
+| S16.3-5 | Resident "Set your own password" screen: labels above full-width boxes at 360/390 px | UX |
+| S16.3-6 | 12 gates green twice; independent review before merge | QA |
+| S16.3-7 | **Found while answering the owner (12:33): replies to residents' messages were never shown to them.** A message sent from the resident app is linked to her account (`inbox_messages.guest_id`, additive migration `migrate-guest-messages.js`); her name/phone/room come from her record, not from the form; Help shows "My messages" with each reply. Before the migration runs, sending still works and the list says replies will appear soon. The public form (no login) is unchanged | SEC/DATA |
+
+## Sprint 16.4 — D-15-7 + 16.3 review recommendations
+**Process deviation (recorded honestly):** the D-15-7 work (S16.4-1) began before these criteria were written, while 16.3 was in review. S16.4-2…5 were written before their build.
+16.3 review: APPROVE FOR TEST DEPLOYMENT, no production blocker (merged to ai/test, PR #15).
+
+| ID | Acceptance criterion | Review |
+|---|---|---|
+| S16.4-1 | D-15-7: a screen whose data arrives after she has moved to another screen never draws over it. Every top-level drawing function draws through drawFor(drawSeq); navigate() hands each screen its own number (two quick taps both bump navSeq before either screen starts). Proven by a slow-network ui test (delayed /purchases and /home, then Rooms) that fails with the guard off | QA/UX |
+| S16.4-2 | The "login paused" bell alert fires only for a username or resident number that really exists (active), and never echoes more than 30 characters | SEC |
+| S16.4-3 | A resident app-login reset also puts a notification on the ADMIN's bell (who reset whose) | SEC |
+| S16.4-4 | Rename writes "old → new" to the audit log; creating a user is refused if the name exists in another case | SEC |
+| S16.4-5 | 12 gates green twice; independent review before merge | QA |
+
+**16.4 status:** review round 3 APPROVE (c3553ce) after two BLOCKs — see TEST_REPORT. Also fixed in review: B16.4-1 symlink, D16.4-a refresh gate (46 save helpers), D16.4-b error card, username format on create. Release: no new migration in 16.4 (16.3 needs `node backend/scripts/migrate-all.js`).

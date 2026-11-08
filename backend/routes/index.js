@@ -154,12 +154,17 @@ router.post('/auth/login', async (req, res) => {
 
 router.post('/auth/change-password', auth, async (req, res) => {
   const { currentPassword, newPassword } = req.body;
-  if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Required' });
+  if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Type your current password and a new one' });
   try {
     const r = await pool.query('SELECT * FROM users WHERE id=$1', [req.user.id]);
     if (!(await bcrypt.compare(currentPassword, r.rows[0].password_hash)))
       return res.status(401).json({ error: 'Wrong current password' });
+    // Sprint 16.3 (S16.3-1): same rule as an admin-set password
+    const why = staffPasswordProblem(newPassword, r.rows[0].username);
+    if (why) return res.status(400).json({ error: why });
+    if (newPassword === currentPassword) return res.status(400).json({ error: 'The new password must be different.' });
     await pool.query('UPDATE users SET password_hash=$1 WHERE id=$2', [await bcrypt.hash(newPassword, 12), req.user.id]);
+    await logActivity(req, 'password_change', 'own password');
     res.json({ message: 'Password changed' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1304,16 +1309,85 @@ router.get('/users', auth, requireAdmin, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Sprint 16.3: staff/admin passwords and usernames
+function staffPasswordProblem(pw, username) {
+  pw = String(pw || '');
+  if (pw.length < 8) return 'Use at least 8 characters.';
+  if (username && pw.trim().toLowerCase() === String(username).trim().toLowerCase()) return 'The password cannot be the username.';
+  return null;
+}
+const USERNAME_RE = /^[A-Za-z0-9._-]{3,30}$/;
+
+// POST /api/users/:id/password — admin sets a new password for any account (S16.3-2)
+router.post('/users/:id/password', auth, requireAdmin, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Bad user id' });
+  try {
+    const u = await pool.query('SELECT id, username FROM users WHERE id=$1', [id]);
+    if (!u.rows[0]) return res.status(404).json({ error: 'User not found' });
+    const why = staffPasswordProblem(req.body && req.body.password, u.rows[0].username);
+    if (why) return res.status(400).json({ error: why });
+    await pool.query('UPDATE users SET password_hash=$1 WHERE id=$2', [await bcrypt.hash(req.body.password, 12), id]);
+    await logActivity(req, 'user_password_reset', u.rows[0].username);
+    res.json({ message: `New password set for ${u.rows[0].username}` });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// PUT /api/users/:id/username — admin renames an account (S16.3-2). Tokens
+// carry the user id, not the name, so open sessions keep working.
+router.put('/users/:id/username', auth, requireAdmin, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const name = String((req.body && req.body.username) || '').trim();
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Bad user id' });
+  if (!USERNAME_RE.test(name)) return res.status(400).json({ error: 'Username: use 3–30 letters, digits, dots, dashes or underscores.' });
+  try {
+    const clash = await pool.query('SELECT id FROM users WHERE lower(username)=lower($1) AND id<>$2', [name, id]);
+    if (clash.rows[0]) return res.status(400).json({ error: 'That username is already taken.' });
+    const before = await pool.query('SELECT username FROM users WHERE id=$1', [id]);
+    if (!before.rows[0]) return res.status(404).json({ error: 'User not found' });
+    const r = await pool.query('UPDATE users SET username=$1 WHERE id=$2 RETURNING id, username, role', [name, id]);
+    await logActivity(req, 'user_rename', `${before.rows[0].username} → ${name}`);   // S16.4-4: old → new
+    res.json(r.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(400).json({ error: 'That username is already taken.' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/guests/:id/reset-login — staff/admin put a resident back on the
+// default (her phone number); she must set her own at the next login (S16.3-3)
+router.post('/guests/:id/reset-login', auth, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Bad resident id' });
+  try {
+    const r = await pool.query('UPDATE guests SET password_hash=NULL WHERE id=$1 RETURNING id, name', [id]);
+    if (!r.rows[0]) return res.status(404).json({ error: 'Resident not found' });
+    await logActivity(req, 'guest_login_reset', `${r.rows[0].name} (#${id})`);
+    // S16.4-3: the admin always hears about it — after a reset, whoever logs in
+    // first with her number sets the password
+    const who = req.user && req.user.username ? req.user.username : 'staff';
+    await require('../services/notify').push({ level: 'important', category: 'system', title: `${who} reset ${r.rows[0].name}'s app login`,
+      detail: 'She logs in with her phone number and must set a new password. If she did not ask for this, check with her.',
+      action_page: 'admin', for_role: 'admin', dedupe_key: `loginreset:${id}:${Date.now()}` }).catch(() => {});
+    res.json({ message: `${r.rows[0].name} can log in with her phone number and will be asked to set her own password.` });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 router.post('/users', auth, requireAdmin, async (req, res) => {
-  const { username, password, role } = req.body;
+  const { password, role } = req.body;
+  const username = req.body.username == null ? '' : String(req.body.username).trim();   // review 16.4: one normalised value everywhere
   if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
-  if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  { const why = staffPasswordProblem(password, username); if (why) return res.status(400).json({ error: why }); }   // S16.3: one rule for staff passwords
+  if (!USERNAME_RE.test(username)) return res.status(400).json({ error: 'Username: use 3–30 letters, digits, dots, dashes or underscores.' });   // same rule as rename
+  // S16.4-4: "Warden" and "warden" are the same name
+  try { const c = await pool.query('SELECT 1 FROM users WHERE lower(username)=lower($1) LIMIT 1', [username]); if (c.rows[0]) return res.status(400).json({ error: 'Username already exists' }); }
+  catch (err) { return res.status(500).json({ error: err.message }); }
   const finalRole = role === 'admin' ? 'admin' : 'staff';
   try {
     const hash = await bcrypt.hash(password, 12);
     const r = await pool.query(
       'INSERT INTO users(username,password_hash,role) VALUES($1,$2,$3) RETURNING id,username,role,created_at',
-      [username.trim(), hash, finalRole]
+      [username, hash, finalRole]
     );
     await logActivity(req, 'user_create', `${username} (${finalRole})`);
     res.status(201).json(r.rows[0]);
@@ -1330,7 +1404,13 @@ router.delete('/users/:id', auth, requireAdmin, async (req, res) => {
     if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
     await logActivity(req, 'user_delete', r.rows[0].username);
     res.json({ message: 'Removed' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    // Sprint 16.3: someone who has entered anything (audit log, payments,
+    // expenses …) is part of the books' history and can't be deleted. Say so
+    // plainly — and how to lock them out instead.
+    if (err.code === '23503') return res.status(409).json({ error: 'This account has entries in the books and the audit log, so it cannot be removed. To stop them logging in, set a new password for it (Password button).' });
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ── AUDIT LOG (admin only) ────────────────────────
@@ -1525,6 +1605,40 @@ router.post('/guest-change-password', guestAuth, async (req, res) => {
     const token = auth.signToken({ guestId: g.id, type: 'guest' }, { expiresIn: '24h' });
     res.json({ message: 'Password changed successfully', token });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Sprint 16.3 (S16.3-7): her messages and the replies ──────────────────
+// Sent from the logged-in app: linked to HER account, and her name/phone/room
+// come from her record — nobody can post "as her" by typing her name. Works
+// before migrate-guest-messages.js has run (stored unlinked, as before).
+router.post('/guest-my-message', guestAuth, async (req, res) => {
+  const g = req.guest;
+  const subject = String((req.body && req.body.subject) || '').trim().slice(0, 200) || null;
+  const message = String((req.body && req.body.message) || '').trim();
+  if (!message) return res.status(400).json({ error: 'Please write a message' });
+  if (message.length > 2000) return res.status(400).json({ error: 'Please keep it under 2,000 characters' });
+  try {
+    const room = g.room_id ? (await pool.query('SELECT room_number FROM rooms WHERE id=$1', [g.room_id])).rows[0] : null;
+    const vals = [g.name, g.phone, room ? room.room_number : null, subject, message];
+    try {
+      await pool.query(`INSERT INTO inbox_messages(guest_name,guest_phone,room_number,subject,message,guest_id) VALUES($1,$2,$3,$4,$5,$6)`, [...vals, g.id]);
+    } catch (e) {
+      if (e.code !== '42703') throw e;   // column not there yet → store as before
+      await pool.query(`INSERT INTO inbox_messages(guest_name,guest_phone,room_number,subject,message) VALUES($1,$2,$3,$4,$5)`, vals);
+    }
+    res.json({ message: 'Message sent' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.get('/guest-my-messages', guestAuth, async (req, res) => {
+  try {
+    const r = await pool.query(`SELECT id, subject, message, reply, replied_at, created_at FROM inbox_messages
+      WHERE guest_id=$1 ORDER BY created_at DESC LIMIT 20`, [req.guest.id]);
+    res.json({ ready: true, messages: r.rows });
+  } catch (err) {
+    if (err.code === '42703') return res.json({ ready: false, messages: [] });
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // POST /api/guest-upi-claim — resident reports "I've paid" after using the
