@@ -35,14 +35,14 @@ app.use(rateLimit({
 // Sprint 16 (S16-3): staff and residents get SEPARATE counters. On the PG's
 // shared Wi-Fi every phone has the same public address, so residents' typos
 // used to lock the warden out (and the other way round).
-// Sprint 16.2 (S16.2-3): which address is "the client"? A production test
-// showed a forged X-Forwarded-For changes req.ip on Railway, so prefer the
-// edge-written X-Real-IP when present; req.ip otherwise (local, tests).
-const clientAddress = (req) => String(req.headers['x-real-ip'] || req.ip || '').trim();
+// Client address = req.ip (trust proxy 1). Verified on production 8 Nov:
+// from the internet, a forged X-Forwarded-For does NOT change it (12 tries
+// with 12 forged addresses were counted together and blocked at the 11th).
+// Only requests from inside Railway's own network can set it. X-Real-IP was
+// tried in 16.2 and removed in 16.2.1 — not proven per-client.
 const makeLoginLimiter = () => rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
-  keyGenerator: clientAddress,
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true,

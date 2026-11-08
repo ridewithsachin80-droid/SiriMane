@@ -148,3 +148,9 @@ Owner decisions: (1) one resident per phone number · (3) force residents to cha
 | S16.2-2 | Other residents and the warden are not affected by one account's limit; the message says when to try again | SEC/UX |
 | S16.2-3 | The per-address limiter keys on Railway's edge-written client address when present (documented in code), falling back to req.ip | SEC |
 | S16.2-4 | 12 gates green twice; independent review before merge | QA |
+
+## Sprint 16.2.1 — settle the client address (criteria before build)
+Evidence (owner, PowerShell from home internet, 8 Nov 12:05, production = 16.1): 12 wrong resident logins, each with a different forged `X-Forwarded-For` → attempts 1–10 401, **11 → 429**, 12 → 401. A 429 at 11 is only possible if all twelve were counted under ONE key, i.e. `req.ip` (trust proxy 1) is the real client address for internet traffic; 12 → 401 matches the fixed 15-min window expiring (owner had failed logins ~15 min earlier). The earlier all-401 result came from the Railway console, i.e. from inside Railway's network.
+| ID | Acceptance criterion | Review |
+|---|---|---|
+| S16.2.1-1 | The per-address limit keys on `req.ip` again (X-Real-IP removed, per reviewer: keep it only if proven per-client and unforgeable — not proven, and not needed); per-account limits unchanged | SEC |
