@@ -191,3 +191,8 @@ Implementer gates G155g/h: 12/12 ×2, 2,552.
 - 299b94c: **APPROVE FOR TEST DEPLOYMENT** — 12/12 on fresh gate3, 2,600. Production blocker **F16-1c** (old data): an old hash of a number saved with "." "/" or letters still skips the forced change → force whenever the password's digits contain her number.
 Data scripts: reviewer ran both on 15 crafted rows — dry run changes nothing, apply atomic and guarded, re-run changes 0; owner should read both dry-run lists before --apply.
 Implementer gates: 12/12 ×2, 2,602.
+
+### Sprint 16.1 — independent review of f90e349: **APPROVE FOR TEST DEPLOYMENT, no code blocker for production**
+12/12 on fresh gate3, 2,604 (xss variance). Old hashes of her number in 10 formats incl. "X.X", "+91.X", "X/", "X (s)" all force the change; never-logged-in spellings get 401; new passwords containing her number refused.
+Release checklist (not code): verify on Railway that a changing `X-Forwarded-For` still reaches 429 · read both data-script dry runs before `--apply` · resident tokens issued before release stay valid up to 24 h · accepted risk: whoever first logs in with the default sets the password.
+Implementer gates: 12/12 ×2, 2,606.

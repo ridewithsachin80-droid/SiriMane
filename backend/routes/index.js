@@ -1435,6 +1435,9 @@ router.post('/guest-login', async (req, res) => {
       // what verified is her own number in some phone format ("+91 …", "0…") —
       // before 15.5 the first login hashed it exactly as typed (review F16-1b)
       || (phoneLike && guestKey.length === 10 && typedKey === guestKey)
+      // …or ANY password that contains her number (old hashes of "98765.43210",
+      // "+91.98…", "98…/", "98… (s)") — the rule change-password uses (F16-1c)
+      || (guestKey.length === 10 && String(password).replace(/\D/g, '').includes(guestKey))
       || (guestKey.length === 10 && await bcrypt.compare(guestKey, guest.password_hash));
     const token = auth.signToken({ guestId: guest.id, type: 'guest', ...(onDefault ? { pwc: 1 } : {}) }, { expiresIn: onDefault ? '1h' : '24h' });
     res.json({

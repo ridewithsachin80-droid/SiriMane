@@ -132,3 +132,8 @@ Owner decisions: (1) one resident per phone number · (3) force residents to cha
 | S16-6 | 12 gates green twice on fresh DBs; independent review before merge to ai/test | QA |
 | S16-7 | **Owner-approved 8 Nov 07:33** — new `backend/scripts/tidy-phones.js`: dry run by default lists every active-or-not resident whose phone is not 10 plain digits and what it would become; `--apply` rewrites only those rows, skips (and lists) any that would collide with another active resident's number or that don't reduce to 10 digits; safe to re-run | DATA REQUIRED |
 | S16-8 | **Owner-approved 8 Nov 07:33** — new `backend/scripts/fix-id-type.js`: dry run lists residents whose ID type is a placeholder ("— select —" and variants); `--apply` sets only that field to NULL; safe to re-run | DATA REQUIRED |
+
+## Sprint 16.1 — F16-1c (criteria recorded before build)
+| ID | Acceptance criterion | Review |
+|---|---|---|
+| S16.1-1 | Any login whose verified password's digits contain her 10-digit number (old hashes of "X.X", "+91.X", "X/", "X (s)") is treated as the default and forced to change — the same rule change-password uses | SEC REQUIRED |
