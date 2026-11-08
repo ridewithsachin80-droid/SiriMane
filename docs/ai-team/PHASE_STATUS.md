@@ -168,3 +168,15 @@ Released before this sprint: 16.2 + 16.2.1 (PR #14, main = 76beb18). Production 
 | S16.3-5 | Resident "Set your own password" screen: labels above full-width boxes at 360/390 px | UX |
 | S16.3-6 | 12 gates green twice; independent review before merge | QA |
 | S16.3-7 | **Found while answering the owner (12:33): replies to residents' messages were never shown to them.** A message sent from the resident app is linked to her account (`inbox_messages.guest_id`, additive migration `migrate-guest-messages.js`); her name/phone/room come from her record, not from the form; Help shows "My messages" with each reply. Before the migration runs, sending still works and the list says replies will appear soon. The public form (no login) is unchanged | SEC/DATA |
+
+## Sprint 16.4 — D-15-7 + 16.3 review recommendations
+**Process deviation (recorded honestly):** the D-15-7 work (S16.4-1) began before these criteria were written, while 16.3 was in review. S16.4-2…5 were written before their build.
+16.3 review: APPROVE FOR TEST DEPLOYMENT, no production blocker (merged to ai/test, PR #15).
+
+| ID | Acceptance criterion | Review |
+|---|---|---|
+| S16.4-1 | D-15-7: a screen whose data arrives after she has moved to another screen never draws over it. Every top-level drawing function draws through drawFor(drawSeq); navigate() hands each screen its own number (two quick taps both bump navSeq before either screen starts). Proven by a slow-network ui test (delayed /purchases and /home, then Rooms) that fails with the guard off | QA/UX |
+| S16.4-2 | The "login paused" bell alert fires only for a username or resident number that really exists (active), and never echoes more than 30 characters | SEC |
+| S16.4-3 | A resident app-login reset also puts a notification on the ADMIN's bell (who reset whose) | SEC |
+| S16.4-4 | Rename writes "old → new" to the audit log; creating a user is refused if the name exists in another case | SEC |
+| S16.4-5 | 12 gates green twice; independent review before merge | QA |
