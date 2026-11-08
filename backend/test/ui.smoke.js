@@ -46,6 +46,7 @@ async function runAtWidth(browser, BASE, width) {
   const ctx = await browser.createBrowserContext();
   const page = await ctx.newPage();
   if (require('./fakeclock').active) await page.evaluateOnNewDocument(require('./fakeclock').pageClock);   // Sprint 18: faked clock
+  await page.emulateTimezone('Asia/Kolkata');   // Sprint 18: every phone at the PG runs on India time
   await page.setViewport({ width, height: 780, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
   const jsErrors = [];
   page.on('pageerror', e => jsErrors.push(e.message));

@@ -82,6 +82,7 @@ const SH = (t) => `<b data-xss=${t}>`;
   try {
     const page = await browser.newPage();
     if (require('./fakeclock').active) await page.evaluateOnNewDocument(require('./fakeclock').pageClock);   // Sprint 18: faked clock
+    await page.emulateTimezone('Asia/Kolkata');   // Sprint 18: every phone at the PG runs on India time
     await page.setViewport({ width: 390, height: 780, isMobile: true, hasTouch: true });
     const dialogs = [];
     page.on('dialog', d => { dialogs.push(d.message()); d.dismiss().catch(() => {}); });
