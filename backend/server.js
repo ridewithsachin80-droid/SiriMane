@@ -78,14 +78,20 @@ const accountLimiter = (max, keyOf, who) => rateLimit({
       const key = keyOf(req.body || {});
       const win = Math.floor(Date.now() / options.windowMs);
       const resident = key.startsWith('g:');
-      const label = resident ? `a resident number ending ${key.slice(-4)}` : `staff login "${key.slice(2)}"`;
-      require('./services/notify').push({
+      const label = resident ? `a resident number ending ${key.slice(-4)}` : `staff login "${key.slice(2, 32)}"`;
+      // S16.4-2: only for an account that really exists — otherwise anyone
+      // could plant text on the admin's bell by typing made-up usernames.
+      const pool = require('./db');
+      const exists = resident
+        ? pool.query(`SELECT 1 FROM guests WHERE is_active = true AND right(regexp_replace(COALESCE(phone,''), '[^0-9]', '', 'g'), 10) = $1 LIMIT 1`, [key.slice(2)])
+        : pool.query('SELECT 1 FROM users WHERE lower(username) = $1 LIMIT 1', [key.slice(2)]);
+      exists.then(r => r.rows.length && require('./services/notify').push({
         level: 'important', category: 'system',
         title: `Login paused for ${label}`,
         detail: `${max} wrong passwords in 15 minutes. If it wasn't her/them, someone may be guessing. The pause lifts on its own.`,
         action_page: resident ? 'guests' : 'admin', for_role: resident ? 'staff' : 'admin',
-        dedupe_key: `lockout:${key}:${win}`
-      }).catch(() => {});
+        dedupe_key: `lockout:${key.slice(0, 40)}:${win}`
+      })).catch(() => {});
     } catch (e) { /* the alert is best-effort; the pause itself always applies */ }
     res.status(options.statusCode).json(options.message);
   },

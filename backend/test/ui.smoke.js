@@ -1036,6 +1036,76 @@ async function runAtWidth(browser, BASE, width) {
     ok(true, `${tag} S16.3-3 Resident 360 offers "Reset app login"`);
     await page.evaluate(() => closeModal());
   }
+  // ── D-15-7: a slow screen must not draw over the one she moved to ─────
+  {
+    for (const [slowPage, slowPath] of [['purchases', '/purchases'], ['dashboard', '/home']]) {
+      await page.evaluate((sp) => {
+        window.__origApiFetch = window.__origApiFetch || apiFetch;
+        apiFetch = (path, opts) => path.startsWith(sp) ? new Promise(r => setTimeout(r, 1500)).then(() => window.__origApiFetch(path, opts)) : window.__origApiFetch(path, opts);
+      }, slowPath);
+      await page.evaluate((pg) => { navigate(pg); navigate('rooms'); }, slowPage);   // she taps on before it loaded
+      await page.waitForSelector('.room-tile', { timeout: 8000 });
+      await new Promise(r => setTimeout(r, 2500));   // the slow answer arrives meanwhile
+      const d157 = await page.evaluate(() => ({ tiles: document.querySelectorAll('.room-tile').length, page: currentPage, seq: navSeq, h: (document.querySelector('#page-content h1, #page-content h2, #page-content h3') || {}).textContent, snippet: document.getElementById('page-content').innerText.slice(0, 120).replace(/\s+/g, ' ') }));
+      if (!(d157.tiles > 0)) console.log('   DEBUG d157', JSON.stringify(d157));
+      ok(d157.tiles > 0 && d157.page === 'rooms', `${tag} D-15-7 a slow "${slowPage}" did not draw over Rooms (${d157.tiles} tiles)`);
+      await page.evaluate(() => { apiFetch = window.__origApiFetch; });
+    }
+    // D16.4-a: a save that answers late must not redraw the screen she left
+    await page.evaluate(() => navigate('outbox')); await page.waitForFunction(() => currentPage === 'outbox', { timeout: 8000 });
+    await new Promise(r => setTimeout(r, 600));
+    await page.evaluate(() => {
+      apiFetch = (path, opts) => path.startsWith('/outbox/draft') ? new Promise(r => setTimeout(r, 1500)).then(() => window.__origApiFetch(path, opts)) : window.__origApiFetch(path, opts);
+      draftOutbox(); navigate('rooms');
+    });
+    await page.waitForSelector('.room-tile', { timeout: 8000 });
+    await new Promise(r => setTimeout(r, 2500));
+    ok(await page.evaluate(() => document.querySelectorAll('.room-tile').length > 0 && currentPage === 'rooms'), `${tag} D16.4-a a late save on Outbox did not redraw Outbox over Rooms`);
+    // D16.4-b: a slow screen that FAILS after she moved on must not paint its error card
+    await page.evaluate(() => {
+      // The screen itself throws late (its own try/catch didn't catch it), so the
+      // failure reaches navigate's error card — the path D16.4-b guards.
+      window.__origPgPurchases = pgPurchases;
+      pgPurchases = () => new Promise((_, rej) => setTimeout(() => rej(new Error('Network down')), 1500));
+      navigate('purchases'); navigate('rooms');
+    });
+    await page.waitForSelector('.room-tile', { timeout: 8000 });
+    await new Promise(r => setTimeout(r, 2500));
+    ok(await page.evaluate(() => document.querySelectorAll('.room-tile').length > 0 && !/could not load/.test(document.getElementById('page-content').textContent)), `${tag} D16.4-b a late failure on Purchases did not paint its error over Rooms`);
+    // …and when she is still on the screen, the error card does show (the boundary still works)
+    await page.evaluate(() => navigate('purchases'));
+    await page.waitForFunction(() => /could not load/.test(document.getElementById('page-content').textContent), { timeout: 8000 });
+    ok(await page.evaluate(() => /Network down/.test(document.getElementById('page-content').textContent)), `${tag} D16.4-b the error card still shows when she stays on the failing screen`);
+    // review 16.4: the error text is escaped — a message carrying markup is shown as text
+    await page.evaluate(() => {
+      pgPurchases = () => Promise.reject(new Error('<img id="esc164" src=x onerror="window.__pwn164=1">'));
+      navigate('purchases');
+    });
+    await page.waitForFunction(() => /could not load/.test(document.getElementById('page-content').textContent), { timeout: 8000 });
+    await new Promise(r => setTimeout(r, 300));
+    ok(await page.evaluate(() => !document.getElementById('esc164') && !window.__pwn164 && /<img id="esc164"/.test(document.getElementById('page-content').textContent)), `${tag} SECURITY: the error card shows the message as text, never as markup`);
+    await page.evaluate(() => { pgPurchases = window.__origPgPurchases; apiFetch = window.__origApiFetch; });
+    // review 16.4: Outbox "Sent" refreshes after a 600 ms timer — moving away during it must not redraw Outbox
+    await page.evaluate(() => navigate('outbox')); await page.waitForFunction(() => currentPage === 'outbox', { timeout: 8000 });
+    await new Promise(r => setTimeout(r, 600));
+    await page.evaluate(() => {
+      apiFetch = (path, opts) => /\/outbox\/\d+\/sent$/.test(path) ? Promise.resolve({ ok: true }) : window.__origApiFetch(path, opts);
+      window.__pgOutboxCalls = 0; window.__origPgOutbox = pgOutbox; pgOutbox = (...a) => { window.__pgOutboxCalls++; return window.__origPgOutbox(...a); };
+      markSent(999999);
+    });
+    await new Promise(r => setTimeout(r, 100));
+    await page.evaluate(() => navigate('rooms'));
+    await page.waitForSelector('.room-tile', { timeout: 8000 });
+    await new Promise(r => setTimeout(r, 1500));
+    ok(await page.evaluate(() => window.__pgOutboxCalls === 0 && currentPage === 'rooms' && document.querySelectorAll('.room-tile').length > 0), `${tag} D16.4-a Outbox "Sent" timer does not redraw Outbox after she moved to Rooms`);
+    // …and if she stays, it does refresh
+    await page.evaluate(() => navigate('outbox')); await page.waitForFunction(() => currentPage === 'outbox', { timeout: 8000 });
+    await new Promise(r => setTimeout(r, 600));
+    await page.evaluate(() => { window.__pgOutboxCalls = 0; markSent(999999); });
+    await new Promise(r => setTimeout(r, 1500));
+    ok(await page.evaluate(() => window.__pgOutboxCalls === 1), `${tag} D16.4-a Outbox "Sent" still refreshes when she stays`);
+    await page.evaluate(() => { pgOutbox = window.__origPgOutbox; apiFetch = window.__origApiFetch; });
+  }
   // Leaving-soon filter
   await page.evaluate(() => navigate('guests'));
   await page.waitForFunction(() => document.querySelector('#page-content table.sm-cards tbody tr'), { timeout: 10000 });

@@ -1339,13 +1339,14 @@ router.put('/users/:id/username', auth, requireAdmin, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const name = String((req.body && req.body.username) || '').trim();
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'Bad user id' });
-  if (!USERNAME_RE.test(name)) return res.status(400).json({ error: 'Use 3–30 letters, digits, dots, dashes or underscores.' });
+  if (!USERNAME_RE.test(name)) return res.status(400).json({ error: 'Username: use 3–30 letters, digits, dots, dashes or underscores.' });
   try {
     const clash = await pool.query('SELECT id FROM users WHERE lower(username)=lower($1) AND id<>$2', [name, id]);
     if (clash.rows[0]) return res.status(400).json({ error: 'That username is already taken.' });
+    const before = await pool.query('SELECT username FROM users WHERE id=$1', [id]);
+    if (!before.rows[0]) return res.status(404).json({ error: 'User not found' });
     const r = await pool.query('UPDATE users SET username=$1 WHERE id=$2 RETURNING id, username, role', [name, id]);
-    if (!r.rows[0]) return res.status(404).json({ error: 'User not found' });
-    await logActivity(req, 'user_rename', `#${id} → ${name}`);
+    await logActivity(req, 'user_rename', `${before.rows[0].username} → ${name}`);   // S16.4-4: old → new
     res.json(r.rows[0]);
   } catch (err) {
     if (err.code === '23505') return res.status(400).json({ error: 'That username is already taken.' });
@@ -1362,20 +1363,31 @@ router.post('/guests/:id/reset-login', auth, async (req, res) => {
     const r = await pool.query('UPDATE guests SET password_hash=NULL WHERE id=$1 RETURNING id, name', [id]);
     if (!r.rows[0]) return res.status(404).json({ error: 'Resident not found' });
     await logActivity(req, 'guest_login_reset', `${r.rows[0].name} (#${id})`);
+    // S16.4-3: the admin always hears about it — after a reset, whoever logs in
+    // first with her number sets the password
+    const who = req.user && req.user.username ? req.user.username : 'staff';
+    await require('../services/notify').push({ level: 'important', category: 'system', title: `${who} reset ${r.rows[0].name}'s app login`,
+      detail: 'She logs in with her phone number and must set a new password. If she did not ask for this, check with her.',
+      action_page: 'admin', for_role: 'admin', dedupe_key: `loginreset:${id}:${Date.now()}` }).catch(() => {});
     res.json({ message: `${r.rows[0].name} can log in with her phone number and will be asked to set her own password.` });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 router.post('/users', auth, requireAdmin, async (req, res) => {
-  const { username, password, role } = req.body;
+  const { password, role } = req.body;
+  const username = req.body.username == null ? '' : String(req.body.username).trim();   // review 16.4: one normalised value everywhere
   if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
   { const why = staffPasswordProblem(password, username); if (why) return res.status(400).json({ error: why }); }   // S16.3: one rule for staff passwords
+  if (!USERNAME_RE.test(username)) return res.status(400).json({ error: 'Username: use 3–30 letters, digits, dots, dashes or underscores.' });   // same rule as rename
+  // S16.4-4: "Warden" and "warden" are the same name
+  try { const c = await pool.query('SELECT 1 FROM users WHERE lower(username)=lower($1) LIMIT 1', [username]); if (c.rows[0]) return res.status(400).json({ error: 'Username already exists' }); }
+  catch (err) { return res.status(500).json({ error: err.message }); }
   const finalRole = role === 'admin' ? 'admin' : 'staff';
   try {
     const hash = await bcrypt.hash(password, 12);
     const r = await pool.query(
       'INSERT INTO users(username,password_hash,role) VALUES($1,$2,$3) RETURNING id,username,role,created_at',
-      [username.trim(), hash, finalRole]
+      [username, hash, finalRole]
     );
     await logActivity(req, 'user_create', `${username} (${finalRole})`);
     res.status(201).json(r.rows[0]);
