@@ -184,3 +184,10 @@ Round 1 (24896ba): APPROVE for Test but **A-1 (Med) regression** — last-10-dig
 Re-check (ae16efb): **APPROVE FOR TEST DEPLOYMENT** — 30 combinations (two sisters × two formats × five password states): every login lands on the sister whose password was typed; ties → 409; 409 is not a new enumeration oracle. 12/12 on fresh gate3, 2,550 (xss variance).
 Before production: verify on Railway that a changing `X-Forwarded-For` still reaches 429 (limiter depends on the proxy) · Low: LIMIT 5 → a 6th resident on one number gets 401; return the 409 message above 5 · owner calls: forced password change after first login, separate staff/resident limiters, phone backfill, P-2.
 Implementer gates G155g/h: 12/12 ×2, 2,552.
+
+### Sprint 16 — independent review (4 rounds)
+- 35fc515: **BLOCK** — F16-1 (default bypass by spelling "98…x"), F16-2 (is_active "true" text). Portal flake found by the gate (2/5 new vs 0/5 old): stray background login in the test + two real app bugs (onload re-restore; late jump to Home) — fixed in ecb45a3.
+- ecb45a3: **BLOCK** — F16-1b (old hashes of formatted numbers gave a full token) → 299b94c.
+- 299b94c: **APPROVE FOR TEST DEPLOYMENT** — 12/12 on fresh gate3, 2,600. Production blocker **F16-1c** (old data): an old hash of a number saved with "." "/" or letters still skips the forced change → force whenever the password's digits contain her number.
+Data scripts: reviewer ran both on 15 crafted rows — dry run changes nothing, apply atomic and guarded, re-run changes 0; owner should read both dry-run lists before --apply.
+Implementer gates: 12/12 ×2, 2,602.
