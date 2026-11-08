@@ -4,6 +4,7 @@ const router = express.Router();
 const auth = require('../middleware/auth');
 const pool = require('../db');
 const notify = require('../services/notify');
+const { IST_TODAY_SQL, istDateSql } = require('../services/istdate');   // Sprint 18: one clock
 
 const requireAdmin = (req, res, next) => req.user && req.user.role === 'admin' ? next() : res.status(403).json({ error: 'Admin only' });
 const json = express.json({ limit: '10kb' });
@@ -75,7 +76,7 @@ router.put('/guests/:id/documents', auth, json, wrap(async (req, res) => {
 
 // ── Recurring maintenance ────────────────────────────────────────────────
 router.get('/maintenance-schedule', auth, wrap(async (req, res) => {
-  const r = await pool.query(`SELECT *, (next_due <= CURRENT_DATE) AS due_now FROM maintenance_schedule WHERE is_active=true ORDER BY next_due`);
+  const r = await pool.query(`SELECT *, (next_due <= ${IST_TODAY_SQL}) AS due_now FROM maintenance_schedule WHERE is_active=true ORDER BY next_due`);
   res.json(r.rows);
 }));
 
@@ -84,7 +85,7 @@ router.post('/maintenance-schedule', auth, requireAdmin, json, wrap(async (req, 
   if (!task || !String(task).trim()) return res.status(400).json({ error: 'What needs doing?' });
   const days = Math.max(1, Math.min(1095, parseInt(every_days) || 90));
   const r = await pool.query(`INSERT INTO maintenance_schedule(task, vendor, every_days, last_done, next_due)
-    VALUES($1,$2,$3,$4::date, COALESCE($4::date, CURRENT_DATE) + ($3::int)) RETURNING *`,
+    VALUES($1,$2,$3,$4::date, COALESCE($4::date, ${IST_TODAY_SQL}) + ($3::int)) RETURNING *`,
     [String(task).trim().slice(0, 120), (vendor || '').slice(0, 100) || null, days, last_done || null]);
   res.status(201).json(r.rows[0]);
 }));
@@ -92,8 +93,8 @@ router.post('/maintenance-schedule', auth, requireAdmin, json, wrap(async (req, 
 router.post('/maintenance-schedule/:id/done', auth, json, wrap(async (req, res) => {
   const when = /^\d{4}-\d{2}-\d{2}$/.test((req.body || {}).date || '') ? req.body.date : null;
   const r = await pool.query(`UPDATE maintenance_schedule
-      SET last_done = COALESCE($2::date, CURRENT_DATE),
-          next_due  = COALESCE($2::date, CURRENT_DATE) + every_days
+      SET last_done = COALESCE($2::date, ${IST_TODAY_SQL}),
+          next_due  = COALESCE($2::date, ${IST_TODAY_SQL}) + every_days
     WHERE id=$1 AND is_active=true RETURNING *`, [req.params.id, when]);
   if (!r.rows[0]) return res.status(404).json({ error: 'Task not found' });
   res.json(r.rows[0]);

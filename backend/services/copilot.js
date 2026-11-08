@@ -17,6 +17,7 @@ const assistant = require('./assistant');
 const tools = require('./tools');
 const SMParse = require('../../frontend/public/js/speech-parser.js');
 const quick = require('./quick');              // Sprint 14: Quick Entry
+const { IST_TODAY_SQL, istDateSql } = require('./istdate');   // Sprint 18: one clock
 
 const PROPOSAL_TTL_MIN = 10;
 const fmt = n => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');   // shown in the Copilot box, so ₹ like the rest of the UI
@@ -295,8 +296,8 @@ async function whatChanged(f) {
   const y = f.checklist.yesterday;
   const [collected, newIssues, resolved, joined, left, checkoutsSoon] = await Promise.all([
     pool.query(`SELECT COUNT(*)::int AS n, COALESCE(SUM(amount),0)::float AS t FROM collections WHERE is_deleted=false AND status='confirmed' AND collection_date=$1`, [y]),
-    pool.query(`SELECT COUNT(*)::int AS n FROM complaints WHERE created_at::date=$1`, [y]),
-    pool.query(`SELECT COUNT(*)::int AS n FROM complaints WHERE resolved_at::date=$1`, [y]),
+    pool.query(`SELECT COUNT(*)::int AS n FROM complaints WHERE ${istDateSql('created_at')}=$1`, [y]),
+    pool.query(`SELECT COUNT(*)::int AS n FROM complaints WHERE ${istDateSql('resolved_at')}=$1`, [y]),
     pool.query(`SELECT COUNT(*)::int AS n FROM guests WHERE join_date=$1`, [y]),
     pool.query(`SELECT COUNT(*)::int AS n FROM guests WHERE leave_date=$1`, [y]),
     pool.query(`SELECT g.name, r.room_number, g.leave_date FROM guests g LEFT JOIN rooms r ON r.id=g.room_id WHERE g.is_active=true AND g.leave_date BETWEEN $1 AND ($1::date + 7) ORDER BY g.leave_date`, [f.date])
@@ -399,8 +400,8 @@ async function eveningSummary({ force } = {}) {
   const [collected, byMode, resolved, newIssues, checklist, clTotal, arrivals, departures, f] = await Promise.all([
     pool.query(`SELECT COUNT(*)::int AS n, COALESCE(SUM(amount),0)::float AS t FROM collections WHERE is_deleted=false AND status='confirmed' AND collection_date=$1`, [today]),
     pool.query(`SELECT payment_mode, COALESCE(SUM(amount),0)::float AS t FROM collections WHERE is_deleted=false AND status='confirmed' AND collection_date=$1 GROUP BY payment_mode`, [today]),
-    pool.query(`SELECT COUNT(*)::int AS n FROM complaints WHERE resolved_at::date=$1`, [today]),
-    pool.query(`SELECT COUNT(*)::int AS n FROM complaints WHERE created_at::date=$1`, [today]),
+    pool.query(`SELECT COUNT(*)::int AS n FROM complaints WHERE ${istDateSql('resolved_at')}=$1`, [today]),
+    pool.query(`SELECT COUNT(*)::int AS n FROM complaints WHERE ${istDateSql('created_at')}=$1`, [today]),
     pool.query(`SELECT COUNT(*)::int AS n FROM checklist_log l JOIN checklist_items i ON i.id=l.item_id AND i.is_active=true WHERE l.log_date=$1 AND l.is_checked=true`, [today]),
     pool.query(`SELECT COUNT(*)::int AS n FROM checklist_items WHERE is_active=true`),
     pool.query(`SELECT COUNT(*)::int AS n FROM guests WHERE join_date=$1`, [tomorrow]),

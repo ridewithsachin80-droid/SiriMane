@@ -4,6 +4,7 @@ const bcrypt = require('bcrypt');
 const PDFDocument = require('pdfkit');
 const pool = require('../db');
 const auth = require('../middleware/auth');
+const { IST_TODAY_SQL, istDateSql } = require('../services/istdate');   // Sprint 18: one clock
 const requireAdmin = auth.requireAdmin;
 
 // Records who did what, for the Audit Log. Never throws — a logging failure
@@ -176,7 +177,7 @@ router.get('/auth/me', auth, (req, res) => res.json({ user: req.user }));
 // ── DASHBOARD ────────────────────────────────────
 router.get('/dashboard', auth, async (req, res) => {
   try {
-    const today = new Date().toISOString().split('T')[0];
+    const today = istToday();   // Sprint 18: India's date (was the UTC date)
     const [guests, rooms, beds, income, expenses, recentGuests, recentPayments,
            pendingVariance, checklistTotal, checklistDone, openComplaints] = await Promise.all([
       pool.query('SELECT COUNT(*) FROM guests WHERE is_active=true'),
@@ -417,7 +418,7 @@ router.put('/guests/:id', auth, async (req, res) => {
     if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
 
     if (newRent !== oldRent && newRent > 0) {
-      const effectiveFrom = rent_effective_from || new Date().toISOString().split('T')[0];
+      const effectiveFrom = rent_effective_from || istToday();   // Sprint 18
       await pool.query(
         `INSERT INTO guest_rent_history(guest_id, monthly_rent, effective_from, changed_by) VALUES($1,$2,$3,$4)`,
         [req.params.id, newRent, effectiveFrom, req.user.id]
@@ -432,7 +433,7 @@ router.put('/guests/:id', auth, async (req, res) => {
     if (newDeposit > oldDeposit) {
       const depositStatus = req.user.role === 'admin' ? 'confirmed' : 'pending_approval';
       await pool.query(
-        `INSERT INTO collections(guest_id,guest_name,amount,collection_date,collection_type,payment_mode,description,created_by,status) VALUES($1,$2,$3,CURRENT_DATE,'deposit','cash','Additional deposit top-up',$4,$5)`,
+        `INSERT INTO collections(guest_id,guest_name,amount,collection_date,collection_type,payment_mode,description,created_by,status) VALUES($1,$2,$3,${IST_TODAY_SQL},'deposit','cash','Additional deposit top-up',$4,$5)`,
         [req.params.id, r.rows[0].name, newDeposit - oldDeposit, req.user.id, depositStatus]
       );
       await logActivity(req, 'deposit_topup', `${r.rows[0].name}: +₹${newDeposit - oldDeposit} deposit`);
@@ -454,7 +455,7 @@ router.put('/guests/:id/approve-rent', auth, requireAdmin, async (req, res) => {
 
 router.delete('/guests/:id', auth, requireAdmin, async (req, res) => {
   try {
-    await pool.query('UPDATE guests SET is_active=false,leave_date=CURRENT_DATE WHERE id=$1', [req.params.id]);
+    await pool.query(`UPDATE guests SET is_active=false,leave_date=${IST_TODAY_SQL} WHERE id=$1`, [req.params.id]);
     res.json({ message: 'Checked out' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -755,10 +756,11 @@ router.get('/reports', auth, async (req, res) => {
       dateFrom = from;
       dateTo = to;
     } else {
-      const m = month || new Date().getMonth() + 1;
-      const y = year || new Date().getFullYear();
+      const t = istToday();   // Sprint 18: this month in India
+      const m = month || Number(t.slice(5, 7));
+      const y = year || Number(t.slice(0, 4));
       dateFrom = `${y}-${String(m).padStart(2,'0')}-01`;
-      dateTo = new Date(y, m, 0).toISOString().split('T')[0]; // last day of that month
+      dateTo = new Date(Date.UTC(y, m, 0)).toISOString().split('T')[0]; // last day of that month
     }
     res.json(await computeReportData(dateFrom, dateTo));
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -782,19 +784,21 @@ async function computeReportData(dateFrom, dateTo) {
 // Month-by-month totals for the N months ending at `end` (a Date). Shared by
 // the trend chart and the owner forecast.
 async function computeTrend(months, end) {
-  const now = end || new Date();
+  // Sprint 18: by default the trend ends at THIS month in India; month maths in
+  // UTC getters so the server's own time zone never matters.
+  const now = end || new Date(Date.now() + 5.5 * 3600 * 1000);
   const result = [];
   for (let i = months - 1; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const m = d.getMonth() + 1;
-    const y = d.getFullYear();
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+    const m = d.getUTCMonth() + 1;
+    const y = d.getUTCFullYear();
     const [inc, exp] = await Promise.all([
       pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND status='confirmed' AND EXTRACT(MONTH FROM collection_date)=$1 AND EXTRACT(YEAR FROM collection_date)=$2`, [m, y]),
       pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM purchases WHERE is_deleted=false AND status='confirmed' AND EXTRACT(MONTH FROM purchase_date)=$1 AND EXTRACT(YEAR FROM purchase_date)=$2`, [m, y])
     ]);
     const income = parseFloat(inc.rows[0].total);
     const expenses = parseFloat(exp.rows[0].total);
-    result.push({ month: `${y}-${String(m).padStart(2,'0')}`, label: d.toLocaleString('en-IN', { month: 'short', year: 'numeric' }), income, expenses, net: income - expenses });
+    result.push({ month: `${y}-${String(m).padStart(2,'0')}`, label: d.toLocaleString('en-IN', { month: 'short', year: 'numeric', timeZone: 'UTC' }), income, expenses, net: income - expenses });
   }
   return result;
 }
@@ -1032,7 +1036,7 @@ async function computeBalanceSheetData(asOf) {
     pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND status='confirmed' AND collection_date <= $1`, [asOf]),
     pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM collections WHERE is_deleted=false AND status='confirmed' AND collection_type='deposit' AND collection_date <= $1`, [asOf]),
     pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM purchases WHERE is_deleted=false AND status='confirmed' AND purchase_date <= $1`, [asOf]),
-    pool.query(`SELECT COALESCE(SUM(refund_amount),0) as total FROM deposit_refunds WHERE created_at::date <= $1`, [asOf]),
+    pool.query(`SELECT COALESCE(SUM(refund_amount),0) as total FROM deposit_refunds WHERE ${istDateSql('created_at')} <= $1`, [asOf]),
     pool.query(`SELECT COALESCE(SUM(value),0) as total FROM fixed_assets WHERE is_deleted=false AND purchase_date <= $1`, [asOf]),
     pool.query(`SELECT COALESCE(SUM(deposit_amount),0) as total FROM guests WHERE is_active=true`),
     pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM capital_transactions WHERE transaction_date <= $1`, [asOf]),
@@ -1070,14 +1074,14 @@ async function computeBalanceSheetData(asOf) {
 
 router.get('/balance-sheet', auth, requireAdmin, async (req, res) => {
   try {
-    const asOf = req.query.asOf || new Date().toISOString().split('T')[0];
+    const asOf = req.query.asOf || istToday();   // Sprint 18
     res.json(await computeBalanceSheetData(asOf));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 router.get('/balance-sheet/export/pdf', auth, requireAdmin, async (req, res) => {
   try {
-    const asOf = req.query.asOf || new Date().toISOString().split('T')[0];
+    const asOf = req.query.asOf || istToday();   // Sprint 18
     const bs = await computeBalanceSheetData(asOf);
 
     res.setHeader('Content-Type', 'application/pdf');
@@ -1192,7 +1196,7 @@ router.get('/rent-due/export/pdf', auth, requireAdmin, async (req, res) => {
     const totalDue = list.reduce((s,g) => s + parseFloat(g.amount_due), 0);
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="sirimane-rent-due-${new Date().toISOString().split('T')[0]}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="sirimane-rent-due-${istToday()}.pdf"`);
     const doc = new PDFDocument({ margin: 40, size: 'A4' });
     doc.pipe(res);
 
@@ -2167,8 +2171,8 @@ router.get('/guests/:id/timeline', auth, async (req, res) => {
       pool.query(`SELECT id, collection_date AS at, amount, collection_type, payment_mode, status, receipt_number, source FROM collections WHERE guest_id=$1 AND is_deleted=false ORDER BY collection_date DESC, id DESC`, [id]),
       pool.query(`SELECT id, effective_from AS at, from_room_number, to_room_number, to_bed_number, note FROM guest_room_history WHERE guest_id=$1`, [id]),
       pool.query(`SELECT id, effective_from AS at, monthly_rent FROM guest_rent_history WHERE guest_id=$1`, [id]),
-      pool.query(`SELECT id, created_at::date AS at, category, description, status, priority, resolved_at FROM complaints WHERE guest_id=$1`, [id]),
-      pool.query(`SELECT id, created_at::date AS at, deposit_amount, deductions, refund_amount FROM deposit_refunds WHERE guest_id=$1`, [id])
+      pool.query(`SELECT id, ${istDateSql('created_at')} AS at, category, description, status, priority, resolved_at FROM complaints WHERE guest_id=$1`, [id]),
+      pool.query(`SELECT id, ${istDateSql('created_at')} AS at, deposit_amount, deductions, refund_amount FROM deposit_refunds WHERE guest_id=$1`, [id])
     ]);
     const guest = g.rows[0];
     const items = [

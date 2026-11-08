@@ -244,7 +244,11 @@ function exportArrayToCsv(filename, columns, rows) {
   a.remove();
   URL.revokeObjectURL(url);
 }
-function nowDate() { return new Date().toISOString().split('T')[0]; }
+// Sprint 18: India's calendar, whatever the phone's clock zone. The old
+// toISOString() gave the UTC date — yesterday between 00:00 and 05:30 IST.
+function istNow() { return new Date(Date.now() + 5.5 * 3600 * 1000); }   // read with getUTC*()
+function nowDate() { return istNow().toISOString().slice(0, 10); }
+function istYM() { const d = istNow(); return { m: d.getUTCMonth() + 1, y: d.getUTCFullYear() }; }
 function monthPicker(month, year, onChangeFn) {
   const n = new Date();
   const m = month || (n.getMonth()+1);
@@ -1175,9 +1179,9 @@ async function pgPayments(month, year) {
   loading();
   document.getElementById('topbar-actions').innerHTML = '';   // Sprint 15: the button lives on the page itself
   try {
-    const now = new Date();
-    const m = month || (now.getMonth()+1);
-    const y = year || now.getFullYear();
+    const now = istYM();   // Sprint 18
+    const m = month || now.m;
+    const y = year || now.y;
     paymentsCurrentMonth = m;
     paymentsCurrentYear = y;
     const list = await API.getCollections(`?month=${m}&year=${y}`);
@@ -1491,9 +1495,9 @@ async function pgPurchases(month, year, from, to) {
       purchasesFromDate = from; purchasesToDate = to;
       purchasesCurrentMonth = null; purchasesCurrentYear = null;
     } else {
-      const now = new Date();
-      m = month || (now.getMonth()+1);
-      y = year || now.getFullYear();
+      const now = istYM();   // Sprint 18
+      m = month || now.m;
+      y = year || now.y;
       purchasesCurrentMonth = m; purchasesCurrentYear = y;
       purchasesFromDate = null; purchasesToDate = null;
     }
@@ -1878,9 +1882,9 @@ async function pgCollections(month, year, from, to) {
       collectionsCurrentMonth = null;
       collectionsCurrentYear = null;
     } else {
-      const now = new Date();
-      m = month || (now.getMonth()+1);
-      y = year || now.getFullYear();
+      const now = istYM();   // Sprint 18
+      m = month || now.m;
+      y = year || now.y;
       collectionsCurrentMonth = m;
       collectionsCurrentYear = y;
       collectionsFromDate = null;
@@ -2377,8 +2381,8 @@ async function pgReports(month, year) {
   const __draw = drawFor(drawSeq);   // D-15-7: draw only while this screen is still the one showing
   reportsMode = 'month';
   loading();
-  const now = new Date();
-  const m = month || (now.getMonth()+1); const y = year || now.getFullYear();
+  const now = istYM();   // Sprint 18
+  const m = month || now.m; const y = year || now.y;
   try {
     const r = await API.getReports(m,y);
     const controls = `
@@ -2411,9 +2415,10 @@ async function pgReportsRange(from, to) {
 }
 
 function switchReportsToRange() {
-  const now = new Date();
-  const defaultFrom = reportsRangeFrom || new Date(now.getFullYear(), 0, 1).toISOString().split('T')[0];
-  const defaultTo = reportsRangeTo || now.toISOString().split('T')[0];
+  // Sprint 18: year-to-date starts on 1 January (it started on 31 December —
+  // new Date(y,0,1) is local midnight, toISOString() turned it into the UTC day before)
+  const defaultFrom = reportsRangeFrom || `${istYM().y}-01-01`;
+  const defaultTo = reportsRangeTo || nowDate();
   pgReportsRange(defaultFrom, defaultTo);
 }
 
@@ -2440,7 +2445,7 @@ function renderReportsPage(r, controlsHtml) {
         <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
           <h3>📈 Owner report</h3>
           <div class="flex items-center gap-2" style="flex-wrap:wrap">
-            <input type="month" id="owner-month" value="${esc(new Date().toISOString().slice(0,7))}" max="${new Date().toISOString().slice(0,7)}" style="margin:0;min-height:40px" onchange="loadOwnerReport()"/>
+            <input type="month" id="owner-month" value="${esc(nowDate().slice(0,7))}" max="${nowDate().slice(0,7)}" style="margin:0;min-height:40px" onchange="loadOwnerReport()"/>
             <button class="btn btn-outline btn-sm" onclick="loadOwnerReport(true)" title="Recompute">↻</button>
           </div>
         </div>

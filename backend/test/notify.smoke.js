@@ -38,6 +38,10 @@ const monthsAgo = n => { const d = ist(); d.setUTCMonth(d.getUTCMonth() - n); re
     // One resident three months behind (triggers the critical alert), one current.
     const behind = (await A('POST', '/guests', { name: 'Behind Bhavya', phone: '9600000001', room_id: room.id, join_date: monthsAgo(3), monthly_rent: 6000, deposit_amount: 12000 })).data;
     const fine = (await A('POST', '/guests', { name: 'Fine Farida', phone: '9600000002', room_id: room.id, join_date: today(), monthly_rent: 6000, deposit_amount: 12000 })).data;
+    // Sprint 18: one resident leaving within a week, so there is always a draft
+    // to work with — rent reminders depend on the day of the month (1st–3rd, 7th+).
+    const leaving = (await A('POST', '/guests', { name: 'Leaving Lata', phone: '9600000003', room_id: room.id, join_date: monthsAgo(3), monthly_rent: 6000, deposit_amount: 12000, expected_checkout: new Date(ist().getTime() + 3 * 86400000).toISOString().slice(0, 10) })).data;
+    await pool.query(`UPDATE guests SET expected_checkout=$1 WHERE id=$2`, [new Date(ist().getTime() + 3 * 86400000).toISOString().slice(0, 10), leaving.id]);
     await A('POST', '/complaints', { category: 'Water', description: 'Notify test leak', guest_name: 'Room N1' });
     await pool.query(`UPDATE complaints SET sla_due_at = NOW() - INTERVAL '5 hours' WHERE status NOT IN ('resolved','closed')`);
 
@@ -79,7 +83,10 @@ const monthsAgo = n => { const d = ist(); d.setUTCMonth(d.getUTCMonth() - n); re
     ok(drafts.every(m => m.status === 'draft'), 'MONEY/TRUST: everything is still a draft — nothing was sent');
     ok(drafts.every(m => m.wa_link && m.wa_link.startsWith('https://wa.me/91')), 'each carries a wa.me link with the country code');
     ok(drafts.every(m => decodeURIComponent(m.wa_link).includes(m.guest_name.split(' ')[0])), 'the message names the resident');
-    ok(drafts.some(m => m.guest_id === behind.id), 'the resident in arrears is drafted');
+    ok(drafts.some(m => m.guest_id === leaving.id && m.kind === 'checkout_reminder'), 'a resident leaving within a week gets a checkout reminder');
+    // Sprint 18: the overdue follow-up goes out from the 7th (India's date) — before that, nothing
+    if (ist().getUTCDate() >= 7) ok(drafts.some(m => m.guest_id === behind.id && m.kind === 'rent_overdue'), 'the resident in arrears is drafted (7th or later)');
+    else ok(!drafts.some(m => m.guest_id === behind.id && m.kind === 'rent_overdue'), 'before the 7th, the resident in arrears is not chased yet');
     ok(!drafts.some(m => m.guest_id === fine.id && m.kind === 'rent_overdue'), 'a resident who joined this week is not chased as overdue');
     const draft = drafts[0];
     r = await S('POST', `/outbox/${draft.id}/sent`); eq(r.status, 200, 'warden marks it sent'); eq(r.data.status, 'sent', 'status updated');

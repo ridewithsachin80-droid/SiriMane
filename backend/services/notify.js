@@ -13,10 +13,11 @@ const routes = require('../routes/index');
 const assistant = require('./assistant');
 const owner = require('./owner');
 const finance = require('./finance');
+const { IST_TODAY_SQL, istDateSql } = require('./istdate');   // Sprint 18: one clock
 
 const fmt = n => 'Rs ' + Math.round(Number(n) || 0).toLocaleString('en-IN');
 const ist = () => new Date(Date.now() + 5.5 * 3600 * 1000);
-const istToday = () => ist().toISOString().slice(0, 10);
+const istToday = (now = Date.now()) => new Date(now + 5.5 * 3600 * 1000).toISOString().slice(0, 10);   // Sprint 18: takes a moment
 const LEVELS = ['critical', 'important', 'informational', 'digest'];
 
 // ── Notifications ────────────────────────────────────────────────────────
@@ -44,8 +45,8 @@ async function sweep(opts = {}) {
     pool.query(`SELECT COUNT(*)::int AS n FROM complaints WHERE sla_due_at < NOW() AND status NOT IN ('resolved','closed')`),
     finance.getDayClosing(day),
     pool.query(`SELECT d.id, d.doc_type, d.expires_on, g.name FROM resident_documents d JOIN guests g ON g.id=d.guest_id
-                 WHERE g.is_active=true AND d.expires_on IS NOT NULL AND d.expires_on <= CURRENT_DATE + 30`),
-    pool.query(`SELECT id, task, vendor, next_due FROM maintenance_schedule WHERE is_active=true AND next_due <= CURRENT_DATE + 7`)
+                 WHERE g.is_active=true AND d.expires_on IS NOT NULL AND d.expires_on <= ${IST_TODAY_SQL} + 30`),
+    pool.query(`SELECT id, task, vendor, next_due FROM maintenance_schedule WHERE is_active=true AND next_due <= ${IST_TODAY_SQL} + 7`)
   ]);
 
   // Money
@@ -179,7 +180,9 @@ async function draftOutbox({ kinds } = {}) {
   const [settings, due, guests] = await Promise.all([
     pool.query(`SELECT key, value FROM app_settings WHERE key IN ('pg_name','upi_vpa')`),
     routes.computeRentDueList(),
-    pool.query(`SELECT g.id, g.name, g.phone, g.join_date, g.expected_checkout, r.room_number FROM guests g LEFT JOIN rooms r ON r.id=g.room_id WHERE g.is_active=true`)
+    // Sprint 18: expected_checkout as 'YYYY-MM-DD' text — pg returns a DATE as a JS Date, and
+    // String(date).slice(0,10) gave "Wed Nov 11", so checkout reminders were never drafted.
+    pool.query(`SELECT g.id, g.name, g.phone, g.join_date, g.expected_checkout::text AS expected_checkout, r.room_number FROM guests g LEFT JOIN rooms r ON r.id=g.room_id WHERE g.is_active=true`)
   ]);
   const st = Object.fromEntries(settings.rows.map(x => [x.key, x.value]));
   const pg = st.pg_name || 'Siri Mane PG';
@@ -211,8 +214,12 @@ async function draftOutbox({ kinds } = {}) {
       await add('rent_overdue', g, TEMPLATES.rent_overdue(g, pg), `rent_overdue:${g.id}:${day.slice(0, 7)}`);
   }
   if (want('checkout_reminder')) {
-    for (const g of guests.rows.filter(x => x.expected_checkout && String(x.expected_checkout).slice(0, 10) <= new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10)))
-      await add('checkout_reminder', g, TEMPLATES.checkout_reminder({ ...g, expected_checkout: String(g.expected_checkout).slice(0, 10) }, pg), `checkout:${g.id}:${String(g.expected_checkout).slice(0, 10)}`);
+    // Checkouts due from today to a week ahead (India's dates)
+    const weekAhead = istToday(Date.now() + 7 * 86400000);
+    for (const g of guests.rows.filter(x => x.expected_checkout && x.expected_checkout >= day && x.expected_checkout <= weekAhead)) {
+      const nice = new Date(g.expected_checkout + 'T00:00:00Z').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+      await add('checkout_reminder', g, TEMPLATES.checkout_reminder({ ...g, expected_checkout: nice }, pg), `checkout:${g.id}:${g.expected_checkout}`);
+    }
   }
   return { drafted: drafted.length, items: drafted };
 }

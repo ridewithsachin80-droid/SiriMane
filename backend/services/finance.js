@@ -5,6 +5,7 @@
 // its own reasoning in words so the screen can show *why*, not just *what*.
 const pool = require('../db');
 const routes = require('../routes/index');
+const { IST_TODAY_SQL, istDateSql } = require('./istdate');   // Sprint 18: one clock
 
 const fmt = n => 'Rs ' + Math.round(Number(n) || 0).toLocaleString('en-IN');
 const istNow = () => new Date(Date.now() + 5.5 * 3600 * 1000);
@@ -24,7 +25,7 @@ async function computeReliability() {
     pool.query(`SELECT guest_id, collection_date, collection_month, amount
                   FROM collections
                  WHERE is_deleted=false AND status='confirmed' AND collection_type='rent'
-                   AND collection_date >= CURRENT_DATE - INTERVAL '12 months'`)
+                   AND collection_date >= ${IST_TODAY_SQL} - INTERVAL '12 months'`)
   ]);
   const byGuest = new Map();
   for (const p of pays.rows) {
@@ -141,27 +142,27 @@ async function expenseInsight() {
                   FROM purchases a JOIN purchases b
                     ON a.id < b.id AND a.amount=b.amount AND COALESCE(a.paid_to,'')=COALESCE(b.paid_to,'')
                    AND ABS(a.purchase_date - b.purchase_date) <= 3
-                 WHERE a.is_deleted=false AND b.is_deleted=false AND a.purchase_date >= CURRENT_DATE - 60
+                 WHERE a.is_deleted=false AND b.is_deleted=false AND a.purchase_date >= ${IST_TODAY_SQL} - 60
                  ORDER BY a.purchase_date DESC LIMIT 10`),
     pool.query(`WITH avg6 AS (
                   SELECT category, AVG(amount) AS avg_amt FROM purchases
-                   WHERE is_deleted=false AND purchase_date >= CURRENT_DATE - 180 AND purchase_date < CURRENT_DATE - 30
+                   WHERE is_deleted=false AND purchase_date >= ${IST_TODAY_SQL} - 180 AND purchase_date < ${IST_TODAY_SQL} - 30
                    GROUP BY category HAVING COUNT(*) >= 3)
                 SELECT p.id, p.amount, p.category, p.paid_to, p.purchase_date, a.avg_amt
                   FROM purchases p JOIN avg6 a ON a.category=p.category
-                 WHERE p.is_deleted=false AND p.purchase_date >= CURRENT_DATE - 30 AND p.amount > 2*a.avg_amt
+                 WHERE p.is_deleted=false AND p.purchase_date >= ${IST_TODAY_SQL} - 30 AND p.amount > 2*a.avg_amt
                  ORDER BY p.amount DESC LIMIT 10`),
     pool.query(`SELECT paid_to, category, COUNT(DISTINCT to_char(purchase_date,'YYYY-MM'))::int AS months, ROUND(AVG(amount)) AS typical
                   FROM purchases WHERE is_deleted=false AND paid_to IS NOT NULL AND paid_to <> ''
-                   AND purchase_date >= CURRENT_DATE - 200
+                   AND purchase_date >= ${IST_TODAY_SQL} - 200
                  GROUP BY paid_to, category HAVING COUNT(DISTINCT to_char(purchase_date,'YYYY-MM')) >= 3
                  ORDER BY AVG(amount) DESC LIMIT 10`),
     pool.query(`SELECT category,
-                  COALESCE(SUM(amount) FILTER (WHERE to_char(purchase_date,'YYYY-MM')=to_char(CURRENT_DATE,'YYYY-MM')),0)::float AS this_month,
+                  COALESCE(SUM(amount) FILTER (WHERE to_char(purchase_date,'YYYY-MM')=to_char(${IST_TODAY_SQL},'YYYY-MM')),0)::float AS this_month,
                   COALESCE(AVG(amount_by_month),0)::float AS avg_month
                 FROM (SELECT category, amount, purchase_date,
                              SUM(amount) OVER (PARTITION BY category, to_char(purchase_date,'YYYY-MM')) AS amount_by_month
-                        FROM purchases WHERE is_deleted=false AND purchase_date >= CURRENT_DATE - 180) x
+                        FROM purchases WHERE is_deleted=false AND purchase_date >= ${IST_TODAY_SQL} - 180) x
                GROUP BY category`)
   ]);
   const changes = monthCmp.rows
