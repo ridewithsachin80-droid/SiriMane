@@ -1,3 +1,6 @@
+// Sprint 18 (review): the app's date maths assumes Node runs in UTC (as on
+// Railway); India's dates are computed explicitly (services/istdate.js).
+process.env.TZ = 'UTC';
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');

@@ -109,13 +109,14 @@ async function computeGuestLedger(guest) {
   const joinDate = new Date(guest.join_date);
   // Sprint 18 (MONEY, called out): the ledger runs to THIS month in India. The
   // server's clock is UTC, so between 00:00 and 05:30 IST on the 1st the new
-  // month's rent used to appear only at 05:30. Month maths below reads the
-  // Date's UTC fields (Railway runs Node in UTC), so the IST instant is shifted.
-  const endDate = guest.leave_date ? new Date(guest.leave_date) : new Date(Date.now() + 5.5 * 3600 * 1000);
+  // month's rent used to appear only at 05:30. The end month is built from
+  // India's date STRING, so it is right whatever time zone Node runs in (review).
+  const endDate = guest.leave_date ? new Date(guest.leave_date) : null;
   if (isNaN(joinDate.getTime())) return { ledger: [], currentBalance: 0 };
 
   let cursor = new Date(joinDate.getFullYear(), joinDate.getMonth(), 1);
-  const endCursor = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
+  const t = istToday();
+  const endCursor = endDate ? new Date(endDate.getFullYear(), endDate.getMonth(), 1) : new Date(Number(t.slice(0, 4)), Number(t.slice(5, 7)) - 1, 1);
 
   const ledger = [];
   let balance = 0;
@@ -548,7 +549,9 @@ router.get('/collections/export/pdf', auth, requireAdmin, async (req, res) => {
 router.post('/collections', auth, async (req, res) => {
   // Once a day has been counted and closed, new money cannot be backdated into
   // it — that would silently change a figure the warden already signed off.
-  const cDate = req.body && req.body.collection_date;
+  // Sprint 18 (review): a blank date means India's today — and the closed-day
+  // lock checks that date too (a blank date used to get the UTC date, past the lock).
+  const cDate = (req.body && req.body.collection_date) || istToday();
   if (cDate && await require('../services/finance').isDayClosed(cDate)) {
     return res.status(409).json({ error: `${cDate} has been closed and counted. Reopen the day first (Admin) or record this against today.` });
   }
@@ -562,7 +565,7 @@ router.post('/collections', auth, async (req, res) => {
     const status = req.user.role === 'admin' ? 'confirmed' : 'pending_approval';
     const r = await pool.query(
       `INSERT INTO collections(guest_id,guest_name,amount,collection_date,collection_month,collection_type,payment_mode,description,receipt_number,created_by,status,source) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
-      [guest_id||null,guest_name,amount,collection_date||new Date(),collection_month,collection_type||'rent',payment_mode||'cash',description,receipt_number,req.user.id,status, src]);
+      [guest_id||null,guest_name,amount,cDate,collection_month,collection_type||'rent',payment_mode||'cash',description,receipt_number,req.user.id,status, src]);
     await logActivity(req, 'collection_add', `₹${amount} ${collection_type||'rent'} from ${guest_name||'guest #'+guest_id}${status==='pending_approval'?' (pending approval)':''}`);
     res.status(201).json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -647,7 +650,7 @@ router.post('/purchases', auth, async (req, res) => {
     const status = req.user.role === 'admin' ? 'confirmed' : 'pending_approval';
     const r = await pool.query(
       `INSERT INTO purchases(amount,category,description,purchase_date,paid_to,payment_mode,receipt_number,created_by,status,source) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-      [amount,category,description,purchase_date||new Date(),paid_to,payment_mode||'cash',receipt_number,req.user.id,status, src]);
+      [amount,category,description,purchase_date||istToday(),paid_to,   /* Sprint 18 (review): India's today */payment_mode||'cash',receipt_number,req.user.id,status, src]);
     await logActivity(req, 'purchase_add', `₹${amount} ${category}${paid_to ? ' to '+paid_to : ''}${status==='pending_approval'?' (pending approval)':''}`);
     res.status(201).json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1206,7 +1209,7 @@ router.get('/rent-due/export/pdf', auth, requireAdmin, async (req, res) => {
 
     doc.fontSize(18).font('Helvetica-Bold').text('Siri Mane PG', { align: 'center' });
     doc.fontSize(11).font('Helvetica').text('Rent Due', { align: 'center' });
-    doc.fontSize(9).fillColor('#666').text(`As of ${fmtD(new Date())}`, { align: 'center' }).fillColor('#000');
+    doc.fontSize(9).fillColor('#666').text(`As of ${fmtD(istToday())}`, { align: 'center' }).fillColor('#000');
     doc.moveDown(1);
     doc.fontSize(11).font('Helvetica-Bold').text(`Total Outstanding: ${fmtMoney(totalDue)}`);
     doc.moveDown(1);

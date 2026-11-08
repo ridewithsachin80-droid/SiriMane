@@ -250,9 +250,9 @@ function istNow() { return new Date(Date.now() + 5.5 * 3600 * 1000); }   // read
 function nowDate() { return istNow().toISOString().slice(0, 10); }
 function istYM() { const d = istNow(); return { m: d.getUTCMonth() + 1, y: d.getUTCFullYear() }; }
 function monthPicker(month, year, onChangeFn) {
-  const n = new Date();
-  const m = month || (n.getMonth()+1);
-  const y = year || n.getFullYear();
+  const n = istYM();   // Sprint 18 (review): India's month on any phone
+  const m = month || n.m;
+  const y = year || n.y;
   const val = `${y}-${String(m).padStart(2,'0')}`;
   return `<input type="month" id="month-picker" value="${esc(val)}" onchange="${onChangeFn}(this.value)" style="padding:7px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;cursor:pointer">`;
 }
@@ -949,7 +949,7 @@ async function toggleChecklistItem(itemId, checked) {
   catch(e) { alert(e.message); __ifHere(pgChecklist)(checklistCurrentDate); }
 }
 
-function currentYearMonth() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; }
+function currentYearMonth() { return nowDate().slice(0, 7); }   // Sprint 18 (review)
 
 function shiftYearMonth(ym, delta) {
   let [y,m] = ym.split('-').map(Number);
@@ -1690,8 +1690,8 @@ async function savePurchase() {
     closeModal();
     // Jump to whichever month the purchase was actually dated, so it's
     // immediately visible instead of vanishing into a different month's view.
-    const dt = d.purchase_date ? new Date(d.purchase_date) : new Date();
-    __ifHere(pgPurchases)(dt.getMonth()+1, dt.getFullYear());
+    const dt = new Date((d.purchase_date || nowDate()).slice(0, 10) + 'T00:00:00Z');   // Sprint 18 (review): read as a calendar date
+    __ifHere(pgPurchases)(dt.getUTCMonth()+1, dt.getUTCFullYear());
   } catch(e) { showAlert(al,e.message); }
 }
 
@@ -2098,10 +2098,10 @@ async function saveCollection() {
     // Jump to whichever month this was actually dated, so it's immediately
     // visible instead of vanishing into a different month's view. Return to
     // wherever the modal was actually opened from.
-    const dt = d.collection_date ? new Date(d.collection_date) : new Date();
+    const dt = new Date((d.collection_date || nowDate()).slice(0, 10) + 'T00:00:00Z');   // Sprint 18 (review)
     if (collectionModalGuestId) viewGuest(collectionModalGuestId);
-    else if (currentPage === 'payments') __ifHere(pgPayments)(dt.getMonth()+1, dt.getFullYear());
-    else __ifHere(pgCollections)(dt.getMonth()+1, dt.getFullYear());
+    else if (currentPage === 'payments') __ifHere(pgPayments)(dt.getUTCMonth()+1, dt.getUTCFullYear());
+    else __ifHere(pgCollections)(dt.getUTCMonth()+1, dt.getUTCFullYear());
   } catch(e) { showAlert(al,e.message); }
 }
 
@@ -3309,7 +3309,8 @@ const SM_MODES = ['Cash', 'UPI', 'Bank Transfer'];
 let collectState = { guest: null, mode: 'Cash', type: 'rent', list: [] };
 
 function monthLabelForCollect(d) {
-  return new Date(d).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+  // Sprint 18 (review): d is 'YYYY-MM-DD' (India's date); format it as that calendar day on any phone
+  return new Date(String(d).slice(0, 10) + 'T00:00:00Z').toLocaleDateString('en-IN', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 }
 
 async function pgCollect() {
@@ -3397,7 +3398,7 @@ function selectCollectGuest(id) {
     <div class="sm-collect-step">
       <div class="form-row">
         <div class="form-group"><label>Date</label><input type="date" id="collect-date" value="${esc(nowDate())}"/></div>
-        <div class="form-group"><label>For month</label><input type="text" id="collect-month" value="${esc(monthLabelForCollect(new Date()))}"/></div>
+        <div class="form-group"><label>For month</label><input type="text" id="collect-month" value="${esc(monthLabelForCollect(nowDate()))}"/></div>
       </div>
     </div>
     <div id="collect-alert" class="alert alert-danger hidden"></div>
@@ -4625,8 +4626,8 @@ async function moveInSave() {
   let existing = [];
   if (moveIn.attempts) {
     try {
-      const jd = new Date(d.join_date);
-      existing = (await apiFetch(`/collections?month=${jd.getMonth() + 1}&year=${jd.getFullYear()}`))
+      const jd = new Date(String(d.join_date).slice(0, 10) + 'T00:00:00Z');   // Sprint 18 (review)
+      existing = (await apiFetch(`/collections?month=${jd.getUTCMonth() + 1}&year=${jd.getUTCFullYear()}`))
         .filter(c => c.guest_id === g.id && c.description === 'At move-in');
     } catch (e) {
       unlock('↻ Retry saving the payment');

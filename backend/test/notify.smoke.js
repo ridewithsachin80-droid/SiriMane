@@ -42,6 +42,10 @@ const monthsAgo = n => { const d = ist(); d.setUTCMonth(d.getUTCMonth() - n); re
     // to work with — rent reminders depend on the day of the month (1st–3rd, 7th+).
     const leaving = (await A('POST', '/guests', { name: 'Leaving Lata', phone: '9600000003', room_id: room.id, join_date: monthsAgo(3), monthly_rent: 6000, deposit_amount: 12000, expected_checkout: new Date(ist().getTime() + 3 * 86400000).toISOString().slice(0, 10) })).data;
     await pool.query(`UPDATE guests SET expected_checkout=$1 WHERE id=$2`, [new Date(ist().getTime() + 3 * 86400000).toISOString().slice(0, 10), leaving.id]);
+    const farAway = (await A('POST', '/guests', { name: 'Faraway Fathima', phone: '9600000004', room_id: room.id, join_date: monthsAgo(3), monthly_rent: 6000, deposit_amount: 12000 })).data;
+    const alreadyGone = (await A('POST', '/guests', { name: 'Gone Geetha', phone: '9600000005', room_id: room.id, join_date: monthsAgo(3), monthly_rent: 6000, deposit_amount: 12000 })).data;
+    await pool.query(`UPDATE guests SET expected_checkout=$1 WHERE id=$2`, [new Date(ist().getTime() + 10 * 86400000).toISOString().slice(0, 10), farAway.id]);
+    await pool.query(`UPDATE guests SET expected_checkout=$1 WHERE id=$2`, [new Date(ist().getTime() - 2 * 86400000).toISOString().slice(0, 10), alreadyGone.id]);
     await A('POST', '/complaints', { category: 'Water', description: 'Notify test leak', guest_name: 'Room N1' });
     await pool.query(`UPDATE complaints SET sla_due_at = NOW() - INTERVAL '5 hours' WHERE status NOT IN ('resolved','closed')`);
 
@@ -84,6 +88,10 @@ const monthsAgo = n => { const d = ist(); d.setUTCMonth(d.getUTCMonth() - n); re
     ok(drafts.every(m => m.wa_link && m.wa_link.startsWith('https://wa.me/91')), 'each carries a wa.me link with the country code');
     ok(drafts.every(m => decodeURIComponent(m.wa_link).includes(m.guest_name.split(' ')[0])), 'the message names the resident');
     ok(drafts.some(m => m.guest_id === leaving.id && m.kind === 'checkout_reminder'), 'a resident leaving within a week gets a checkout reminder');
+    { const cr = drafts.find(m => m.guest_id === leaving.id && m.kind === 'checkout_reminder');
+      const want = new Date(new Date(ist().getTime() + 3 * 86400000).toISOString().slice(0, 10) + 'T00:00:00Z').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+      ok(cr && cr.body.includes(want), `the reminder names the date plainly (${want})`); }
+    ok(!drafts.some(m => m.guest_id === farAway.id || m.guest_id === alreadyGone.id), 'no reminder for a checkout 10 days out, or one already past');
     // Sprint 18: the overdue follow-up goes out from the 7th (India's date) — before that, nothing
     if (ist().getUTCDate() >= 7) ok(drafts.some(m => m.guest_id === behind.id && m.kind === 'rent_overdue'), 'the resident in arrears is drafted (7th or later)');
     else ok(!drafts.some(m => m.guest_id === behind.id && m.kind === 'rent_overdue'), 'before the 7th, the resident in arrears is not chased yet');
