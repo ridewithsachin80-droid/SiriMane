@@ -341,6 +341,11 @@ async function main() {
           ok(resB.length === 1 && resB[0].for_role === 'staff', `S16.3-4 the warden is told once that a resident login was paused (${resB.length})`);
           ok(!bell.some(b => b.title.includes(victim)), 'S16.3-4 PRIVACY: the full phone number is not on the bell');
           ok(bell.some(b => b.title.includes('s162staff') && b.for_role === 'admin'), 'S16.3-4 the admin is told a staff login was paused');
+          // S16.4-2: 21 tries at a username that does NOT exist → paused, but nothing on the bell
+          const ghost = 'ghost<b>' + 'x'.repeat(60);
+          for (let i = 1; i <= 21; i++) await fetch(BASE + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': '203.0.113.' + (100 + i) }, body: JSON.stringify({ username: ghost, password: 'nope' + i }) });
+          await new Promise(r => setTimeout(r, 300));
+          ok(!(await pool.query(`SELECT 1 FROM notifications WHERE title LIKE '%ghost%'`)).rows.length, 'S16.4-2 SECURITY: a made-up username never reaches the admin\'s bell');
           await A('DELETE', `/users/${su.id}`); await A('DELETE', `/guests/${gv.id}`);
         }
         // S16-4 bcrypt 6 accepts passwords hashed by bcrypt 5 — through the real login routes.
@@ -383,6 +388,8 @@ async function main() {
         eq((await api('GET', '/auth/me', null, tok)).status, 200, 'S16.3-2 an open session keeps working after the rename');
         eq((await login('s163renamed', 'Third-Pass-3', 5)).status, 200, 'S16.3-2 the new name logs in');
         eq((await login('s163user', 'Third-Pass-3', 6)).status, 401, 'S16.3-2 the old name no longer does');
+        ok((await pool.query(`SELECT 1 FROM activity_log WHERE action='user_rename' AND details='s163user → s163renamed'`)).rows.length === 1, 'S16.4-4 the audit log records old → new');
+        eq((await A('POST', '/users', { username: 'S163RENAMED', password: 'Other-Pass-1', role: 'staff' })).status, 400, 'S16.4-4 creating a name that exists in another case is refused');
         const audit = (await pool.query(`SELECT action FROM activity_log WHERE action IN ('user_password_reset','user_rename','password_change') ORDER BY id`)).rows.map(x => x.action);
         ok(audit.includes('user_password_reset') && audit.includes('user_rename') && audit.includes('password_change'), 'S16.3-2 all three are in the Audit Log');
         r163 = await A('DELETE', `/users/${t163.id}`);
@@ -392,6 +399,7 @@ async function main() {
         const g163 = (await A('POST', '/guests', { name: 'S163 Resident', phone: n163, join_date: today, monthly_rent: 5000, deposit_amount: 0 })).data;
         await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [await require('bcrypt').hash('Her-Own-1', 6), g163.id]);
         eq((await S('POST', `/guests/${g163.id}/reset-login`)).status, 200, 'S16.3-3 the warden (staff) can reset a resident\'s app login');
+        ok((await pool.query(`SELECT 1 FROM notifications WHERE for_role='admin' AND title LIKE '%reset S163 Resident''s app login%'`)).rows.length === 1, 'S16.4-3 the admin is told who reset whose login');
         let gl163 = await fetch(BASE + '/api/guest-login', { method: 'POST', headers: LX(7), body: JSON.stringify({ mobile: n163, password: n163 }) }).then(r => r.json());
         eq(gl163.must_change_password, true, 'S16.3-3 she logs in with her number and must set her own password');
         eq((await api('POST', `/guests/${g163.id}/reset-login`)).status, 401, 'S16.3-3 SECURITY: needs a staff login');

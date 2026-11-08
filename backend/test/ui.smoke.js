@@ -1036,6 +1036,22 @@ async function runAtWidth(browser, BASE, width) {
     ok(true, `${tag} S16.3-3 Resident 360 offers "Reset app login"`);
     await page.evaluate(() => closeModal());
   }
+  // ── D-15-7: a slow screen must not draw over the one she moved to ─────
+  {
+    for (const [slowPage, slowPath] of [['purchases', '/purchases'], ['dashboard', '/home']]) {
+      await page.evaluate((sp) => {
+        window.__origApiFetch = window.__origApiFetch || apiFetch;
+        apiFetch = (path, opts) => path.startsWith(sp) ? new Promise(r => setTimeout(r, 1500)).then(() => window.__origApiFetch(path, opts)) : window.__origApiFetch(path, opts);
+      }, slowPath);
+      await page.evaluate((pg) => { navigate(pg); navigate('rooms'); }, slowPage);   // she taps on before it loaded
+      await page.waitForSelector('.room-tile', { timeout: 8000 });
+      await new Promise(r => setTimeout(r, 2500));   // the slow answer arrives meanwhile
+      const d157 = await page.evaluate(() => ({ tiles: document.querySelectorAll('.room-tile').length, page: currentPage, seq: navSeq, h: (document.querySelector('#page-content h1, #page-content h2, #page-content h3') || {}).textContent, snippet: document.getElementById('page-content').innerText.slice(0, 120).replace(/\s+/g, ' ') }));
+      if (!(d157.tiles > 0)) console.log('   DEBUG d157', JSON.stringify(d157));
+      ok(d157.tiles > 0 && d157.page === 'rooms', `${tag} D-15-7 a slow "${slowPage}" did not draw over Rooms (${d157.tiles} tiles)`);
+      await page.evaluate(() => { apiFetch = window.__origApiFetch; });
+    }
+  }
   // Leaving-soon filter
   await page.evaluate(() => navigate('guests'));
   await page.waitForFunction(() => document.querySelector('#page-content table.sm-cards tbody tr'), { timeout: 10000 });

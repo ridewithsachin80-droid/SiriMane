@@ -49,6 +49,11 @@ function setupNav() {
 
 let currentPage = null;
 let navSeq = 0;
+// D-15-7: the navigation a screen belongs to. navigate() runs the screen a
+// moment later (a microtask), so two quick taps both bump navSeq BEFORE either
+// screen starts — reading navSeq there would let the first screen think it is
+// current. navigate() hands each screen its own number via drawSeq instead.
+let drawSeq = 0;
 
 // Returns a promise that resolves true once this screen has rendered and is
 // still the screen on show (false if it failed, or the user moved on).
@@ -79,7 +84,7 @@ function navigate(page) {
   if(!pages[page]) return Promise.resolve(false);
   // Error boundary: a thrown error inside any screen shows a retry card
   // instead of a blank page.
-  return Promise.resolve().then(() => pages[page]()).then(() => { try { injectSubtabs(page); } catch (e) { console.error(e); } return seq === navSeq; }).catch(e => {
+  return Promise.resolve().then(() => { drawSeq = seq; return pages[page](); }).then(() => { try { injectSubtabs(page); } catch (e) { console.error(e); } return seq === navSeq; }).catch(e => {
     console.error(e);
     setContent(`<div class="card" style="padding:32px;text-align:center">
       <div style="font-size:32px">⚠️</div>
@@ -152,6 +157,17 @@ async function loadComplaintsCount() {
 }
 
 // ── HELPERS ───────────────────────────────────────
+// D-15-7: a screen whose data arrives AFTER she has moved to another screen
+// must not draw over it (slow 4G: Home appearing on top of Rooms). Each
+// drawing function notes the navigation it started under; drawFor() returns
+// a setContent that does nothing once navigate() has moved on.
+function drawFor(seq) {
+  return (html) => {
+    if (seq !== navSeq) return false;   // she has moved on — this screen is stale
+    setContent(html);
+    return true;
+  };
+}
 function setContent(html) {
   const el = document.getElementById('page-content');
   el.innerHTML = html;
@@ -181,7 +197,8 @@ function closeModal() { stopPurchaseVoice(); document.getElementById('modal-cont
 // Skeleton placeholders read as "content is coming" far better than a bare
 // spinner on a slow 4G connection. Same call site as before.
 function loading() {
-  setContent('<div class="sm-skel"><div class="sm-skel-line" style="width:44%;height:22px"></div>'
+  const __draw = drawFor(drawSeq);   // D-15-7: draw only while this screen is still the one showing
+  __draw('<div class="sm-skel"><div class="sm-skel-line" style="width:44%;height:22px"></div>'
     + '<div class="sm-skel-card"></div>'.repeat(4) + '</div>');
 }
 
@@ -236,13 +253,14 @@ function onReportsMonthChange(value) {
 let roomsListCache = [];
 
 async function pgRooms() {
+  const __draw = drawFor(drawSeq);   // D-15-7: draw only while this screen is still the one showing
   loading();
   document.getElementById('topbar-actions').innerHTML = '';   // Sprint 15: the button lives on the page itself
   try {
     const list = await API.getRooms();
     roomsListCache = list;
     const floors = [...new Set(list.map(r => r.floor))].sort((a,b)=>a-b);
-    setContent(`
+    __draw(`
       <div class="page-header"><h1>Rooms</h1><p>Manage rooms including bunk beds</p></div>
       <div class="card">
         <div class="card-header">
@@ -270,7 +288,7 @@ async function pgRooms() {
         </div>
       </div>
     `);
-  } catch(e) { setContent(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
+  } catch(e) { __draw(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
 }
 
 function renderRoomRows(list) {
@@ -356,6 +374,7 @@ let guestsCurrentFilter = 'active';
 let guestsListCache = [];
 
 async function pgGuests(filter) {
+  const __draw = drawFor(drawSeq);   // D-15-7: draw only while this screen is still the one showing
   loading();
   const f = filter || guestsCurrentFilter;
   guestsCurrentFilter = f;
@@ -369,7 +388,7 @@ async function pgGuests(filter) {
     const leftCount = list.filter(g=>!g.is_active).length;
   const leavingCount = guestsListCache.filter(g => g.is_active && g.expected_checkout && new Date(g.expected_checkout) <= new Date(Date.now() + 30 * 86400000)).length;
     const rooms = [...new Set(list.filter(g=>g.room_number).map(g => g.room_number))].sort();
-    setContent(`
+    __draw(`
       <div class="page-header"><h1>Residents</h1><p>Register and manage the people living here</p></div>
       ${pendingCount>0?`<div class="alert" style="background:#FFFBEB;border:1px solid var(--amber);color:#92400E;margin-bottom:16px">⏳ ${pendingCount} guest${pendingCount>1?'s have':' has'} a rent that differs from their room's standard rate and ${pendingCount>1?'need':'needs'} your approval — look for the amber "Variance" badge below.</div>`:''}
       <div class="flex gap-2 mb-4" style="flex-wrap:wrap">
@@ -406,7 +425,7 @@ async function pgGuests(filter) {
       { action: 'announcement', label: 'Post notice', icon: 'megaphone' },
       { action: 'documents', label: 'Mark documents', icon: 'receipt' }
     ]);
-  } catch(e) { setContent(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
+  } catch(e) { __draw(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
 }
 
 function renderGuestRows(filtered, f) {
@@ -769,6 +788,7 @@ async function submitCheckout(id) {
 
 // ── DAILY MENU ────────────────────────────────────
 async function pgMenu() {
+  const __draw = drawFor(drawSeq);   // D-15-7: draw only while this screen is still the one showing
   loading();
   document.getElementById('topbar-actions').innerHTML = '';   // Sprint 15: the button lives on the page itself
   try {
@@ -779,7 +799,7 @@ async function pgMenu() {
     days.forEach(d => { byDay[d] = {}; });
     items.forEach(i => { if(byDay[i.day_of_week]) byDay[i.day_of_week][i.meal_type] = i; });
 
-    setContent(`
+    __draw(`
       <div class="page-header flex justify-between items-center mb-5">
         <div><h1>Daily Menu</h1><p>Set daily food menu for guests</p></div>
         <button class="btn btn-primary btn-sm" onclick="menuModal()">+ Add Menu</button>
@@ -806,7 +826,7 @@ async function pgMenu() {
             </table>
           </div>`}
       </div>`);
-  } catch(e) { setContent(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
+  } catch(e) { __draw(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
 }
 
 function menuModal(preDay='') {
@@ -845,6 +865,7 @@ async function saveMenu() {
 let checklistCurrentDate = null;
 
 async function pgChecklist(date) {
+  const __draw = drawFor(drawSeq);   // D-15-7: draw only while this screen is still the one showing
   loading();
   const d = date || checklistCurrentDate || nowDate();
   checklistCurrentDate = d;
@@ -854,7 +875,7 @@ async function pgChecklist(date) {
     : '';
   try {
     const data = await API.getChecklist(d);
-    setContent(`
+    __draw(`
       <div class="page-header flex justify-between items-center mb-5">
         <div><h1>Daily Checklist</h1><p>Owner-cum-Warden routine — tick off as you complete each task</p></div>
       </div>
@@ -887,7 +908,7 @@ async function pgChecklist(date) {
         </div>
       `).join('')}
     `);
-  } catch(e) { setContent(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
+  } catch(e) { __draw(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
 }
 
 async function toggleChecklistItem(itemId, checked) {
@@ -1010,6 +1031,7 @@ let complaintsCurrentFilter = 'all';
 const COMPLAINT_CATEGORIES = ['Electrical','Water','Wifi/Internet','Cleaning','Furniture','Security','Food/Mess','Other'];
 
 async function pgComplaints(filter) {
+  const __draw = drawFor(drawSeq);   // D-15-7: draw only while this screen is still the one showing
   loading();
   const f = filter || complaintsCurrentFilter;
   complaintsCurrentFilter = f;
@@ -1017,7 +1039,7 @@ async function pgComplaints(filter) {
   try {
     const list = await API.getComplaints(f);
     const tabs = [['all','All'],['open','Open'],['in_progress','In Progress'],['resolved','Resolved']];
-    setContent(`
+    __draw(`
       <div class="page-header flex justify-between items-center mb-5">
         <div><h1>Requests</h1><p>Issues raised by residents or logged on rounds — kept in sync between warden and admin</p></div>
         <button class="btn btn-primary btn-sm" onclick="complaintModal()">+ Log Issue</button>
@@ -1054,7 +1076,7 @@ async function pgComplaints(filter) {
       </div>
     `);
     bulkSetup('complaints', [{ action: 'assign', label: 'Assign to staff', icon: 'users' }]);
-  } catch(e) { setContent(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
+  } catch(e) { __draw(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
 }
 
 function complaintModal() {
@@ -1117,6 +1139,7 @@ let paymentsCurrentYear = null;
 let paymentsListCache = [];
 
 async function pgPayments(month, year) {
+  const __draw = drawFor(drawSeq);   // D-15-7: draw only while this screen is still the one showing
   loading();
   document.getElementById('topbar-actions').innerHTML = '';   // Sprint 15: the button lives on the page itself
   try {
@@ -1137,7 +1160,7 @@ async function pgPayments(month, year) {
     const waiting = list.filter(c => c.status === 'pending_verification' || c.status === 'pending_approval');
     const total = received.reduce((s,c)=>s+parseFloat(c.amount),0);
     const waitingTotal = waiting.reduce((s,c)=>s+parseFloat(c.amount),0);
-    setContent(`
+    __draw(`
       <div class="page-header flex justify-between items-center">
         <div><h1>Payments</h1><p>Track rent payments</p></div>
         <div class="flex items-center gap-2">
@@ -1170,7 +1193,7 @@ async function pgPayments(month, year) {
           </table>
         </div>
       </div>`);
-  } catch(e) { setContent(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
+  } catch(e) { __draw(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
 }
 
 // Sprint 15.1: one way to show type, month and mode on payment cards — the
@@ -1228,11 +1251,12 @@ async function delCollectionFromPayments(id) {
 
 // ── GUEST MESSAGES (Announcements) ───────────────
 async function pgAnnouncements() {
+  const __draw = drawFor(drawSeq);   // D-15-7: draw only while this screen is still the one showing
   loading();
   document.getElementById('topbar-actions').innerHTML = '';   // Sprint 15: the button lives on the page itself
   try {
     const list = await API.getAnnouncements();
-    setContent(`
+    __draw(`
       <div class="page-header"><h1>Announcements</h1><p>Notices posted to every resident's portal</p></div>
       <div class="card">
         <div class="card-header">
@@ -1261,7 +1285,7 @@ async function pgAnnouncements() {
             </div>`).join('')}
           </div>`}
       </div>`);
-  } catch(e) { setContent(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
+  } catch(e) { __draw(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
 }
 
 function announcementModal() {
@@ -1312,12 +1336,13 @@ async function delAnnouncement(id) {
 
 // ── INBOX ─────────────────────────────────────────
 async function pgInbox() {
+  const __draw = drawFor(drawSeq);   // D-15-7: draw only while this screen is still the one showing
   loading();
   try {
     const msgs = await API.getInbox();
     const unread = msgs.filter(m=>!m.is_read).length;
     loadInboxCount();
-    setContent(`
+    __draw(`
       <div class="page-header"><h1>Messages</h1><p>Sent by residents — reply directly from here</p></div>
       <div class="card">
         <div class="card-header">
@@ -1346,7 +1371,7 @@ async function pgInbox() {
           </div>`).join('')}
         </div>
       </div>`);
-  } catch(e) { setContent(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
+  } catch(e) { __draw(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
 }
 
 async function viewInboxMsg(m) {
@@ -1418,6 +1443,7 @@ let purchasesFromDate = null;
 let purchasesToDate = null;
 
 async function pgPurchases(month, year, from, to) {
+  const __draw = drawFor(drawSeq);   // D-15-7: draw only while this screen is still the one showing
   loading();
   document.getElementById('topbar-actions').innerHTML = '';   // Sprint 15: the button lives on the page itself
   try {
@@ -1444,7 +1470,7 @@ async function pgPurchases(month, year, from, to) {
     const periodLabel = useRange
       ? `${fmtDate(from)} – ${fmtDate(to)}`
       : new Date(y,m-1,1).toLocaleString('en-IN',{month:'long',year:'numeric'});
-    setContent(`
+    __draw(`
       <div class="page-header"><h1>Purchases</h1><p>Track all PG expenses and purchases</p></div>
       ${pendingCount>0?`<div class="alert" style="background:#FFFBEB;border:1px solid var(--amber);color:#92400E;margin-bottom:16px">⏳ ${pendingCount} staff-entered purchase${pendingCount>1?'s':''} awaiting your approval below.</div>`:''}
       ${isAdmin()?`<div class="flex gap-2 mb-5">
@@ -1486,7 +1512,7 @@ async function pgPurchases(month, year, from, to) {
           </table>
         </div>
       </div>`);
-  } catch(e) { setContent(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
+  } catch(e) { __draw(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
 }
 
 function onPurchasesRangeChange() {
@@ -1798,6 +1824,7 @@ let collectionsFromDate = null;
 let collectionsToDate = null;
 
 async function pgCollections(month, year, from, to) {
+  const __draw = drawFor(drawSeq);   // D-15-7: draw only while this screen is still the one showing
   loading();
   document.getElementById('topbar-actions').innerHTML = '';   // Sprint 15: the button lives on the page itself
   try {
@@ -1829,7 +1856,7 @@ async function pgCollections(month, year, from, to) {
     const periodLabel = useRange
       ? `${fmtDate(from)} – ${fmtDate(to)}`
       : new Date(y,m-1,1).toLocaleString('en-IN',{month:'long',year:'numeric'});
-    setContent(`
+    __draw(`
       <div class="page-header"><h1>${icon('rupee')} Collections</h1><p>Track all income — rent, deposits, and extra charges</p></div>
       ${pendingVerificationCount>0?`<div class="alert" style="background:var(--amber-light,#FFFBEB);border:1px solid var(--amber,#F59E0B);color:#92400E;margin-bottom:10px">⏳ ${pendingVerificationCount} resident-reported UPI payment${pendingVerificationCount>1?'s':''} awaiting your confirmation below — check your bank/UPI app, then confirm or reject.</div>`:''}
       ${pendingApprovalCount>0?`<div class="alert" style="background:var(--amber-light,#FFFBEB);border:1px solid var(--amber,#F59E0B);color:#92400E;margin-bottom:16px">⏳ ${pendingApprovalCount} staff-entered collection${pendingApprovalCount>1?'s':''} awaiting your approval below.</div>`:''}
@@ -1872,7 +1899,7 @@ async function pgCollections(month, year, from, to) {
           </table>
         </div>
       </div>`);
-  } catch(e) { setContent(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
+  } catch(e) { __draw(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
 }
 
 // Triggered when either the From or To date input changes. Only applies the
@@ -2043,6 +2070,7 @@ async function confirmPendingCollection(id) {
 let rentDueListCache = [];
 
 async function pgRentDue() {
+  const __draw = drawFor(drawSeq);   // D-15-7: draw only while this screen is still the one showing
   loading();
   document.getElementById('topbar-actions').innerHTML = '';
   try {
@@ -2054,7 +2082,7 @@ async function pgRentDue() {
     const totalDepositPending = list.reduce((s,g) => s + parseFloat(g.deposit_pending||0), 0);
     const fullyPaidCount = list.filter(g => parseFloat(g.amount_due) <= 0).length;
     const pendingCount = list.filter(g => parseFloat(g.amount_due) > 0 || parseFloat(g.deposit_pending||0) > 0).length;
-    setContent(`
+    __draw(`
       <div class="page-header"><h1>Rent Due <span class="sm-kn" style="font-size:15px">ಬಾಕಿ</span></h1><p>Running balance for each resident, carried forward across months — not just this month's snapshot</p></div>
       <div class="flex gap-2 mb-5" style="flex-wrap:wrap">
         ${isAdmin()?`<button class="btn btn-outline btn-sm" onclick="exportRentDueCsv()">⬇ Export CSV</button>
@@ -2099,7 +2127,7 @@ async function pgRentDue() {
       </div>`);
     loadReliability();
     bulkSetup('rent-due', [{ action: 'reminders', label: 'Draft reminders', icon: 'whatsapp' }]);
-  } catch(e) { setContent(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
+  } catch(e) { __draw(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
 }
 
 let rentDueSort = { key: null, dir: 'asc' };
@@ -2299,6 +2327,7 @@ let reportsRangeFrom = null;
 let reportsRangeTo = null;
 
 async function pgReports(month, year) {
+  const __draw = drawFor(drawSeq);   // D-15-7: draw only while this screen is still the one showing
   reportsMode = 'month';
   loading();
   const now = new Date();
@@ -2309,13 +2338,14 @@ async function pgReports(month, year) {
       <span style="font-size:13px;color:var(--text-muted)">Select Month</span>
       ${monthPicker(m, y, 'onReportsMonthChange')}
       <button class="btn btn-outline btn-sm" onclick="switchReportsToRange()">Custom Range</button>`;
-    setContent(renderReportsPage(r, controls));
+    __draw(renderReportsPage(r, controls));
     loadTrendChart();
     if (isAdmin()) loadOwnerReport();
-  } catch(e) { setContent(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
+  } catch(e) { __draw(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
 }
 
 async function pgReportsRange(from, to) {
+  const __draw = drawFor(drawSeq);   // D-15-7: draw only while this screen is still the one showing
   reportsMode = 'range';
   reportsRangeFrom = from;
   reportsRangeTo = to;
@@ -2328,9 +2358,9 @@ async function pgReportsRange(from, to) {
       <input type="date" id="rep-to" value="${esc(to)}" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit"/>
       <button class="btn btn-primary btn-sm" onclick="applyReportsRange()">Apply</button>
       <button class="btn btn-outline btn-sm" onclick="switchReportsToMonth()">By Month</button>`;
-    setContent(renderReportsPage(r, controls));
+    __draw(renderReportsPage(r, controls));
     loadTrendChart();
-  } catch(e) { setContent(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
+  } catch(e) { __draw(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
 }
 
 function switchReportsToRange() {
@@ -2499,6 +2529,7 @@ let balanceSheetAsOf = null;
 let balanceSheetAssetsCache = [];
 
 async function pgBalanceSheet(asOf) {
+  const __draw = drawFor(drawSeq);   // D-15-7: draw only while this screen is still the one showing
   loading();
   document.getElementById('topbar-actions').innerHTML = '';
   const date = asOf || balanceSheetAsOf || nowDate();
@@ -2511,7 +2542,7 @@ async function pgBalanceSheet(asOf) {
     ]);
     balanceSheetAssetsCache = assets;
     const hasGap = Math.abs(bs.reconciliationDiff) > 0.5;
-    setContent(`
+    __draw(`
       <div class="page-header flex justify-between items-center">
         <div><h1>Balance Sheet</h1><p>What the business owns vs. owes, as of a point in time</p></div>
         <div class="flex items-center gap-2">
@@ -2620,7 +2651,7 @@ async function pgBalanceSheet(asOf) {
           </table>
         </div>
       </div>`);
-  } catch(e) { setContent(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
+  } catch(e) { __draw(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
 }
 
 async function exportBalanceSheetPdf() {
@@ -2733,7 +2764,8 @@ async function pgAdmin() {
 }
 
 function renderAdminPage() {
-  setContent(`
+  const __draw = drawFor(drawSeq);   // D-15-7: draw only while this screen is still the one showing
+  __draw(`
     <div class="page-header"><h1>Admin</h1><p>Staff accounts, audit trail, deposit refunds, and app settings</p></div>
     <div id="schema-banner"></div>
     <div class="flex gap-2 mb-5">
@@ -3113,9 +3145,10 @@ function initMobileCards() {
 
 // ── Skeleton loading + empty states ─────────────────────────────
 function skeleton(kind) {
+  const __draw = drawFor(drawSeq);   // D-15-7: draw only while this screen is still the one showing
   const cards = `<div class="sm-skel">${'<div class="sm-skel-card"></div>'.repeat(4)}</div>`;
   const lines = `<div class="sm-skel"><div class="sm-skel-line" style="width:40%;height:22px"></div>${'<div class="sm-skel-line"></div>'.repeat(6)}</div>`;
-  setContent(kind === 'lines' ? lines : cards);
+  __draw(kind === 'lines' ? lines : cards);
 }
 
 function emptyState(name, title, text, actionHtml) {
@@ -3210,6 +3243,7 @@ function monthLabelForCollect(d) {
 }
 
 async function pgCollect() {
+  const __draw = drawFor(drawSeq);   // D-15-7: draw only while this screen is still the one showing
   skeleton('cards');
   document.getElementById('topbar-actions').innerHTML = '';
   const list = await API.getRentDue();
@@ -3222,7 +3256,7 @@ async function pgCollect() {
   collectState.type = 'rent';
   collectState.source = 'manual';
   collectState.voiceProposal = null;
-  setContent(`
+  __draw(`
     <div class="page-header"><h1>${icon('rupee')} Collect</h1><p>Rent · <span class="sm-kn">ಬಾಡಿಗೆ ಸಂಗ್ರಹ</span></p></div>
     <div class="card" style="padding:16px">
       ${collectVoiceRow()}
@@ -3340,10 +3374,11 @@ async function saveCollectEntry() {
 }
 
 function showCollectDone(g, amount, saved) {
+  const __draw = drawFor(drawSeq);   // D-15-7: draw only while this screen is still the one showing
   const pending = saved && saved.status && saved.status !== 'confirmed';
   const msg = `Hi ${g.name}, we have received ${fmt(amount)} towards ${collectState.type === 'deposit' ? 'your deposit' : 'rent'} at Siri Mane PG. Thank you!`;
   const wa = buildWhatsappUrl(g.phone, msg);
-  setContent(`
+  __draw(`
     <div class="card sm-done-card">
       <div class="sm-done-tick">✅</div>
       <h3 style="margin:8px 0 4px">${fmt(amount)} recorded</h3>
@@ -3745,10 +3780,11 @@ async function pgReminders() {
   await renderReminders();
 }
 async function renderReminders() {
+  const __draw = drawFor(drawSeq);   // D-15-7: draw only while this screen is still the one showing
   const list = await apiFetch('/assistant/reminders?lang=' + reminderState.lang);
   reminderState.list = list;
   const total = list.reduce((t, g) => t + (parseFloat(g.amount_due) || 0), 0);
-  setContent(`
+  __draw(`
     <div class="page-header"><h1>Rent Reminders <span class="sm-kn" style="font-size:15px">ಜ್ಞಾಪನೆ</span></h1>
       <p>${list.length ? `${list.length} resident${list.length === 1 ? ' owes' : 's owe'} ${fmt(total)}. Each message is drafted from her exact balance — read it, edit if you like, then send.` : 'Nobody owes rent right now.'}</p>
     </div>
@@ -4163,6 +4199,7 @@ function runQuickAction(i) { const list = QUICK_ACTIONS.filter(a => !a.admin || 
 // ── Home (AI-first hierarchy, one API call) ──────────────────────────────
 let homeCache = null;
 async function pgHome(force) {
+  const __draw = drawFor(drawSeq);   // D-15-7: draw only while this screen is still the one showing
   skeleton('cards');
   document.getElementById('topbar-actions').innerHTML = '';
   const h = await apiFetch('/home');
@@ -4174,7 +4211,7 @@ async function pgHome(force) {
   // main/sub are always plain text (names, categories, counts) — escaped here once (S15.2 review F-1)
   const row = (ic, main, sub, action) => `<div class="today-row">${icon(ic)}<span class="t-main">${esc(main)}${sub ? `<div class="t-sub">${esc(sub)}</div>` : ''}</span>${action || ''}</div>`;
 
-  setContent(`
+  __draw(`
     <div class="home-greeting">${esc(h.brief.greeting)}, ${esc(h.user.username)}</div>
     <div class="home-date">${esc(h.brief.dateLabel)}${h.brief.health ? ` · <span class="health-pill ${h.brief.health.overall >= 80 ? 'good' : h.brief.health.overall >= 60 ? 'ok' : 'low'}" onclick='showHealthDetail(homeCache.brief.health)'>Health ${h.brief.health.overall}</span>` : ''}</div>
 
@@ -4646,12 +4683,13 @@ function openWizardFromCopilot(w) {
 // ── Room & bed map ──────────────────────────────────────────────
 let roomMapCache = null;
 async function pgRoomMap() {
+  const __draw = drawFor(drawSeq);   // D-15-7: draw only while this screen is still the one showing
   skeleton('cards');
   document.getElementById('topbar-actions').innerHTML = isAdmin()
     ? `<button class="btn btn-primary btn-sm" onclick="roomModal()">${icon('plus')} Add room</button>` : '';
   const m = await apiFetch('/room-map');
   roomMapCache = m;
-  setContent(`
+  __draw(`
     <div class="page-header"><h1>Rooms</h1><p>${m.totals.residents} resident${m.totals.residents === 1 ? '' : 's'} · ${m.totals.beds} beds · ${m.totals.free} free</p></div>
     ${(m.totals.overCapacity || m.totals.noRoom || m.totals.bedFixes) ? `<div class="alert alert-warning" style="display:block;margin-bottom:14px">
       ${m.totals.overCapacity ? `<div>${m.totals.overCapacity} resident${m.totals.overCapacity === 1 ? ' is' : 's are'} beyond the beds their room has.</div>` : ''}
@@ -4848,13 +4886,14 @@ async function loadMyTasks() {
    ═══════════════════════════════════════════════════════════════ */
 let financeCache = null;
 async function pgFinanceOverview() {
+  const __draw = drawFor(drawSeq);   // D-15-7: draw only while this screen is still the one showing
   skeleton('cards');
   document.getElementById('topbar-actions').innerHTML = '';
   const d = await apiFetch('/finance/overview');
   financeCache = d;
   const k = d.kpis, f = d.forecast.collections, o = d.forecast.occupancy, e = d.expenses, t = d.today;
   const kpi = (label, value, sub) => `<div class="money-card"><div class="m-label">${label}</div><div class="m-value">${value}</div>${sub ? `<div class="t-sub">${sub}</div>` : ''}</div>`;
-  setContent(`
+  __draw(`
     <div class="page-header"><h1>Finance</h1><p>${new Date(k.month + '-01T00:00:00Z').toLocaleDateString('en-IN', { month: 'long', year: 'numeric', timeZone: 'UTC' })}</p></div>
 
     <div class="home-section-h">This month</div>
@@ -4968,13 +5007,14 @@ async function loadReliability() {
    resident is ever scored.
    ═══════════════════════════════════════════════════════════════ */
 async function pgVisitors() {
+  const __draw = drawFor(drawSeq);   // D-15-7: draw only while this screen is still the one showing
   skeleton('cards');
   document.getElementById('topbar-actions').innerHTML = '';
   const list = await apiFetch('/visitors');
   const label = { expected: 'Expected', in: 'Inside now', out: 'Left', denied: 'Not allowed' };
   const badge = { expected: 'badge-blue', in: 'badge-green', out: 'badge-gray', denied: 'badge-red' };
   const today = list.filter(v => v.status === 'expected' || v.status === 'in');
-  setContent(`
+  __draw(`
     <div class="page-header"><h1>Visitors</h1><p>Registered by residents · ${today.length} expected or inside</p></div>
     ${list.length ? `<div class="card"><div class="table-wrap"><table>
       <thead><tr><th>VISITOR</th><th>FOR</th><th>EXPECTED</th><th>STATUS</th><th>ACTIONS</th></tr></thead>
@@ -4997,6 +5037,7 @@ async function visitorAction(id, action) {
 }
 
 async function pgFeedback() {
+  const __draw = drawFor(drawSeq);   // D-15-7: draw only while this screen is still the one showing
   skeleton('cards');
   document.getElementById('topbar-actions').innerHTML = '';
   const [food, exp, sat] = await Promise.all([
@@ -5005,7 +5046,7 @@ async function pgFeedback() {
     isAdmin() ? apiFetch('/satisfaction').catch(() => null) : Promise.resolve(null)
   ]);
   const stars = n => '★'.repeat(Math.round(n)) + '☆'.repeat(5 - Math.round(n));
-  setContent(`
+  __draw(`
     <div class="page-header"><h1>Feedback</h1><p>What residents are telling us — grouped, never per person</p></div>
 
     <div class="home-section-h">Food</div>
@@ -5095,11 +5136,12 @@ async function sweepNotifications() { try { const r = await apiFetch('/notificat
 
 // ── Outbox ──────────────────────────────────────────────────────
 async function pgOutbox() {
+  const __draw = drawFor(drawSeq);   // D-15-7: draw only while this screen is still the one showing
   skeleton('cards');
   document.getElementById('topbar-actions').innerHTML = `<button class="btn btn-outline btn-sm" onclick="draftOutbox()">Draft due messages</button>`;
   const [drafts, sent] = await Promise.all([apiFetch('/outbox?status=draft'), apiFetch('/outbox?status=sent')]);
   const kindLabel = { rent_due: 'Rent due', rent_overdue: 'Rent overdue', payment_confirmed: 'Payment received', request_updated: 'Request update', welcome: 'Welcome', checkout_reminder: 'Checkout' };
-  setContent(`
+  __draw(`
     <div class="page-header"><h1>Outbox</h1><p>Messages Siri has drafted. Nothing is sent until you tap Send.</p></div>
     ${drafts.length ? `<div class="card"><div style="padding:4px 16px">
       ${drafts.map(m => `<div class="outbox-row">
@@ -5130,10 +5172,11 @@ async function skipMessage(id) { try { await apiFetch(`/outbox/${id}/skip`, { me
 
 // ── Recurring maintenance ───────────────────────────────────────
 async function pgMaintenance() {
+  const __draw = drawFor(drawSeq);   // D-15-7: draw only while this screen is still the one showing
   skeleton('cards');
   document.getElementById('topbar-actions').innerHTML = isAdmin() ? `<button class="btn btn-primary btn-sm" onclick="maintenanceModal()">${icon('plus')} Add task</button>` : '';
   const list = await apiFetch('/maintenance-schedule');
-  setContent(`
+  __draw(`
     <div class="page-header"><h1>Recurring maintenance</h1><p>Things that need doing every few months</p></div>
     ${list.length ? `<div class="card"><div style="padding:4px 16px">
       ${list.map(m => `<div class="today-row">${icon(m.due_now ? 'flag' : 'calendar')}
