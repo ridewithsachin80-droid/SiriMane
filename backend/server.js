@@ -71,6 +71,24 @@ const accountLimiter = (max, keyOf, who) => rateLimit({
   legacyHeaders: false,
   skipSuccessfulRequests: true,
   keyGenerator: (req) => keyOf(req.body || {}),
+  // S16.3-4: when a pause trips, put it on the bell (once per account per
+  // window) so the warden/admin knows someone is guessing.
+  handler: (req, res, next, options) => {
+    try {
+      const key = keyOf(req.body || {});
+      const win = Math.floor(Date.now() / options.windowMs);
+      const resident = key.startsWith('g:');
+      const label = resident ? `a resident number ending ${key.slice(-4)}` : `staff login "${key.slice(2)}"`;
+      require('./services/notify').push({
+        level: 'important', category: 'system',
+        title: `Login paused for ${label}`,
+        detail: `${max} wrong passwords in 15 minutes. If it wasn't her/them, someone may be guessing. The pause lifts on its own.`,
+        action_page: resident ? 'guests' : 'admin', for_role: resident ? 'staff' : 'admin',
+        dedupe_key: `lockout:${key}:${win}`
+      }).catch(() => {});
+    } catch (e) { /* the alert is best-effort; the pause itself always applies */ }
+    res.status(options.statusCode).json(options.message);
+  },
   message: { error: `Too many wrong passwords for this ${who}. It is paused for up to 15 minutes — try again later, or ask the warden.` }
 });
 app.use('/api/guest-login', accountLimiter(10, b => 'g:' + String(b.mobile || '').replace(/\D/g, '').slice(-10), 'number'));

@@ -154,3 +154,17 @@ Evidence (owner, PowerShell from home internet, 8 Nov 12:05, production = 16.1):
 | ID | Acceptance criterion | Review |
 |---|---|---|
 | S16.2.1-1 | The per-address limit keys on `req.ip` again (X-Real-IP removed, per reviewer: keep it only if proven per-client and unforgeable — not proven, and not needed); per-account limits unchanged | SEC |
+
+## Sprint 16.3 — account management (criteria recorded before build)
+Owner, 8 Nov 12:31: "you don't need my permission to start building after you got what you need" — standing rule recorded in HANDOFF; releases, money, paid services, renames/deletions and data changes still need him.
+Released before this sprint: 16.2 + 16.2.1 (PR #14, main = 76beb18). Production Serverless switched OFF by owner (in-process jobs need an always-on container); replicas = 1.
+
+| ID | Acceptance criterion | Review |
+|---|---|---|
+| S16.3-1 | Admin and staff can change their own password from a "My password" button: current password required; new ≥ 8 characters, not the username, different from current; clear message | SEC |
+| S16.3-2 | Admin can set a new password for any staff/admin account (≥ 8 chars) and rename any username (3–30 of letters, digits, . _ -; unique, case-insensitive); both logged in the Audit Log; sessions keep working after a rename | SEC REQUIRED |
+| S16.3-3 | Staff or admin can reset a resident's app login: her password goes back to her phone number and she must set her own at the next login; audit-logged | SEC |
+| S16.3-4 | When a per-account login pause trips, a bell notification appears (resident → warden, staff/admin → admin) once per account per window, showing only the last 4 digits of a resident's number | SEC/UX |
+| S16.3-5 | Resident "Set your own password" screen: labels above full-width boxes at 360/390 px | UX |
+| S16.3-6 | 12 gates green twice; independent review before merge | QA |
+| S16.3-7 | **Found while answering the owner (12:33): replies to residents' messages were never shown to them.** A message sent from the resident app is linked to her account (`inbox_messages.guest_id`, additive migration `migrate-guest-messages.js`); her name/phone/room come from her record, not from the form; Help shows "My messages" with each reply. Before the migration runs, sending still works and the list says replies will appear soon. The public form (no login) is unchanged | SEC/DATA |

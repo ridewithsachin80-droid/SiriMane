@@ -84,6 +84,16 @@
     .p-bottomnav button small { font-size:9.5px; font-weight:500; opacity:.75; }
     select { width:100%; padding:11px 14px; border:1.5px solid var(--p-border); border-radius:10px; font-family:inherit; background:var(--p-card); color:var(--p-text); min-height:44px; }
     .form-row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .fpw-field { display:block; margin-bottom:12px; }
+    .my-msg { padding:10px 0; border-bottom:1px solid var(--p-border, rgba(127,127,127,.2)); }
+    .my-msg:last-child { border-bottom:0; }
+    .my-msg-d { font-size:11px; color:var(--p-text-muted); }
+    .my-msg-q div, .my-msg-a div { white-space:pre-wrap; overflow-wrap:anywhere; margin-top:2px; }
+    .my-msg-a { margin:8px 0 0 12px; padding:8px 10px; border-left:3px solid #E0A93B; background:rgba(224,169,59,.08); border-radius:6px; }
+    .my-msg-who { font-size:11px; font-weight:600; color:#B57F12; }
+    .my-msg-wait { margin:6px 0 0 12px; font-size:12px; color:var(--p-text-muted); }
+    .fpw-field label { display:block; margin-bottom:6px; }
+    .fpw-field input { display:block; width:100%; box-sizing:border-box; }
     #p-theme { background:none; border:none; cursor:pointer; font-size:18px; padding:6px 8px; border-radius:8px; line-height:1; min-width:44px; min-height:44px; }
 
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
@@ -220,8 +230,9 @@
       <div class="card-b">
         <p class="text-muted" style="margin:0 0 12px">You logged in with your phone number. Anyone who knows your number could do the same, so please choose your own password now.</p>
         <div id="fpw-alert" class="hidden"></div>
-        <div class="form-row"><label for="fpw-new">New password (at least 6 characters)</label><input type="password" id="fpw-new" autocomplete="new-password"></div>
-        <div class="form-row"><label for="fpw-confirm">Type it again</label><input type="password" id="fpw-confirm" autocomplete="new-password"></div>
+        <!-- S16.3-5: label above a full-width box (.form-row is a 2-column grid) -->
+        <div class="fpw-field"><label for="fpw-new">New password (at least 6 characters)</label><input type="password" id="fpw-new" autocomplete="new-password"></div>
+        <div class="fpw-field"><label for="fpw-confirm">Type it again</label><input type="password" id="fpw-confirm" autocomplete="new-password"></div>
         <button class="btn btn-amber" id="fpw-btn" onclick="forcePasswordSave()">Save and continue</button>
       </div>
     </div>
@@ -400,6 +411,11 @@
           </div>
           <button class="btn btn-amber" id="msg-btn" onclick="sendMessage()">📤 Send Message</button>
         </div>
+      </div>
+      <!-- S16.3-7: what she sent, and the PG's replies -->
+      <div class="card">
+        <div class="card-h">📨 My messages</div>
+        <div class="card-b" id="my-msgs"></div>
       </div>
     </div>
 
@@ -701,6 +717,23 @@ async function registerVisitor() {
     loadVisitors();
   } catch (e) { if (al) { al.textContent = e.message; al.classList.remove('hidden'); } }
 }
+// S16.3-7: her messages with the PG's replies
+async function loadMyMessages() {
+  const host = document.getElementById('my-msgs');
+  if (!host) return;
+  try {
+    const r = await apiGuest('/guest-my-messages');
+    const list = r.messages || [];
+    host.innerHTML = list.length ? list.map(m => `
+      <div class="my-msg">
+        <div class="my-msg-q"><strong>${escH(m.subject || 'Message')}</strong> <span class="my-msg-d">${fmtDate(m.created_at)}</span><div>${escH(m.message)}</div></div>
+        ${m.reply ? `<div class="my-msg-a"><span class="my-msg-who">Reply from Siri Mane${m.replied_at ? ' · ' + fmtDate(m.replied_at) : ''}</span><div>${escH(m.reply)}</div></div>`
+                  : '<div class="my-msg-wait">No reply yet</div>'}
+      </div>`).join('')
+      : `<p style="text-align:center;color:var(--p-text-muted);font-size:13px">${r.ready === false ? 'Replies will appear here soon.' : 'No messages yet'}</p>`;
+  } catch { host.innerHTML = ''; }
+}
+
 async function loadVisitors() {
   const host = document.getElementById('vis-list');
   if (!host) return;
@@ -1043,16 +1076,9 @@ async function sendMessage() {
   btn.disabled = true; btn.textContent = 'Sending...';
 
   try {
-    await fetch('/api/guest-message', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + guestToken },
-      body: JSON.stringify({
-        guest_name: guestData.name,
-        guest_phone: guestData.phone,
-        room_number: guestData.room_number,
-        subject, message: body
-      })
-    });
+    // S16.3-7: sent as HER (logged in) so the reply can come back to her
+    await apiGuest('/guest-my-message', { method: 'POST', body: { subject, message: body } });
+    loadMyMessages();
     document.getElementById('msg-body').value = '';
     document.getElementById('msg-subject').value = '';
     showAl(al, '✅ Message sent to management!', 'success');
@@ -1139,6 +1165,7 @@ function showTab(tab) {
   if (show.includes('home')) loadPortalHome();
   if (show.includes('idcard')) loadIdCard();
   if (show.includes('visitors')) loadVisitors();
+  if (show.includes('message')) loadMyMessages();
   if (show.includes('emergency')) loadEmergency();
   if (show.includes('complaint')) loadComplaintHistory();
   const nav = PORTAL_NAV[tab] || tab;

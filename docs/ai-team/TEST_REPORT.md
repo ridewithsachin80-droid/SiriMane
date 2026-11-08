@@ -205,3 +205,8 @@ Implementer gates: 12/12 ×2, 2,611.
 ### Sprint 16.2.1 — independent review of 6ebfcb3: **APPROVE FOR TEST DEPLOYMENT**
 Revert correct (per-address limiters on req.ip; per-account limits unchanged). 12/12 fresh gate3, 2,609.
 **Correction to the implementer's reading:** attempts 1–11 counted together prove a forged XFF cannot change req.ip from the internet, but "the window expired" does NOT explain attempt 12 → 401 (each key's window starts at its own first failure; earlier shared failures would have blocked before 11). More likely: the home public IP changed mid-run (IPv6 rotation / v4↔v6), a restart wiped in-memory counts, or a second replica with its own counter. Before production: confirm Railway runs ONE replica; optional re-run recording RateLimit headers.
+
+### Sprint 16.3 gates
+G163d: 11/12 — ui FAIL at 789 (`.room-tile` wait). Traced via GATE_LOG: the step after check 789 is ui.smoke.js:1390 `paletteRunCommand('expense'); navigate('rooms')` — the purchases page's late render overwrites Rooms = **D-15-7** (known, pre-existing; 16.3 does not touch it). 1 failure in 7 ui runs (G163d, G163e, 5 extra). Next sprint fixes D-15-7.
+G163e: **12/12 PASS, 2,668**. Mutation: removing the lockout bell fails "the warden is told once … (0)".
+Also found by the gate: deleting a staff account with any history returned a raw FK error (pre-existing) → now 409 with the way out (set a new password).
