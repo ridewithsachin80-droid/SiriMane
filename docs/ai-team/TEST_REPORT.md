@@ -232,3 +232,26 @@ Review: **APPROVE** (1 round). Browser check: g/collect, ccm/collect, ga-audienc
 Gates: 10/12 green; api and notify stop at the D-15-2 date checks between 18:30–24:00 UTC — identical on the parent af6f6b7. With node's clock shifted 7 h (dates agree), api 418 and notify 64 pass on the hotfix (parent 416 / 64).
 Accepted residual risk: `*.google.com` on the home page is another possible exfiltration endpoint; equivalent paths (own GA property, own GTM container, navigation) were already open — real fix is D-17-1 (token out of localStorage) or a separate origin for the home page. Other-country Google domains (e.g. google.ae) still blocked for ga-audiences — console noise only.
 D-15-2 is a real app bug, not test-only: between 00:00–05:30 IST the server's "today" is yesterday (dashboard computes today as a UTC date in node; DB CURRENT_DATE is UTC) — affects early-morning checklist ticks and maintenance dates. Recommended as the next sprint.
+
+### Sprint 18 — one clock (D-15-2): implementer evidence
+**Root cause.** Railway's Node and Postgres run in UTC. Between 00:00 and 05:30 IST: `new Date().toISOString()`, `CURRENT_DATE`, `NOW()` used as a date, `col::date` on stored time stamps, and the phones' `nowDate()` all gave **yesterday**. The database session time zone is deliberately left alone: 58 `timestamp without time zone` columns hold UTC wall-clock time.
+
+**MONEY — before/after (measured, not estimated)**
+| Case | Before | After |
+|---|---|---|
+| Collection form default date, entered 01:00 IST on 1 Dec | 2026-11-30 (counted in November) | 2026-12-01 (December) |
+| Additional-deposit `collection_date` written by the server at 01:00 IST on 1 Dec | 2026-11-30 | 2026-12-01 |
+| Rent ledger of a resident (₹6,000/month, joined 1 Sep, paid Sep–Nov) at 01:00 IST on 1 Dec | months Sep–Nov, balance ₹0 | months Sep–Dec, balance −₹6,000 (same as both versions show from 05:30) |
+| Year-to-date report range on an IST phone (any hour) | 2025-12-31 … today | 2026-01-01 … today |
+| YTD income with sample collections ₹6,000 on 2025-12-31 and ₹5,000 on 2026-01-05 (report's own WHERE clause) | ₹11,000 | ₹5,000 |
+Also moved to India's date: dashboard "income/expenses this month", the resident UPI claim's `collection_date`, checkout `leave_date`, rent-change effective date, report default month, balance-sheet `asOf`, trend end month. Existing rows are untouched; `pending_verification` handling is unchanged.
+
+**Found on the way.** Checkout reminders had never been drafted: pg returns a DATE as a JS Date and `String(date).slice(0,10)` gave "Wed Nov 11", which never compares ≤ "2026-11-15". Fixed (date as text); reminders cover today … +7 days.
+
+**Test harness.** `backend/test/fakeclock.js` (new, test-only) shifts `Date` in Node and in every browser page; Postgres runs on libfaketime in a separate UTC cluster (port 5436, like Railway). Browser pages now emulate Asia/Kolkata like every phone at the PG. Test fixtures write India dates (CURRENT_DATE → IST; `daysAgo()` in quick/bulk). The outbox test no longer depends on the day of the month (a resident leaving within a week guarantees a draft; the overdue follow-up is asserted only from the 7th).
+Process note: two early sweeps (1 am / 14:00) were contaminated by an earlier faked-clock batch still running on the same cluster and were discarded and rerun alone.
+
+**Mutations (at 01:00 IST on 1 Dec), all caught:** ledger on the UTC month (assistant: "Kavya (settled) not listed") · screens' today = UTC date (ui) · SQL today = CURRENT_DATE (api: "additional deposit is dated India's today, got 2026-11-30") · year-to-date from 31 Dec (ui: S18-3).
+
+Backlog from this sprint: visitors' `expected_at` is stored as India wall-clock (typed by the resident) while `checked_in_at` is UTC wall-clock — handled per column here, but should be unified · quick-entry category guesses learn from purchases other suites saved (order-dependent test; G-1) · `CURRENT_DATE` remains only as column defaults (`collections.collection_date`, `purchases.purchase_date`, `room_inspections.inspected_on`) — every insert in the app passes the date explicitly (scanned), so the default is never used.
+**Implementer gates on f5ea735 (12/12 each, run one at a time):** 01:00 IST on 1 Dec 2,793 · 14:00 IST 2,791 · 23:45 IST 2,791 · real clock (≈02:10 and 02:15 IST, inside the window) 2,791 ×2. (ui has two extra assertions on the 1st of a month.)
