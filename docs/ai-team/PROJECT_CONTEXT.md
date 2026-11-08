@@ -29,7 +29,7 @@ repository:
   test_branch: "ai/test"
   baseline_sha: "48deac233fcafe667b4977d344106fff62b301a5"   # main, 17 Sep 2026, "Add files via upload" — contains Sprints 0–14.4
   work_branch_prefix: "ai/"
-  registered_work_branches: ["ai/test", "ai/sprint-15", "ai/sprint-15-1", "ai/sprint-15-2", "ai/sprint-15-3", "ai/sprint-15-4", "ai/sprint-15-5", "ai/sprint-16", "ai/sprint-16-1"]   # ai/sprint-15: candidate branch for Sprint 15, not deployed; merged into ai/test only after G3
+  registered_work_branches: ["ai/test", "ai/sprint-15", "ai/sprint-15-1", "ai/sprint-15-2", "ai/sprint-15-3", "ai/sprint-15-4", "ai/sprint-15-5", "ai/sprint-16", "ai/sprint-16-1", "ai/sprint-16-2", "ai/sprint-16-2-1"]   # ai/sprint-15: candidate branch for Sprint 15, not deployed; merged into ai/test only after G3
   forbidden_refs: ["main"]                                       # Railway deploys main → production
   integration_method: "pull-request (base: ai/test)"
   integrator: "DEV (single integrator; preserved)"

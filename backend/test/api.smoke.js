@@ -318,6 +318,25 @@ async function main() {
         eq(await tryLogin('/guest-login', { mobile: '9999999999', password: 'wrong-again' }), 429, 'S16-3 the 11th wrong resident login is blocked');
         eq(await tryLogin('/auth/login', { username: 'admin', password: process.env.ADMIN_PASSWORD || 'SiriMane@2024' }), 200, 'S16-3 SECURITY/OPS: the warden can still log in from the same address');
 
+        // S16.2: per-ACCOUNT limit — a forged address on every try does not help
+        {
+          const forged = (i) => ({ 'Content-Type': 'application/json', 'X-Forwarded-For': '198.51.100.' + i });
+          const gl = async (i, m, p) => (await fetch(BASE + '/api/guest-login', { method: 'POST', headers: forged(i), body: JSON.stringify({ mobile: m, password: p }) })).status;
+          const victim = '8' + String(Date.now()).slice(-9);
+          const gv = (await A('POST', '/guests', { name: 'S162 Target', phone: victim, join_date: today, monthly_rent: 5000, deposit_amount: 0 })).data;
+          for (let i = 1; i <= 10; i++) await gl(i, victim, 'guess' + i);
+          eq(await gl(11, victim, 'guess-11'), 429, 'S16.2-1 SECURITY: the 11th wrong password for one number is blocked even from a NEW forged address');
+          eq(await gl(12, '+91 ' + victim, 'guess-12'), 429, 'S16.2-1 …and typing the same number as "+91 …" does not reset it');
+          const other = '7' + String(Date.now()).slice(-9);
+          ok((await gl(13, other, other)) !== 429, 'S16.2-2 another resident is not affected');
+          // staff: 20 per username
+          const su = (await A('POST', '/users', { username: 's162staff', password: 'Right-Pass-1', role: 'staff' })).data;
+          const sl = async (i, u, p) => (await fetch(BASE + '/api/auth/login', { method: 'POST', headers: forged(100 + i), body: JSON.stringify({ username: u, password: p }) })).status;
+          for (let i = 1; i <= 20; i++) await sl(i, 's162staff', 'nope' + i);
+          eq(await sl(21, 'S162STAFF ', 'nope-21'), 429, 'S16.2-1 SECURITY: the 21st wrong staff password is blocked (username case/space does not reset it)');
+          eq(await sl(22, 'admin', process.env.ADMIN_PASSWORD || 'SiriMane@2024'), 200, 'S16.2-2 the admin is not affected by another username\'s limit');
+          await A('DELETE', `/users/${su.id}`); await A('DELETE', `/guests/${gv.id}`);
+        }
         // S16-4 bcrypt 6 accepts passwords hashed by bcrypt 5 — through the real login routes.
         // These two hashes were made by bcrypt 5.1.1 before the upgrade.
         const BCRYPT5_STAFF = '$2b$06$8tWaK3Ny61dHhJxfVmV9peQm1mYVFa2foFUHMAj8y8lKFylYgTXqe';      // 'alpha-123'

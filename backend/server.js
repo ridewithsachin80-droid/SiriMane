@@ -35,6 +35,11 @@ app.use(rateLimit({
 // Sprint 16 (S16-3): staff and residents get SEPARATE counters. On the PG's
 // shared Wi-Fi every phone has the same public address, so residents' typos
 // used to lock the warden out (and the other way round).
+// Client address = req.ip (trust proxy 1). Verified on production 8 Nov:
+// from the internet, a forged X-Forwarded-For does NOT change it (12 tries
+// with 12 forged addresses were counted together and blocked at the 11th).
+// Only requests from inside Railway's own network can set it. X-Real-IP was
+// tried in 16.2 and removed in 16.2.1 — not proven per-client.
 const makeLoginLimiter = () => rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
@@ -53,6 +58,23 @@ app.use('/api/ai', require('./routes/ai'));
 app.use('/api', require('./routes/rooms-requests'));
 
 app.use(express.json({ limit: '10kb' }));
+
+// Sprint 16.2 (S16.2-1): a per-ACCOUNT limit as well, which no forged address
+// can dodge. 10 wrong passwords for one resident's number (20 for a staff
+// username — harder to lock the admin out on purpose) in 15 minutes pauses
+// that account for the rest of the window. Correct logins never count.
+// Mounted after the JSON parser because the key comes from the body.
+const accountLimiter = (max, keyOf, who) => rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  keyGenerator: (req) => keyOf(req.body || {}),
+  message: { error: `Too many wrong passwords for this ${who}. It is paused for up to 15 minutes — try again later, or ask the warden.` }
+});
+app.use('/api/guest-login', accountLimiter(10, b => 'g:' + String(b.mobile || '').replace(/\D/g, '').slice(-10), 'number'));
+app.use('/api/auth/login', accountLimiter(20, b => 'u:' + String(b.username || '').trim().toLowerCase(), 'username'));
 
 app.use('/api', require('./routes/index'));
 app.use('/api/assistant', require('./routes/assistant'));

@@ -137,3 +137,20 @@ Owner decisions: (1) one resident per phone number · (3) force residents to cha
 | ID | Acceptance criterion | Review |
 |---|---|---|
 | S16.1-1 | Any login whose verified password's digits contain her 10-digit number (old hashes of "X.X", "+91.X", "X/", "X (s)") is treated as the default and forced to change — the same rule change-password uses | SEC REQUIRED |
+
+## Sprint 16.2 — login limit that cannot be dodged (criteria recorded before build)
+
+**Finding (owner, production console, 8 Nov 10:12):** 12 wrong resident logins, each with a different `X-Forwarded-For`, all got 401 — the per-address limit never triggered. Railway's own answers on how its edge treats that header contradict each other (sources in TEST_REPORT). Owner is re-testing from outside Railway; this sprint does not depend on the answer.
+
+| ID | Acceptance criterion | Review |
+|---|---|---|
+| S16.2-1 | A per-ACCOUNT failed-login limit on top of the per-address one: 10 wrong resident logins for one mobile (last 10 digits) in 15 min → that mobile gets 429 for the rest of the window, whatever address the requests claim; staff logins keyed by username at 20. Successful logins don't count | SEC REQUIRED |
+| S16.2-2 | Other residents and the warden are not affected by one account's limit; the message says when to try again | SEC/UX |
+| S16.2-3 | The per-address limiter keys on Railway's edge-written client address when present (documented in code), falling back to req.ip | SEC |
+| S16.2-4 | 12 gates green twice; independent review before merge | QA |
+
+## Sprint 16.2.1 — settle the client address (criteria before build)
+Evidence (owner, PowerShell from home internet, 8 Nov 12:05, production = 16.1): 12 wrong resident logins, each with a different forged `X-Forwarded-For` → attempts 1–10 401, **11 → 429**, 12 → 401. A 429 at 11 is only possible if all twelve were counted under ONE key, i.e. `req.ip` (trust proxy 1) is the real client address for internet traffic; 12 → 401 matches the fixed 15-min window expiring (owner had failed logins ~15 min earlier). The earlier all-401 result came from the Railway console, i.e. from inside Railway's network.
+| ID | Acceptance criterion | Review |
+|---|---|---|
+| S16.2.1-1 | The per-address limit keys on `req.ip` again (X-Real-IP removed, per reviewer: keep it only if proven per-client and unforgeable — not proven, and not needed); per-account limits unchanged | SEC |

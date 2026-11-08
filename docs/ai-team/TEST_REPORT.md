@@ -196,3 +196,12 @@ Implementer gates: 12/12 ×2, 2,602.
 12/12 on fresh gate3, 2,604 (xss variance). Old hashes of her number in 10 formats incl. "X.X", "+91.X", "X/", "X (s)" all force the change; never-logged-in spellings get 401; new passwords containing her number refused.
 Release checklist (not code): verify on Railway that a changing `X-Forwarded-For` still reaches 429 · read both data-script dry runs before `--apply` · resident tokens issued before release stay valid up to 24 h · accepted risk: whoever first logs in with the default sets the password.
 Implementer gates: 12/12 ×2, 2,606.
+
+### Sprint 16.2 — independent review of beb6d7e: **APPROVE FOR TEST DEPLOYMENT**
+12/12 on fresh gate3, 2,609 (xss variance); no limiter warnings. Account key can't be dodged (+91/0/spaced/numeric/array forms collapse; staff key broader than the route's match). Interactions with address/global limiters and forced change consistent; counts in memory → reset on deploy.
+Before production: **settle X-Real-IP from the owner's outside test** — if Railway sets it to one shared internal address, every client shares one bucket (10 failures anywhere pause everyone's address limit) → then drop it · anyone knowing the staff username can keep `admin` paused (~20 tries/15 min; open sessions keep working) → rename the default `admin`, alert the warden when an account pause trips, confirm the default admin password was changed.
+Implementer gates: 12/12 ×2, 2,611.
+
+### Sprint 16.2.1 — independent review of 6ebfcb3: **APPROVE FOR TEST DEPLOYMENT**
+Revert correct (per-address limiters on req.ip; per-account limits unchanged). 12/12 fresh gate3, 2,609.
+**Correction to the implementer's reading:** attempts 1–11 counted together prove a forged XFF cannot change req.ip from the internet, but "the window expired" does NOT explain attempt 12 → 401 (each key's window starts at its own first failure; earlier shared failures would have blocked before 11). More likely: the home public IP changed mid-run (IPv6 rotation / v4↔v6), a restart wiped in-memory counts, or a second replica with its own counter. Before production: confirm Railway runs ONE replica; optional re-run recording RateLimit headers.
