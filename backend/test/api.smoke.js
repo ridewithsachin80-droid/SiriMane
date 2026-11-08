@@ -362,6 +362,54 @@ async function main() {
         ok(r16.status === 200 && r16.data.must_change_password === false, 'S16-4 a resident password hashed by bcrypt 5 still logs in (non-ASCII too)');
         await A('DELETE', `/users/${u16.id}`); await A('DELETE', `/guests/${g16.id}`);
       }
+      // ── Sprint 18: one clock — India's date at every hour (the gate also runs on a faked clock at 01:00 IST on the 1st)
+      {
+        const ym = today.slice(0, 7);
+        const lastDay = new Date(Date.UTC(+today.slice(0, 4), +today.slice(5, 7), 0)).toISOString().slice(0, 10);
+        let r18 = await A('GET', '/reports');
+        ok(r18.data.dateFrom === `${ym}-01` && r18.data.dateTo === lastDay, `S18-1 the default report period is THIS month in India (${r18.data.dateFrom}…${r18.data.dateTo}, today ${today})`);
+        r18 = await A('GET', '/reports/trend?months=3');
+        eq(r18.data[r18.data.length - 1].month, ym, 'S18-1 the trend ends at this month in India');
+        const bs18 = await A('GET', '/balance-sheet');
+        if (bs18.data && bs18.data.asOf) eq(String(bs18.data.asOf).slice(0, 10), today, 'S18-1 the balance sheet defaults to India\'s today');
+        // MONEY: entries the server dates itself
+        const g18 = (await A('POST', '/guests', { name: 'S18 Clock', phone: '6' + String(Date.now()).slice(-9), join_date: today, monthly_rent: 5000, deposit_amount: 1000 })).data;
+        await A('PUT', `/guests/${g18.id}`, { ...g18, deposit_amount: 1500 });
+        const dep18 = (await pool.query(`SELECT collection_date::text AS d FROM collections WHERE guest_id=$1 AND description LIKE 'Additional deposit%'`, [g18.id])).rows[0];
+        eq(dep18 && dep18.d, today, "S18-2 MONEY: an additional deposit is dated India's today");
+        await A('DELETE', `/guests/${g18.id}`);
+        eq((await pool.query(`SELECT leave_date::text AS d FROM guests WHERE id=$1`, [g18.id])).rows[0].d, today, "S18-2 checkout is dated India's today");
+        // Day boundaries of stored time stamps are taken in India
+        const own0 = (await A('GET', `/owner/report?month=${ym}&force=1`)).data;
+        const c18 = (await A('POST', '/complaints', { category: 'Water', description: 'S18 clock tap', room_number: '1' })).data;
+        const own1 = (await A('GET', `/owner/report?month=${ym}&force=1`)).data;
+        const raised = x => (x && (x.facts || x).complaints || {}).raised;
+        eq(raised(own1), raised(own0) + 1, "S18-1 a complaint raised now counts in THIS month's owner report");
+        await A('DELETE', `/complaints/${c18.id}`);
+        // MONEY (review): a blank date is India's today — and a closed day stays closed
+        const gB = (await A('POST', '/guests', { name: 'S18 Blank', phone: '8' + String(Date.now()).slice(-9), join_date: today, monthly_rent: 5000, deposit_amount: 0 })).data;
+        const dash0 = (await A('GET', '/dashboard')).data.monthlyIncome;
+        const cb = await A('POST', '/collections', { guest_id: gB.id, guest_name: gB.name, amount: 1818, collection_type: 'rent', payment_mode: 'cash', collection_date: '' });
+        ok(cb.status === 201 && String(cb.data.collection_date).slice(0, 10) === today, `S18-2 MONEY: a collection with a blank date is dated India's today (${cb.data && String(cb.data.collection_date).slice(0, 10)})`);
+        eq((await A('GET', '/dashboard')).data.monthlyIncome, dash0 + 1818, "S18-2 MONEY: it counts in THIS month's dashboard income");
+        const pb = await A('POST', '/purchases', { amount: 181, category: 'Other', description: 'S18 blank', purchase_date: '' });
+        ok(pb.status === 201 && String(pb.data.purchase_date).slice(0, 10) === today, "S18-2 MONEY: a purchase with a blank date is dated India's today");
+        const closeR = await A('POST', '/day-closing', { date: today, counted: { cash: 0, upi: 0, bank: 0 }, note: 'S18 test' });
+        if (closeR.status === 200) {
+          eq((await A('POST', '/collections', { guest_id: gB.id, guest_name: gB.name, amount: 1, collection_type: 'rent', payment_mode: 'cash', collection_date: '' })).status, 409, 'S18-2 MONEY: a blank-date collection cannot slip into a closed day');
+          await A('POST', '/day-closing/reopen', { date: today });
+        } else ok(false, `S18 (fixture) today's day could be closed (${closeR.status} ${JSON.stringify(closeR.data).slice(0, 80)})`);
+        // The resident's UPI claim: dated India's today, pending, never income
+        const tB = (await api('POST', '/guest-login', { mobile: gB.phone, password: gB.phone })).data;
+        const tokB = tB.must_change_password ? (await api('POST', '/guest-change-password', { currentPassword: gB.phone, newPassword: 'Her-Own-18' }, tB.token)).data.token : tB.token;
+        const dash1 = (await A('GET', '/dashboard')).data.monthlyIncome;
+        eq((await api('POST', '/guest-upi-claim', { amount: 2500 }, tokB)).status, 201, 'S18 (fixture) she reports a UPI payment');
+        const claim = (await pool.query(`SELECT collection_date::text AS d, status FROM collections WHERE guest_id=$1 AND amount=2500`, [gB.id])).rows[0];
+        ok(claim && claim.d === today && claim.status === 'pending_verification', `S18-2 MONEY: her UPI claim is dated India's today and pending (${claim && claim.d} ${claim && claim.status})`);
+        eq((await A('GET', '/dashboard')).data.monthlyIncome, dash1, 'MONEY: a pending_verification claim never counts as income');
+        await pool.query(`DELETE FROM collections WHERE guest_id=$1`, [gB.id]); await pool.query(`DELETE FROM purchases WHERE description='S18 blank'`);
+        await A('DELETE', `/guests/${gB.id}`);
+      }
       // ── Sprint 16.3: account management ──────────────────────
       {
         const LX = (ip) => ({ 'Content-Type': 'application/json', 'X-Forwarded-For': '192.0.2.' + ip });

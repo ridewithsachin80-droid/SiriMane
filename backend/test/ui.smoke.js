@@ -45,6 +45,8 @@ async function runAtWidth(browser, BASE, width) {
   // Fresh browser context per width so the 360px login doesn't carry over.
   const ctx = await browser.createBrowserContext();
   const page = await ctx.newPage();
+  if (require('./fakeclock').active) await page.evaluateOnNewDocument(require('./fakeclock').pageClock);   // Sprint 18: faked clock
+  await page.emulateTimezone('Asia/Kolkata');   // Sprint 18: every phone at the PG runs on India time
   await page.setViewport({ width, height: 780, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
   const jsErrors = [];
   page.on('pageerror', e => jsErrors.push(e.message));
@@ -1192,6 +1194,27 @@ async function runAtWidth(browser, BASE, width) {
     await new Promise(r => setTimeout(r, 1800));
     const rcT = await page.evaluate(() => { const r = window.__rc; pgRoomMap = window.__oMap; pgRooms = window.__oTab; return `${r.map}/${r.table}/${!!document.querySelector('#page-content table')}/${!!document.querySelector('.room-tile')}`; });
     eq(rcT, '0/1/true/false', `${tag} S17-3 Map → Table button → Edit → Save stays on the table`);
+    // S18: the screens use India's calendar (the gate also runs on a faked clock at 01:00 IST on the 1st)
+    {
+      const istD = new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
+      eq(await page.evaluate(() => nowDate()), istD, `${tag} S18-1 the screen's "today" is India's date`);
+      // MONEY: the collection form's default date
+      await page.evaluate(() => navigate('collect')); await page.waitForFunction(() => currentPage === 'collect', { timeout: 8000 });
+      const g18 = await page.evaluate(() => API.getGuests().then(l => (l || []).find(g => g.is_active)));
+      ok(g18, `${tag} S18 (fixture) an active resident to collect from`);
+      await page.evaluate(id => selectCollectGuest(id), g18.id);
+      await page.waitForSelector('#collect-date', { timeout: 8000 });
+      eq(await page.$eval('#collect-date', e => e.value), istD, `${tag} S18-2 MONEY: a new collection defaults to India's today`);
+      // MONEY: year-to-date starts on 1 January (it started on 31 December)
+      const ytd = await page.evaluate(() => { let got = null; const o = pgReportsRange; pgReportsRange = (f, t) => { got = [f, t]; }; reportsRangeFrom = null; reportsRangeTo = null; switchReportsToRange(); pgReportsRange = o; return got; });
+      eq(ytd.join('…'), `${istD.slice(0, 4)}-01-01…${istD}`, `${tag} S18-3 MONEY: year-to-date runs from 1 January to India's today`);
+      // …and the same on a phone set to another time zone (review: "any phone time zone")
+      await page.emulateTimezone('America/New_York');
+      const ny = await page.evaluate(() => ({ today: nowDate(), ym: currentYearMonth(), label: monthLabelForCollect(nowDate()), picker: (monthPicker(null, null, 'x').match(/value="([^"]+)"/) || [])[1] }));
+      await page.emulateTimezone('Asia/Kolkata');
+      const lbl = new Date(istD + 'T00:00:00Z').toLocaleDateString('en-IN', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+      eq(`${ny.today}|${ny.ym}|${ny.label}|${ny.picker}`, `${istD}|${istD.slice(0, 7)}|${lbl}|${istD.slice(0, 7)}`, `${tag} S18-1 on a phone in another time zone, today/month/labels are still India's`);
+    }
     // S17-4: a script on the page cannot send anything to another site
     eq(cspViolations.length, 0, `${tag} S17-4 no content-security-policy violation on any screen so far (${cspViolations.slice(0, 5).join('; ')})`);
     cspViolations.length = 0;

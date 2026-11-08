@@ -109,15 +109,15 @@ const monthAgo = (n) => { const d = new Date(Date.now() + 5.5 * 3600 * 1000); d.
     await api('POST', '/guests', { name: 'Owner V', phone: '9444444444', room_id: r2.id, join_date: today, monthly_rent: 5000, deposit_amount: 10000 }, staffTok);
     await pool.query(`UPDATE guests SET created_at = NOW() - INTERVAL '4 days' WHERE name='Owner V'`);
     // Unusual purchase: 5 history rows around ₹500 then one at ₹3,000
-    for (let i = 0; i < 5; i++) await pool.query(`INSERT INTO purchases(amount,category,description,purchase_date,paid_to,payment_mode,created_by,status) VALUES($1,'Milk','hist',CURRENT_DATE - ($2||' days')::interval,'Dairy','cash',1,'confirmed')`, [500 + i * 10, 40 + i * 7]);
+    for (let i = 0; i < 5; i++) await pool.query(`INSERT INTO purchases(amount,category,description,purchase_date,paid_to,payment_mode,created_by,status) VALUES($1,'Milk','hist',(NOW() AT TIME ZONE 'Asia/Kolkata')::date - ($2||' days')::interval,'Dairy','cash',1,'confirmed')`, [500 + i * 10, 40 + i * 7]);
     await A('POST', '/purchases', { amount: 3000, category: 'Milk', description: 'big', purchase_date: today, paid_to: 'Dairy', payment_mode: 'cash' });
     // Refund larger than deposit
     await pool.query(`INSERT INTO deposit_refunds(guest_id, guest_name, deposit_amount, deductions, refund_amount) VALUES($1,'Owner Refund',5000,0,7000)`, [gC.id]);
     // UPI claim older than 2 days
-    await pool.query(`INSERT INTO collections(guest_id,guest_name,amount,collection_date,collection_type,payment_mode,status,reported_by_guest,created_at) VALUES($1,$2,1000,CURRENT_DATE-3,'rent','UPI','pending_verification',true,NOW()-INTERVAL '3 days')`, [gB.id, gB.name]);
+    await pool.query(`INSERT INTO collections(guest_id,guest_name,amount,collection_date,collection_type,payment_mode,status,reported_by_guest,created_at) VALUES($1,$2,1000,(NOW() AT TIME ZONE 'Asia/Kolkata')::date-3,'rent','UPI','pending_verification',true,NOW()-INTERVAL '3 days')`, [gB.id, gB.name]);
     // Checklist under 50% for 3 days
     const items = await pool.query('SELECT id FROM checklist_items WHERE is_active=true ORDER BY id LIMIT 2');
-    for (let d = 1; d <= 3; d++) for (const it of items.rows) await pool.query(`INSERT INTO checklist_log(item_id, log_date, is_checked) VALUES($1, CURRENT_DATE - ($2::int), true) ON CONFLICT DO NOTHING`, [it.id, d]);
+    for (let d = 1; d <= 3; d++) for (const it of items.rows) await pool.query(`INSERT INTO checklist_log(item_id, log_date, is_checked) VALUES($1, (NOW() AT TIME ZONE 'Asia/Kolkata')::date - ($2::int), true) ON CONFLICT DO NOTHING`, [it.id, d]);
     flags = (await A('GET', '/owner/anomalies')).data;
     const ids = flags.map(f => f.id);
     ok(ids.includes('rent_variance'), 'flag: rent variance pending > 3 days');

@@ -31,7 +31,7 @@ const S = (m, p, b) => api(m, p, b, staffTok);
 const ask = (text, tok) => api('POST', '/copilot/ask', { text, context: { page: 'finance-overview' } }, tok || adminTok);
 const uniq = Date.now().toString().slice(-6);
 const alpha = uniq.replace(/\d/g, d => 'abcdefghij'[d]);   // matchResident strips digits, so tell the twins apart with letters
-const daysAgo = n => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
+const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toISOString().slice(0, 10);   // Sprint 18: India dates, like the forms
 
 (async () => {
   const server = app.listen(0); await new Promise(r => server.once('listening', r));
