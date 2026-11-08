@@ -84,6 +84,9 @@ const SH = (t) => `<b data-xss=${t}>`;
     await page.setViewport({ width: 390, height: 780, isMobile: true, hasTouch: true });
     const dialogs = [];
     page.on('dialog', d => { dialogs.push(d.message()); d.dismiss().catch(() => {}); });
+    const cspViolations = [];   // S17-4
+    await page.exposeFunction('__cspReport', v => { cspViolations.push(v); });
+    await page.evaluateOnNewDocument(() => { document.addEventListener('securitypolicyviolation', e => { try { window.__cspReport(`${e.violatedDirective} ${e.blockedURI}`); } catch (_) {} }); });
     await page.goto(BASE + '/management', { waitUntil: 'networkidle0' });
     await page.type('#login-username', 'admin');
     await page.type('#login-password', process.env.ADMIN_PASSWORD || 'SiriMane@2024');
@@ -207,6 +210,7 @@ const SH = (t) => `<b data-xss=${t}>`;
     }
     ok(failures.length === 0, `SECURITY: untrusted text became HTML on ${failures.length} screen(s):\n  - ${failures.join('\n  - ')}`);
     ok(dialogs.length === 0, `no alert/confirm dialogs were triggered (${dialogs.join(' | ')})`);
+    ok(cspViolations.length === 0, `S17-4 no content-security-policy violation on any screen (${cspViolations.slice(0, 5).join('; ')})`);
     console.log(`\n✅ XSS gate passed — ${count} assertions`);
   } catch (e) {
     console.error(`\n❌ XSS gate FAILED after ${count} assertions:\n`, e.message); process.exitCode = 1;

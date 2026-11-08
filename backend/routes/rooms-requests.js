@@ -173,8 +173,8 @@ router.put('/requests/:id', jsonSmall, auth, async (req, res) => {
     const c = cur.rows[0];
     if (!c) return res.status(404).json({ error: 'Request not found' });
     if (assigned_to) {
-      const u = await pool.query(`SELECT id FROM users WHERE id=$1`, [assigned_to]);
-      if (!u.rows[0]) return res.status(400).json({ error: 'No such staff member' });
+      const u = await pool.query(`SELECT id FROM users u WHERE id=$1 AND (to_jsonb(u)->>'disabled_at') IS NULL`, [assigned_to]);   // S17-1
+      if (!u.rows[0]) return res.status(400).json({ error: 'No such staff member (or the account is turned off)' });
     }
     // Raising the priority shortens the clock; it is always measured from when
     // the request was raised, so nobody can buy time by re-prioritising.
@@ -276,8 +276,8 @@ router.put('/checklist-items/:id/assign', jsonSmall, auth, requireAdmin, async (
   const { assigned_to, due_time } = req.body || {};
   try {
     if (assigned_to) {
-      const u = await pool.query('SELECT id FROM users WHERE id=$1', [assigned_to]);
-      if (!u.rows[0]) return res.status(400).json({ error: 'No such staff member' });
+      const u = await pool.query(`SELECT id FROM users u WHERE id=$1 AND (to_jsonb(u)->>'disabled_at') IS NULL`, [assigned_to]);   // S17-1
+      if (!u.rows[0]) return res.status(400).json({ error: 'No such staff member (or the account is turned off)' });
     }
     const r = await pool.query(`UPDATE checklist_items SET assigned_to=$1::int, due_time=COALESCE($2,due_time) WHERE id=$3 AND is_active=true RETURNING *`,
       [assigned_to || null, due_time || null, req.params.id]);

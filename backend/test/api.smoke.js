@@ -398,7 +398,54 @@ async function main() {
         const audit = (await pool.query(`SELECT action FROM activity_log WHERE action IN ('user_password_reset','user_rename','password_change') ORDER BY id`)).rows.map(x => x.action);
         ok(audit.includes('user_password_reset') && audit.includes('user_rename') && audit.includes('password_change'), 'S16.3-2 all three are in the Audit Log');
         r163 = await A('DELETE', `/users/${t163.id}`);
-        ok(r163.status === 409 && /set a new password/.test(r163.data.error || ''), 'S16.3 deleting an account with history is refused with a clear way out (not a database error)');
+        ok(r163.status === 409 && /Turn off/.test(r163.data.error || ''), 'S16.3 deleting an account with history is refused with a clear way out (not a database error)');
+        // ── Sprint 17 (S17-1): turn an account off instead of deleting it
+        {
+          const u17 = (await A('POST', '/users', { username: 's17staff', password: 'Staff-Pass-17', role: 'staff' })).data;
+          const t17 = (await login('s17staff', 'Staff-Pass-17', 21)).data.token;
+          eq((await api('GET', '/auth/me', null, t17)).status, 200, 'S17-1 the account works before');
+          eq((await api('POST', `/users/${u17.id}/disable`, null, t17)).status, 403, 'S17-1 SECURITY: staff cannot turn accounts off');
+          const me17 = (await A('GET', '/auth/me')).data.user;
+          eq((await A('POST', `/users/${me17.id}/disable`)).status, 400, 'S17-1 the admin cannot turn off their own account');
+          const d17 = await A('POST', `/users/${u17.id}/disable`);
+          ok(d17.status === 200 && d17.data.disabled_at, 'S17-1 admin turns an account off');
+          eq((await api('GET', '/auth/me', null, t17)).status, 401, 'S17-1 SECURITY: an open session stops at its next request');
+          const l17 = await login('s17staff', 'Staff-Pass-17', 22);
+          ok(l17.status === 403 && /turned off/.test(l17.data.error || '') && !l17.data.token, 'S17-1 the right password gets "turned off", and no token');
+          const w17 = await login('s17staff', 'wrong-password', 23);
+          ok(w17.status === 401 && w17.data.error === 'Invalid credentials', 'S17-1 SECURITY: a wrong password stays generic (does not reveal the account is off)');
+          ok((await A('GET', '/users')).data.find(x => x.id === u17.id).disabled_at, 'S17-1 the staff list shows it as turned off');
+          ok(!(await A('GET', '/staff-list')).data.some(x => x.id === u17.id), 'S17-1 a turned-off account is not offered in "assign to"');
+          const c17 = (await A('POST', '/complaints', { category: 'Water', description: 'S17 tap', room_number: '1' })).data;
+          ok(c17 && c17.id, 'S17-1 (fixture) a request to assign');
+          eq((await A('PUT', `/requests/${c17.id}`, { assigned_to: u17.id })).status, 400, 'S17-1 a request cannot be given to a turned-off account');
+          eq((await A('POST', `/users/${u17.id}/enable`)).status, 200, 'S17-1 admin turns it back on');
+          eq((await login('s17staff', 'Staff-Pass-17', 24)).status, 200, 'S17-1 …and it can log in again');
+          eq((await A('PUT', `/requests/${c17.id}`, { assigned_to: u17.id })).status, 200, 'S17-1 …and can be given requests again');
+          const a17 = (await pool.query(`SELECT action FROM activity_log WHERE action IN ('user_disable','user_enable')`)).rows.map(x => x.action);
+          ok(a17.includes('user_disable') && a17.includes('user_enable'), 'S17-1 both are in the Audit Log');
+          // Before the migration runs (production between deploy and migrate-all), nothing breaks
+          await pool.query('ALTER TABLE users DROP COLUMN disabled_at');
+          try {
+            eq((await A('GET', '/auth/me')).status, 200, 'S17-1 OPS: before the migration, open sessions keep working');
+            eq((await login('s17staff', 'Staff-Pass-17', 25)).status, 200, 'S17-1 OPS: before the migration, login works');
+            eq((await A('GET', '/users')).status, 200, 'S17-1 OPS: before the migration, the staff list loads');
+            eq((await A('GET', '/staff-list')).status, 200, 'S17-1 OPS: before the migration, "assign to" loads');
+            const p17 = await A('POST', `/users/${u17.id}/disable`);
+            ok(p17.status === 503 && /migrate-all/.test(p17.data.error), 'S17-1 OPS: before the migration, Turn off says the update is pending');
+          } finally { await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled_at TIMESTAMPTZ'); }
+          await A('DELETE', `/complaints/${c17.id}`);
+        }
+        // ── Sprint 17 (S17-4): content security policy
+        {
+          const h = async p => (await fetch(BASE + p)).headers.get('content-security-policy') || '';
+          for (const p of ['/management', '/guest', '/api/rooms', '/js/app.js']) {
+            const c = await h(p);
+            ok(/connect-src 'self'(;|$)/.test(c) && /img-src 'self' data: blob:(;|$)/.test(c) && /frame-ancestors 'none'/.test(c) && /object-src 'none'/.test(c) && !/google-analytics|googletagmanager/.test(c), `S17-4 SECURITY: ${p} may only talk to the app itself and can't be framed`);
+          }
+          const home = await h('/');
+          ok(/script-src [^;]*googletagmanager/.test(home) && /frame-ancestors 'none'/.test(home), 'S17-4 the public home page allows Google Analytics');
+        }
         // S16.3-3 reset a resident's app login
         const n163 = '9' + String(Date.now()).slice(-9);
         const g163 = (await A('POST', '/guests', { name: 'S163 Resident', phone: n163, join_date: today, monthly_rent: 5000, deposit_amount: 0 })).data;

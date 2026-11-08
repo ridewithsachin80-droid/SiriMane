@@ -12,6 +12,48 @@ const PUBLIC = path.join(__dirname, '../frontend/public');
 app.set('trust proxy', 1);
 
 app.use(helmet({ contentSecurityPolicy: false }));
+// ── Content Security Policy (Sprint 17, S17-4) ────────────────────────────
+// What a page may load and where it may send data. The app pages (staff and
+// resident) may talk only to this server: even if someone slipped a script
+// into a page, it could not send the login token or resident data to another
+// site (connect-src / img-src / form-action), load code from elsewhere
+// (script-src), or show the app inside another site (frame-ancestors).
+// 'unsafe-inline' stays because every screen uses inline onclick handlers;
+// removing it would mean rewriting them all.
+// The public home page also loads Google Analytics — only there, so a script
+// on a staff page can't use an analytics account as a way out.
+const CSP_BASE = {
+  "default-src": ["'self'"],
+  "script-src": ["'self'", "'unsafe-inline'"],
+  "script-src-attr": ["'unsafe-inline'"],
+  "style-src": ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+  "font-src": ["'self'", "data:", "https://fonts.gstatic.com"],
+  "img-src": ["'self'", "data:", "blob:"],
+  "media-src": ["'self'", "blob:"],
+  "connect-src": ["'self'"],
+  "worker-src": ["'self'"],
+  "manifest-src": ["'self'"],
+  "frame-src": ["'none'"],
+  "object-src": ["'none'"],
+  "base-uri": ["'self'"],
+  "form-action": ["'self'"],
+  "frame-ancestors": ["'none'"]
+};
+const GA = ["https://www.googletagmanager.com", "https://*.google-analytics.com", "https://*.analytics.google.com"];
+function cspHeader(extra) {
+  return Object.entries(CSP_BASE).map(([k, v]) => [k, ...v, ...((extra && extra[k]) || [])].join(' ')).join('; ');
+}
+const CSP_APP = cspHeader();
+const CSP_HOME = cspHeader({ "script-src": ["https://www.googletagmanager.com"], "connect-src": GA, "img-src": GA });
+const APP_PATHS = /^\/(api\/|health|management|siri-mane-management|guest|siri-mane-guest-portal|js\/|css\/|sw-guest\.js|manifest)/;
+app.use((req, res, next) => {
+  // The landing page is '/', '/home.html' and every unknown page path (served
+  // by the catch-all below). Everything else gets the app policy.
+  const home = !APP_PATHS.test(req.path) && (req.path === '/' || req.path === '/home.html' || !/\.[a-z0-9]+$/i.test(req.path));
+  res.setHeader('Content-Security-Policy', home ? CSP_HOME : CSP_APP);
+  next();
+});
+app.locals.CSP_APP = CSP_APP; app.locals.CSP_HOME = CSP_HOME;   // for the gates
 app.use(cors({
   origin: process.env.FRONTEND_URL || '*',
   methods: ['GET','POST','PUT','DELETE'],
