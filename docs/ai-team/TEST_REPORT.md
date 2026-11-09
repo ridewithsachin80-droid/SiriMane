@@ -355,3 +355,19 @@ Backlog (minor): the probe still starts the skip window in a Groq-only setup (pr
 - Minor: tests now cover -kaayi, the 4-word cap and the CSS. Added more Kannada complaint wordings and leftover words. Short dictionary words no longer stretch ("raveena" → Other). Transliteration goes word by word with NFC. Comment moved.
 - Mutations N1–N9 (every fix above removed in turn) are all caught. Quick 362, UI 958.
 - Test-only: the fake recogniser could fire onerror before its delayed onstart. The test now waits for "Listening in ಕನ್ನಡ" first; this is the likely cause of the earlier intermittent miss.
+
+### Sprint 21 — independent review round 2: **BLOCK** (9be9c8a) → fixes 0baa5b8, 9a776d0
+- Every round-1 finding was verified fixed by the reviewer's probes. Three regressions came from my own rewrite:
+  - R1: a full stop after a number ("5000.", "1.5k.") lost the amount or changed it to ₹2;
+  - R2: the bare letters "g" and "l" counted as quantities ("6000 g pay");
+  - R3: the new suffix rule broke English prefixes ("milkman", "toiletries").
+- Fixed:
+  - A full stop that is not a decimal point is treated as punctuation.
+  - The bare g/l were removed; a glued "500g" or "2l" is still a quantity. A pay-word guard I added turned out to be dead code once g/l were gone (its mutation survived), so I removed it.
+  - The suffix rule applies only to the short Kannada words added in S21.
+  - The amount's own words are removed before resident matching (a resident named Noora is no longer taken from "ನೂರೈವತ್ತು").
+  - A quantity with no price asks how much ("ಹಾಲು ಮೂರು ಪ್ಯಾಕೆಟ್" → "How much was the haalu?").
+- A bug I introduced while fixing (operator precedence turned the Kannada grocery list into one word) was caught by the existing tests before commit.
+- Test isolation: one quick run collided with a full gate run on the same database, so both were discarded and re-run sequentially.
+- Mutations P1–P5 (full stop, bare g/l, suffix scope, amount words in names, quantity strip) were all caught.
+- Gates on 9a776d0: 12/12 ×2, 3,133 each (quick 386, ui 958).
