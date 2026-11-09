@@ -33,6 +33,7 @@ const ORDER = [
   'migrate-notify-docs.js',     // Sprint 12: notifications, outbox, documents, maintenance schedule
   'migrate-room-360.js',        // Sprint 13: room_inspections
   'migrate-guest-messages.js',  // Sprint 16.3: inbox_messages.guest_id (her messages + replies)
+  'migrate-password-refresh.js', // Hotfix 19.2: guests.must_change_password
   'migrate-staff-disable.js'    // Sprint 17: users.disabled_at (turn an account off instead of deleting it)
 ];
 

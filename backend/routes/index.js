@@ -1137,22 +1137,8 @@ router.get('/balance-sheet/export/pdf', auth, requireAdmin, async (req, res) => 
   } catch (err) { if (!res.headersSent) res.status(500).json({ error: err.message }); }
 });
 
-// ── GUEST LOOKUP (admin only) ────────────────────
-// Hotfix 19.1 (SECURITY): this was PUBLIC and returned g.* — her password hash
-// and ID-proof number — to anyone who typed her phone number. No screen calls
-// it. Now admin-only and named columns only; secrets are never selected.
-router.get('/guest-lookup', auth, requireAdmin, async (req, res) => {
-  const { phone } = req.query;
-  if (!phone) return res.status(400).json({ error: 'Phone required' });
-  try {
-    const g = await pool.query(`SELECT g.id, g.name, g.phone, g.room_id, g.bed_number, g.join_date, g.leave_date, g.is_active, g.monthly_rent, g.deposit_amount, r.room_number FROM guests g LEFT JOIN rooms r ON g.room_id=r.id WHERE g.phone=$1 LIMIT 1`, [phone]);
-    if (!g.rows[0]) return res.status(404).json({ error: 'Not found' });
-    const c = await pool.query('SELECT amount,collection_date,collection_type,payment_mode FROM collections WHERE guest_id=$1 AND is_deleted=false AND status=\'confirmed\' ORDER BY collection_date DESC LIMIT 12', [g.rows[0].id]);
-    const a = await pool.query('SELECT title,message,priority,created_at FROM announcements WHERE is_active=true ORDER BY created_at DESC LIMIT 5');
-    const m = await pool.query('SELECT * FROM daily_menu ORDER BY CASE day_of_week WHEN \'Monday\' THEN 1 WHEN \'Tuesday\' THEN 2 WHEN \'Wednesday\' THEN 3 WHEN \'Thursday\' THEN 4 WHEN \'Friday\' THEN 5 WHEN \'Saturday\' THEN 6 WHEN \'Sunday\' THEN 7 END');
-    res.json({ ...g.rows[0], payments: c.rows, announcements: a.rows, menu: m.rows });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+// (GET /guest-lookup removed — Hotfix 19.2, owner-approved 9 Nov 2026: it was
+// public and leaked password hashes and ID numbers; no screen used it.)
 
 // ── PUBLIC GUEST MESSAGE ─────────────────────────
 router.post('/guest-message', async (req, res) => {
@@ -1558,7 +1544,7 @@ router.post('/guest-login', async (req, res) => {
     // CREDENTIAL that verified, not from how she typed it (review F16-1):
     // no hash yet → default; a hash that is of her own number → default.
     const guestKey = String(normPhone(guest.phone) || '').slice(-10);
-    const onDefault = !guest.password_hash
+    let onDefault = !guest.password_hash
       // what verified is her own number in some phone format ("+91 …", "0…") —
       // before 15.5 the first login hashed it exactly as typed (review F16-1b)
       || (phoneLike && guestKey.length === 10 && typedKey === guestKey)
@@ -1566,10 +1552,15 @@ router.post('/guest-login', async (req, res) => {
       // "+91.98…", "98…/", "98… (s)") — the rule change-password uses (F16-1c)
       || (guestKey.length === 10 && String(password).replace(/\D/g, '').includes(guestKey))
       || (guestKey.length === 10 && await bcrypt.compare(guestKey, guest.password_hash));
+    // Hotfix 19.2: the owner asked every resident to choose a new password
+    // (after the 19.1 leak). She logged in with her current one; same flow.
+    const refresh = !onDefault && guest.must_change_password === true;
+    if (refresh) onDefault = true;
     const token = auth.signToken({ guestId: guest.id, type: 'guest', ...(onDefault ? { pwc: 1 } : {}) }, { expiresIn: onDefault ? '1h' : '24h' });
     res.json({
       token,
       must_change_password: onDefault,
+      password_reason: refresh ? 'refresh' : (onDefault ? 'default' : undefined),
       guest: {
         id: guest.id, name: guest.name, phone: guest.phone,
         room_number: guest.room_number, bed_number: guest.bed_number
@@ -1648,6 +1639,8 @@ router.post('/guest-change-password', guestAuth, async (req, res) => {
     if (newPassword === currentPassword) return res.status(400).json({ error: 'The new password must be different.' });
     const hash = await bcrypt.hash(newPassword, 10);
     await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [hash, g.id]);
+    // Hotfix 19.2: she has chosen a new one — stop asking (no-op before the migration)
+    await pool.query('UPDATE guests SET must_change_password=false WHERE id=$1', [g.id]).catch(e => { if (e.code !== '42703') throw e; });
     // A fresh, unrestricted token — the default-password one only allowed this call
     const token = auth.signToken({ guestId: g.id, type: 'guest' }, { expiresIn: '24h' });
     res.json({ message: 'Password changed successfully', token });

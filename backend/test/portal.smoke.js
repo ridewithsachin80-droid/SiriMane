@@ -219,6 +219,21 @@ async function runAtWidth(browser, BASE, width, fixtures) {
   ok(await page.$eval('#portal-section', e => e.classList.contains('hidden')), `${tag} expired session lands back on login`);
   eq(await page.evaluate(() => localStorage.getItem('guest_token')), null, `${tag} expired session is cleared`);
 
+  // Hotfix 19.2: a resident asked for a new password sees why, in plain words
+  {
+    const ph = '6' + String(Date.now() + width).slice(-9);
+    const g = await (await fetch(`${BASE}/api/guests`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + fixtures.adminTok }, body: JSON.stringify({ name: 'HF Ask ' + width, phone: ph, join_date: '2026-06-01', monthly_rent: 5000, deposit_amount: 0 }) })).json();
+    await pool.query('UPDATE guests SET password_hash=$1, must_change_password=true WHERE id=$2', [await require('bcrypt').hash('Her-Old-Pass', 6), g.id]);
+    const ctx = await browser.createBrowserContext(); const p2 = await ctx.newPage();
+    await p2.setViewport({ width, height: 780, isMobile: true, hasTouch: true });
+    await p2.goto(BASE + '/guest', { waitUntil: 'networkidle0' });
+    await p2.type('#login-mobile', ph); await p2.type('#login-password', 'Her-Old-Pass'); await p2.click('#login-btn');
+    await p2.waitForFunction(() => !document.getElementById('force-pw-section').classList.contains('hidden'), { timeout: 8000 });
+    ok(/asking every resident/.test(await p2.$eval('#fpw-why', e => e.textContent)), `${tag} HF19.2 the screen says the PG is asking everyone for a new password (not "you used your phone number")`);
+    await ctx.close();
+    await fetch(`${BASE}/api/guests/${g.id}`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + fixtures.adminTok } });
+  }
+
   // ── Sprint 7.1: dark theme in the portal ──────────────────────────────
   const lum = c => { const [r, g, b] = c.match(/\d+/g).map(Number).map(v => { v /= 255; return v <= .03928 ? v / 12.92 : Math.pow((v + .055) / 1.055, 2.4); }); return .2126 * r + .7152 * g + .0722 * b; };
   const contrast = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((m, n) => n - m); return (x + .05) / (y + .05); };
