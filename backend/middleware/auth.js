@@ -47,11 +47,50 @@ function verifyToken(token) {
   }
   return decoded;
 }
+// ── Sprint 19 (D-17-1): the login lives in an HttpOnly cookie ─────────────
+// Page scripts can't read it, so an injected script can no longer copy the
+// token anywhere. API clients that send `Authorization: Bearer` (the gates,
+// Copilot's internal calls) keep working.
+const STAFF_COOKIE = 'sm_staff', GUEST_COOKIE = 'sm_guest';
+function readCookie(req, name) {
+  const raw = req.headers.cookie || '';
+  for (const part of raw.split(';')) {
+    const i = part.indexOf('=');
+    if (i > 0 && part.slice(0, i).trim() === name) { try { return decodeURIComponent(part.slice(i + 1).trim()); } catch { return null; } }
+  }
+  return null;
+}
+/** The request's token and how it came: 'header' | 'cookie' | null. */
+function tokenFrom(req, cookieName) {
+  const h = req.headers.authorization;
+  if (h && /^Bearer\s+\S+/.test(h)) return { token: h.split(/\s+/)[1], via: 'header' };
+  const c = readCookie(req, cookieName);
+  return c ? { token: c, via: 'cookie' } : { token: null, via: null };
+}
+/** A browser can send a cookie on a forged cross-site request; it cannot add
+ *  our own header to one. Writes that ride on the cookie must carry it. */
+const SAFE = new Set(['GET', 'HEAD', 'OPTIONS']);
+function csrfOk(req, via) {
+  return via !== 'cookie' || SAFE.has(req.method) || req.headers['x-requested-with'] === 'sirimane';
+}
+function setAuthCookie(req, res, name, token, maxAgeMs) {
+  res.cookie(name, token, { httpOnly: true, sameSite: 'strict', secure: !!req.secure, path: '/api', ...(maxAgeMs ? { maxAge: maxAgeMs } : {}) });
+}
+/** Review S19-2: the app's own screens (which send X-Requested-With) get the
+ *  cookie only — the token stays out of the body so no page script sees it.
+ *  API clients (the gates, scripts) still receive it. */
+function bodyToken(req, token) { return req.headers['x-requested-with'] === 'sirimane' ? {} : { token }; }
+function clearAuthCookie(req, res, name) {
+  res.clearCookie(name, { httpOnly: true, sameSite: 'strict', secure: !!req.secure, path: '/api' });
+}
+
 const auth = async (req, res, next) => {
   try {
-    const token = req.headers.authorization?.split(' ')[1];
+    const { token, via } = tokenFrom(req, STAFF_COOKIE);
     if (!token) return res.status(401).json({ error: 'No token' });
+    if (!csrfOk(req, via)) return res.status(403).json({ error: 'Request refused (missing app header).' });
     const decoded = verifyToken(token);
+    req.authToken = token;   // for Copilot / bulk internal calls
     // S17-1: a turned-off account stops at its next request. to_jsonb() reads
     // disabled_at if the column exists and NULL if the migration hasn't run yet.
     const result = await pool.query(`SELECT id, username, role, (to_jsonb(u)->>'disabled_at') IS NOT NULL AS off FROM users u WHERE id=$1`, [decoded.userId]);
@@ -80,4 +119,5 @@ auth.verifyToken = verifyToken;
 auth.ENV_ID = ENV_ID;
 auth.ENV_SOURCE = ENV_SOURCE;
 auth.LEGACY_CUTOFF = LEGACY_CUTOFF;
+Object.assign(auth, { STAFF_COOKIE, GUEST_COOKIE, tokenFrom, csrfOk, setAuthCookie, clearAuthCookie, bodyToken });
 module.exports = auth;
