@@ -468,6 +468,25 @@ const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toI
     for (const [t, item] of [['ಹಾಲು ಮೂರು ಪ್ಯಾಕೆಟ್', 'haalu'], ['milk 3 packets', 'milk']]) {
       i = await quick.classify(t, adminUser, {}, { allowModel: false }); ok(i && i.ask === 'amount' && new RegExp(`^How much was the ${item}\\?`).test(i.clarify), `round 2 "${t}" asks how much the ${item} was (got ${JSON.stringify(i && (i.clarify || i.tool))})`);
     }
+    // ── Review S21 round 3 (N1): a resident's name is never a number ─────
+    const roomNo2 = '8' + uniq.slice(-2);
+    let room2 = (await A('POST', '/rooms', { room_number: roomNo2, floor: 8, total_beds: 4, monthly_rent: 6000, room_type: 'sharing' })).data;
+    if (!room2 || !room2.id) { const rl = (await A('GET', '/rooms')).data; room2 = (rl.list || rl).find(x => x.room_number === roomNo2); }
+    const nk = (await A('POST', '/guests', { name: `Noora K${alpha}`, phone: `97${uniq}05`.slice(0, 10), room_id: room2.id, bed_number: '1', monthly_rent: 6000, deposit_amount: 0, join_date: daysAgo(30), id_proof_type: 'Aadhaar' })).data;
+    const an = (await A('POST', '/guests', { name: `Ainoor Z${alpha}`, phone: `97${uniq}06`.slice(0, 10), room_id: room2.id, bed_number: '2', monthly_rent: 6000, deposit_amount: 0, join_date: daysAgo(30), id_proof_type: 'Aadhaar' })).data;
+    ok(nk && nk.id && an && an.id, 'N1 (fixture) residents named Noora and Ainoor');
+    for (const [t, who, mode] of [[`Noora K${alpha} cash`, nk, 'Cash'], [`Noora K${alpha}`, nk], [`Noora K${alpha} paid`, nk], ['Noora paid', nk], ['Noora upi', nk, 'UPI'], ['Ainoor paid', an]]) {
+      i = await quick.classify(t, adminUser, {}, { allowModel: false });
+      ok(i && i.tool === 'prepare_payment' && !i.args.amount && (!mode || i.args.mode === mode), `N1 "${t}" is her payment with NO amount — never ₹100/₹500 from her name (got ${JSON.stringify(i && i.args)})`);
+    }
+    for (const t of ['noora', 'noora deposit']) { i = await quick.classify(t, adminUser, {}, { allowModel: false }); ok(i && i.tool === 'prepare_payment' && !i.args.amount, `N1 "${t}" is not ₹100 (got ${JSON.stringify(i && (i.args || i.clarify))})`); }
+    for (const [t, who, n] of [[`Noora K${alpha} 5000 upi`, nk, 5000], [`Noora K${alpha} aidu saavira`, nk, 5000], ['Ainoor 5000', an, 5000]]) {
+      i = await quick.classify(t, adminUser, {}, { allowModel: false }); ok(i && i.args.resident_id === who.id && i.args.amount === n, `N1 "${t}" is still ₹${n}`);
+    }
+    for (const [t, n] of [['ಈರುಳ್ಳಿ ನೂರೈವತ್ತು', 150], ['noora aivattu onion', 150]]) { i = await quick.classify(t, adminUser, {}, { allowModel: false }); ok(i && i.tool === 'prepare_expense' && i.args.amount === n, `N1 "${t}" is still ₹${n} with a Noora living here`); }
+    eq(SMParse.extractAmount('noora'), null, 'N1 "noora" alone is a word, not ₹100');
+    eq(SMParse.parseCollection(`Noora K${alpha} cash`, [{ id: nk.id, name: nk.name }]).amount, null, 'N1 the on-device Collect parser agrees: no amount from her name');
+    await pool.query(`UPDATE guests SET is_active=false WHERE id = ANY($1)`, [[nk.id, an.id]]);
     console.log('✓ S21 Kannada');
 
     // ── Audit ────────────────────────────────────────────────────────────

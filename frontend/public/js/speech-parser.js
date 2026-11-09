@@ -204,6 +204,9 @@
       if (!seenAny && shortForm(w) != null && nextW in MULTIPLIERS) { current += shortForm(w); matchedWords.push(words[i]); seenAny = true; continue; }
       if (w in HALF) { pendingHalf = true; matchedWords.push(words[i]); continue; }
       if (w === 'and' || w === 'a') { if (seenAny) matchedWords.push(words[i]); continue; }
+      // ನೂರ (noora) is a joining form — "noora aivattu" = 150. On its own it is a
+      // word (the name Noora), never ₹100 (review S21 N1).
+      if (w === 'noora' && numberWord(nextW) == null) { if (seenAny) break; matchedWords = []; continue; }
       if (w in MULTIPLIERS) {
         if (!seenAny && !pendingHalf) {
           const prev = (words[i - 1] || '').replace(/[^a-z.]/g, '');
@@ -303,11 +306,17 @@
     const mode = extractMode(raw);
     const type = extractType(raw);
     const guest = matchResident(raw, residents, room && room.room);
+    // A resident's name is never the amount ("Noora", "Ainoor") — review S21 N1.
+    let amt0 = amt;
+    if (amt0 && guest && !/\d/.test(amt0.matched)) {
+      const nw = String(guest.name || '').toLowerCase().split(/\s+/);
+      if (amt0.matched.toLowerCase().split(/\s+/).every(w => nw.includes(w))) amt0 = null;
+    }
     let leftover = raw;
-    [room && room.matched, amt && amt.matched, mode && mode.matched].forEach(m => { if (m) leftover = leftover.replace(new RegExp(escape(m), 'i'), ' '); });
+    [room && room.matched, amt0 && amt0.matched, mode && mode.matched].forEach(m => { if (m) leftover = leftover.replace(new RegExp(escape(m), 'i'), ' '); });
     if (guest) leftover = leftover.replace(new RegExp(escape(guest.name), 'i'), ' ');
     leftover = leftover.replace(/\b(rupees|rupaye|rupai|rs|paid|gave|collected|from|for|rent|deposit|advance|the|of|by|via|in|using)\b/gi, ' ').replace(/\s+/g, ' ').trim();
-    return { guest, amount: amt ? amt.amount : null, mode: mode ? mode.mode : null, type, room: room ? room.room : null, leftover };
+    return { guest, amount: amt0 ? amt0.amount : null, mode: mode ? mode.mode : null, type, room: room ? room.room : null, leftover };
   }
 
   // ── Complaints ──────────────────────────────────────────────────────────
