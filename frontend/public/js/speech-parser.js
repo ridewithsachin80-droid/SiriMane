@@ -155,7 +155,6 @@
   // Short spoken forms — ಆರ್ ಸಾವಿರ (aar saavira) — only count right before a multiplier.
   // Glued to the number only: "500g", "2l" (a lone "g" is G Pay — review S21 R2).
   const QTY_GLUED = /^(g|l|kg|kgs|gm|gms|ml|ltr|ltrs|pcs|pc|pkt|pkts)$/;
-  const PAY_NEXT = /^(upi|gpay|g|google|phonepe|phone|paytm|cash|bank|neft|imps|nagadu)$/;
   // "aidu kg", "3 packets", "ಮೂರು ಪ್ಯಾಕೆಟ್" → removed, so what is left is the item.
   function stripQuantities(text) {
     const t = String(text || '').split(/\s+/).filter(Boolean), out = [];
@@ -186,7 +185,7 @@
     while ((m = re.exec(lower))) {
       const after = lower.slice(m.index + m[0].length).trim().split(/\s+/)[0] || '';
       const glued = (lower.slice(m.index + 1).match(/^\d+(?:\.\d+)?([a-z]+)/) || [])[1] || '';
-      if (!m[2] && !PAY_NEXT.test(after.replace(/[^a-z]/g, '')) && (QTY.test(after.replace(/[^a-z]/g, '')) || QTY_GLUED.test(glued))) continue;   // "5 kg", "5kg" — never "6000 g pay"
+      if (!m[2] && (QTY.test(after.replace(/[^a-z]/g, '')) || QTY_GLUED.test(glued))) continue;   // "5 kg", "5kg" — never "6000 g pay"
       let n = parseFloat(m[1]);
       const unit = m[2] ? m[2].trim() : '';
       if (unit === 'k') n *= 1000;
