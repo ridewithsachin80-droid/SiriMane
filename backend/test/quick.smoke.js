@@ -341,7 +341,7 @@ const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toI
     i = await quick.intent('ಜಾನವಿ ಐದು ಸಾವಿರ ಯುಪಿಐ', adminUser, {});
     ok(i.tool === 'prepare_payment' && i.args.amount === 5000 && i.args.mode === 'UPI', `S21-3 …₹5,000 by UPI (got ${JSON.stringify(i.args)})`);
     // S21-4 A complaint in Kannada keeps her own words; the room is read.
-    for (const [kn, room] of [['ರೂಮ್ 106 ನಲ್ಲಿ ನಲ್ಲಿ ಸೋರುತ್ತಿದೆ', '106'], ['ಫ್ಯಾನ್ ಕೆಲಸ ಮಾಡ್ತಿಲ್ಲ ರೂಮ್ 12', '12'], ['ನೀರು ಬರುತ್ತಿಲ್ಲ', undefined], ['current illa room 7', '7'], ['nalli soruttide', undefined]]) {
+    for (const [kn, room] of [['ರೂಮ್ 106 ನಲ್ಲಿ ನಲ್ಲಿ ಸೋರುತ್ತಿದೆ', '106'], ['ಫ್ಯಾನ್ ಕೆಲಸ ಮಾಡ್ತಿಲ್ಲ ರೂಮ್ 12', '12'], ['ನೀರು ಬರುತ್ತಿಲ್ಲ', undefined], ['current illa room 7', '7'], ['nalli soruttide', undefined], ['fan kelsa madtilla room 4', '4']]) {
       i = await quick.intent(kn, adminUser, {});
       ok(i && i.tool === 'prepare_complaint' && i.args.description === kn && i.args.room === room, `S21-4 "${kn}" is a complaint${room ? ' for room ' + room : ''}, worded as she said it (got ${JSON.stringify(i && i.args)})`);
     }
