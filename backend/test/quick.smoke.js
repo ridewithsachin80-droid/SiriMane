@@ -537,7 +537,7 @@ const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toI
     ok(tz && tz.id, 'H21.1 S2 (fixture) a resident named Tenzin');
     i = await quick.classify('Tenzin ten', adminUser, {}, { allowModel: false }); ok(i && i.tool === 'prepare_payment' && i.args.resident_id === tz.id, `H21.1 S2 "Tenzin ten" is still her payment (got ${JSON.stringify(i && [i.tool, i.args])})`);
     await pool.query(`UPDATE guests SET is_active=false WHERE id=$1`, [tz.id]);
-    for (const [t, d] of [['Tender coconut ten', 'Tender coconut'], ['Milk 2500ml 500', 'Milk 2500ml']]) { i = await quick.intent(t, adminUser, {}); eq(i.args.description, d, `H21.1 S2 "${t}" is filed as "${d}"`); }
+    for (const [t, d] of [['Tender coconut ten', 'Tender coconut'], ['Milk 2500ml 500', 'Milk 2500ml'], ['Kitten food ten', 'Kitten food'], ['Paneer 1500g 500', 'Paneer 1500g']]) { i = await quick.intent(t, adminUser, {}); eq(i.args.description, d, `H21.1 S2 "${t}" is filed as "${d}"`); }
     console.log('✓ S21 Kannada');
 
     // ── Audit ────────────────────────────────────────────────────────────
