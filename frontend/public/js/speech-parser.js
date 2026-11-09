@@ -178,7 +178,12 @@
     if (!names.size) return text;
     return String(text || '').split(/(\s+)/).map(t => names.has(t.toLowerCase().replace(/[.,!?]+$/, '')) ? 'zzname' : t).join('');
   }
-  function shortForm(w) { return w.length >= 3 && (w + 'u') in ONES ? ONES[w + 'u'] : (w in EN_HEARD ? EN_HEARD[w] : null); }
+  function shortForm(w, nextW) {
+    if (w.length >= 3 && (w + 'u') in ONES) return ONES[w + 'u'];
+    // English-mode hearings only before a KANNADA multiplier — "I thousand" stays ₹1,000 (review 21.1 S1).
+    if (w in EN_HEARD && (KN_MULT.has(nextW) || nextW === 'nooru' || nextW === 'noora')) return EN_HEARD[w];
+    return null;
+  }
   // Hotfix 21.1: Kannada numbers as Chrome in ENGLISH mode writes them —
   // ಐದು ಸಾವಿರ → "I sawida", ಆರು → "aru". Only ever counted right before a
   // ಸಾವಿರ/ನೂರು, so "I paid" or "are you" are never numbers.
@@ -217,7 +222,7 @@
       const nextW = (words[i + 1] || '').replace(/[^a-z.]/g, '');
       const nv = numberWord(w);
       if (nv != null) { current += nv; matchedWords.push(words[i]); seenAny = true; continue; }
-      if (!seenAny && shortForm(w) != null && nextW in MULTIPLIERS) { current += shortForm(w); matchedWords.push(words[i]); seenAny = true; continue; }
+      if (!seenAny && shortForm(w, nextW) != null && nextW in MULTIPLIERS) { current += shortForm(w, nextW); matchedWords.push(words[i]); seenAny = true; continue; }
       if (w in HALF) { pendingHalf = true; matchedWords.push(words[i]); continue; }
       if (w === 'and' || w === 'a') { if (seenAny) matchedWords.push(words[i]); continue; }
       // ನೂರ (noora) is a joining form — "noora aivattu" = 150. On its own it is a

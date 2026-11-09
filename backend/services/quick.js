@@ -298,7 +298,8 @@ const BUYABLE = new Set(['Groceries', 'Cleaning']);
 // hears — "Nooru rupaye" left "Nooru" behind as the item.
 function dropWords(text, matched) {
   if (!matched) return text;
-  return String(text).replace(new RegExp(matched.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), ' ');
+  // Whole words only — "ten" is never cut out of "Tenzin" or "Tender" (review 21.1 S2).
+  return String(text).replace(new RegExp('(^|\\s)' + matched.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?=\\s|$)', 'i'), '$1 ');
 }
 
 // ── Fuzzy resident matching (14.2) ──────────────────────────────────────────

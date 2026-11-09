@@ -530,6 +530,14 @@ const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toI
       ok(i && i.tool === 'prepare_payment' && i.args.amount === 5000 && i.args.mode === 'UPI', `H21.1 "${t}" is a ₹5,000 UPI payment (got ${JSON.stringify(i && (i.args || i.clarify))})`);
     }
     eq(SMParse.extractAmount('Priya sawida'), null, 'H21.1 "sawida" after a name is unclear — she is asked, never ₹1,000');
+    // Review 21.1 S1: the English-mode "I" = 5 is only before a Kannada ಸಾವಿರ/ನೂರು.
+    for (const [t, n] of [['Priya I thousand', 1000], ['milk I hundred', 100], ['I nooru', 500]]) eq(SMParse.extractAmount(t).amount, n, `H21.1 S1 "${t}" is ₹${n}`);
+    // Review 21.1 S2: an amount word is removed only as a whole word.
+    const tz = (await A('POST', '/guests', { name: `Tenzin D${alpha}`, phone: `97${uniq}09`.slice(0, 10), room_id: room2.id, bed_number: '1', monthly_rent: 6000, deposit_amount: 0, join_date: daysAgo(30), id_proof_type: 'Aadhaar' })).data;
+    ok(tz && tz.id, 'H21.1 S2 (fixture) a resident named Tenzin');
+    i = await quick.classify('Tenzin ten', adminUser, {}, { allowModel: false }); ok(i && i.tool === 'prepare_payment' && i.args.resident_id === tz.id, `H21.1 S2 "Tenzin ten" is still her payment (got ${JSON.stringify(i && [i.tool, i.args])})`);
+    await pool.query(`UPDATE guests SET is_active=false WHERE id=$1`, [tz.id]);
+    for (const [t, d] of [['Tender coconut ten', 'Tender coconut'], ['Milk 2500ml 500', 'Milk 2500ml']]) { i = await quick.intent(t, adminUser, {}); eq(i.args.description, d, `H21.1 S2 "${t}" is filed as "${d}"`); }
     console.log('✓ S21 Kannada');
 
     // ── Audit ────────────────────────────────────────────────────────────
