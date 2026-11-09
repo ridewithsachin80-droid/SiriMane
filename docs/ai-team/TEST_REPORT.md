@@ -318,3 +318,8 @@ Owner, 9 Nov 07:55: "Yes for both" (delete the route; ask residents to change th
 - Test harness: quick-entry tests reset the skip window when swapping stubs (a simulated outage correctly started it).
 - Mutations M1–M6 (no fallback, no skip window, tabs not wrapping, stray heading, portal ignoring targeting, expired login kept) all caught.
 - Gates on 9d24462: 12/12 ×2, 2,899 each (api 472, ai 219, copilot 253, quick 195, ui 920, portal 262).
+
+### Sprint 20 — independent review (2 rounds)
+- edba5d9: **APPROVE** with should-fixes: the skip window started on any Groq error (a one-off 400, or a Groq-only setup with nothing to fall back to); an empty/cut-off Groq answer counted as success; worst case ~50 s (Groq 25 s + Gemini 25 s); no test pinned what Gemini receives or that quick entry falls back (mutants survived). Minor: Gemini without JSON mode, max_tokens deprecated, invalid tablist role. → 86440ce.
+- 86440ce: **APPROVE**. 12/12 ×2 on fresh gate14, 2,907 each. Worst case now ~33 s (8 + 25). Mutants mA2 (extra data to Gemini), mB2 (quick Groq-only), mH (pause without Gemini), mI (cut-off accepted) caught.
+Backlog (minor): the probe still starts the skip window in a Groq-only setup (production has both keys) · no test of Gemini's request body (`responseMimeType`) · "+ Add" clipped in Admin → Staff at 360 px (pre-existing) · the Groq model and JSON/reasoning settings are unverified against the live service — "Test AI connection" after release shows it.
