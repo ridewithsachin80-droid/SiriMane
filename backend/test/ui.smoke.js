@@ -459,7 +459,23 @@ async function runAtWidth(browser, BASE, width) {
   // 6.1: Admin → Copilot log tab renders the audit
   await page.evaluate(() => navigate('admin'));
   await page.waitForSelector('#schema-banner', { timeout: 8000 });
-  await page.evaluate(() => switchAdminTab('copilot'));
+  // Sprint 20: every Admin tab can be reached and tapped on this phone width
+  const adminTabs = await page.$$eval('.admin-tabs .btn', (bs) => bs.map(b => { const r = b.getBoundingClientRect(); return { t: b.textContent.trim(), left: r.left, right: r.right, h: r.height }; }));
+  const vw = await page.evaluate(() => document.documentElement.clientWidth);
+  eq(adminTabs.length, 6, `${tag} S20-3 Admin has six tabs`);
+  ok(adminTabs.every(x => x.left >= 0 && x.right <= vw + 0.5), `${tag} S20-3 every Admin tab is on screen (${adminTabs.filter(x => x.right > vw + 0.5).map(x => x.t).join(', ') || 'all visible'})`);
+  ok(adminTabs.every(x => x.h >= 44), `${tag} S20-3 Admin tabs are 44 px tap targets (${Math.min(...adminTabs.map(x => Math.round(x.h)))} px)`);
+  const tapTab = async (label) => { const all = await page.$$('.admin-tabs .btn'); for (const b of all) { if ((await b.evaluate(e => e.textContent.trim())) === label) { await b.tap(); return; } } throw new Error('no tab ' + label); };
+  await tapTab('AI impact');
+  await page.waitForFunction(() => adminActiveTab === 'ai', { timeout: 8000 });
+  ok(true, `${tag} S20-3 "AI impact" opens by a real tap`);
+  // S20-4: Audit Log cards carry the right labels on a phone
+  await tapTab('Audit Log');
+  await page.waitForSelector('#audit-tb', { timeout: 8000 });
+  await sleep(300);
+  const auditLabels = await page.$$eval('#audit-tb tr:first-child td', tds => tds.map(td => td.getAttribute('data-label')));
+  eq(auditLabels.join('|'), 'WHEN|USER|ACTION|DETAILS', `${tag} S20-4 Audit Log card labels are right (no "PAYS")`);
+  await tapTab('Copilot log');
   await page.waitForFunction(() => /Copilot log|No Copilot activity/.test(document.querySelector('#admin-tab-content')?.textContent || ''), { timeout: 10000 });
   const logTxt = await page.$eval('#admin-tab-content', e => e.textContent);
   ok(/record 700 rent/.test(logTxt), `${tag} Copilot log lists the ask made earlier (${logTxt.replace(/\s+/g, ' ').slice(0, 160)})`);
@@ -1738,6 +1754,13 @@ async function runAtWidth(browser, BASE, width) {
     await page.waitForFunction(() => document.getElementById('login-username') && document.getElementById('login-username').offsetParent !== null, { timeout: 10000 });
     await new Promise(r => setTimeout(r, 500));
     ok(!(await page.cookies(BASE + '/api/auth/me')).some(c => c.name === 'sm_staff'), `${tag} S19-2 logging out through the screen drops the cookie`);
+    await page.type('#login-username', 'admin'); await page.type('#login-password', process.env.ADMIN_PASSWORD || 'SiriMane@2024');
+    await page.click('#login-btn'); await page.waitForSelector('.home-greeting', { timeout: 15000 });
+    // Sprint 20: an EXPIRED login during a password change logs out (it used to show "Invalid token")
+    await page.deleteCookie(...(await page.cookies(BASE + '/api/auth/me')));
+    await page.evaluate(() => API.changePassword('anything', 'Brand-New-79').catch(() => {}));
+    await page.waitForFunction(() => document.getElementById('login-username') && document.getElementById('login-username').offsetParent !== null, { timeout: 10000 });
+    ok(await page.evaluate(() => !localStorage.getItem('sm_user')), `${tag} S20-5 an expired login during a password change goes back to the login screen`);
     await page.type('#login-username', 'admin'); await page.type('#login-password', process.env.ADMIN_PASSWORD || 'SiriMane@2024');
     await page.click('#login-btn'); await page.waitForSelector('.home-greeting', { timeout: 15000 });
   }

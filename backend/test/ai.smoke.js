@@ -229,6 +229,68 @@ const api = async (method, path, body, token) => {
     eq(r.status, 401, 'staff token cannot open a resident portal');
     console.log('✓ ai routes, privacy, source columns, guest linkage');
 
+    // ── Sprint 20: AI text never depends on one provider
+    {
+      const realGroq = ai.providers.groqText, realGem = ai.providers.geminiText;
+      let groqCalls = 0, gemCalls = 0;
+      ai.providers.groqDownUntil = 0;
+      ai.providers.groqText = async () => { groqCalls++; throw new Error('Groq 404: The model `llama-3.3-70b-versatile` does not exist'); };
+      ai.providers.geminiText = async ({ prompt }) => { gemCalls++; return /complaint/i.test(prompt) ? JSON.stringify({ category: 'Water', priority: 'high', description: 'Tap leaking in room 4' }) : 'OK'; };
+      r = await api('POST', '/ai/parse', { kind: 'complaint', text: 'tap leaking in room 4' }, staffTok);
+      ok(r.status === 200 && r.data.category === 'Water' && groqCalls === 1 && gemCalls === 1, `S20-1 Groq failing → the same request is answered by Gemini (${r.status} ${JSON.stringify(r.data).slice(0, 80)})`);
+      r = await api('POST', '/ai/parse', { kind: 'complaint', text: 'tap leaking in room 5' }, staffTok);
+      ok(r.status === 200 && groqCalls === 1 && gemCalls === 2, 'S20-1 after a Groq failure, Groq is skipped (no extra wait) and Gemini answers');
+      ok(ai.providers.groqDownUntil > Date.now() + 9 * 60000, 'S20-1 …for 10 minutes');
+      // The probe says what's in use, and a working Groq ends the skip window
+      r = await api('GET', '/ai/probe', null, adminTok);
+      ok(r.data.groq.ok === false && r.data.in_use === 'gemini' && r.data.fallback === true, `S20-2 the connection test says Gemini is standing in (${r.data.in_use})`);
+      ai.providers.groqText = async ({ user }) => { groqCalls++; return user === 'ping' ? 'OK' : JSON.stringify({ category: 'Electrical', priority: 'low', description: 'x' }); };
+      r = await api('GET', '/ai/probe', null, adminTok);
+      ok(r.data.groq.ok === true && r.data.in_use === 'groq' && ai.providers.groqDownUntil === 0, 'S20-2 a working Groq is used again straight away');
+      // No provider at all → a clear error, not a hang
+      ai.providers.groqText = async () => { throw new Error('down'); };
+      ai.providers.geminiText = async () => { throw new Error('also down'); };
+      ai.providers.groqDownUntil = 0;
+      r = await api('POST', '/ai/parse', { kind: 'complaint', text: 'fan broken' }, staffTok);
+      ok(r.status === 502, 'S20-1 both providers down → the form says to fill it in (502), no crash');
+      // Review S20 — PRIVACY: Gemini gets exactly what Groq got, no more; JSON mode carried over
+      let gArgs = null, gemArgs = null;
+      ai.providers.groqText = async (a) => { gArgs = a; const e = new Error('Groq 503: down'); e.status = 503; throw e; };
+      ai.providers.geminiText = async (a) => { gemArgs = a; return JSON.stringify({ category: 'Water', priority: 'low', description: 'x' }); };
+      ai.providers.groqDownUntil = 0;
+      await api('POST', '/ai/parse', { kind: 'complaint', text: 'drain blocked' }, staffTok);
+      ok(gArgs && gemArgs && gemArgs.prompt === gArgs.system + '\n\n' + gArgs.user && gemArgs.json === true, 'S20-1 PRIVACY: Gemini receives exactly the text Groq got (and JSON mode), nothing more');
+      // A one-request problem (400, empty answer) falls back WITHOUT pausing Groq
+      for (const [label, fail] of [['400', () => { const e = new Error('Groq 400: failed to generate JSON'); e.status = 400; throw e; }], ['empty answer', () => { const e = new Error('Groq gave an empty answer'); e.status = 'empty'; throw e; }]]) {
+        ai.providers.groqDownUntil = 0; let used = null;
+        ai.providers.groqText = async () => fail();
+        ai.providers.geminiText = async () => { used = 'gemini'; return JSON.stringify({ category: 'Water', priority: 'low', description: 'x' }); };
+        r = await api('POST', '/ai/parse', { kind: 'complaint', text: 'drain blocked' }, staffTok);
+        ok(r.status === 200 && used === 'gemini' && ai.providers.groqDownUntil === 0, `S20-1 a Groq ${label} falls back to Gemini for that request only (Groq not paused)`);
+      }
+      // Groq only (no Gemini): a failure is reported, and Groq is never paused
+      { const keep = { stub: ai.providers._stub, g: process.env.GROQ_API_KEY, m: process.env.GEMINI_API_KEY };
+        ai.providers._stub = false; process.env.GROQ_API_KEY = 'test-key'; delete process.env.GEMINI_API_KEY; ai.providers.groqDownUntil = 0;
+        ai.providers.groqText = async () => { const e = new Error('Groq 503: down'); e.status = 503; throw e; };
+        let msg = ''; try { await ai.providers.text({ system: 's', user: 'u' }); } catch (e) { msg = e.message; }
+        ok(/503/.test(msg) && ai.providers.groqDownUntil === 0, `S20-1 with Groq only, a failure is reported as it is and Groq is not paused (${msg})`);
+        ai.providers._stub = keep.stub; if (keep.g === undefined) delete process.env.GROQ_API_KEY; else process.env.GROQ_API_KEY = keep.g; if (keep.m !== undefined) process.env.GEMINI_API_KEY = keep.m; }
+      // The real Groq call: an empty or cut-off answer is a failure, not success
+      { const keepFetch = global.fetch, keepKey = process.env.GROQ_API_KEY;
+        process.env.GROQ_API_KEY = 'test-key';
+        // a fresh copy of the module: the suite's stubs replaced groqText on the shared one
+        const aiPath = require.resolve('../routes/ai'); const cached = require.cache[aiPath]; delete require.cache[aiPath];
+        const freshGroq = require('../routes/ai').providers.groqText; require.cache[aiPath] = cached;
+        let thrown = [];
+        for (const reply of [{ choices: [{ message: { content: '' }, finish_reason: 'stop' }] }, { choices: [{ message: { content: '{"cat' }, finish_reason: 'length' }] }]) {
+          global.fetch = async (url, opts) => /groq/.test(url) ? { ok: true, status: 200, json: async () => reply } : keepFetch(url, opts);
+          try { await freshGroq({ system: 's', user: 'u', json: true }); thrown.push('returned'); } catch (e) { thrown.push(e.status); }
+        }
+        global.fetch = keepFetch; if (keepKey === undefined) delete process.env.GROQ_API_KEY; else process.env.GROQ_API_KEY = keepKey;
+        eq(thrown.join(','), 'empty,empty', 'S20-1 an empty or cut-off Groq answer counts as a failure (so Gemini answers)'); }
+      ai.providers.groqText = realGroq; ai.providers.geminiText = realGem; ai.providers.groqDownUntil = 0;
+    }
+
     console.log(`\n✅ AI gate passed — ${count} assertions`);
   } catch (e) {
     console.error(`\n❌ AI gate FAILED after ${count} assertions:\n`, e.message); process.exitCode = 1;

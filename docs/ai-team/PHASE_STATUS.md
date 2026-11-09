@@ -221,3 +221,19 @@ Owner, 9 Nov 06:35: "go". Closes the remaining risk recorded in Sprint 17: an in
 | S19-4 | Nothing else changes for the user: every screen, PDF/CSV downloads, request photos, her ID photo, receipts, Copilot and bulk actions (internal calls), turned-off accounts, login limits, environment-bound tokens. API clients that send `Authorization: Bearer` (the gates, internal calls) keep working | QA |
 | S19-5 | **Release is safe:** a phone that was logged in before the release is asked to log in once — no error loop, no blank screen | OPS |
 | S19-6 | Gates 12/12 twice; new tests prove page JS cannot read the token (not in `document.cookie`, not in storage) and that a cookie-authenticated write without the header is refused; independent review before merge | QA |
+
+## Sprint 20 — AI that keeps working, Admin on a phone (criteria recorded before build)
+Owner, 9 Nov 09:33: "Go" (AI-first, in order). Evidence from the owner's production screenshots, 09:40:
+- Admin → Settings → Test AI connection: Gemini ✅ 551 ms; **Groq ❌ 404 "model llama-3.3-70b-versatile does not exist"** — Groq retired it on 16 Aug 2026 (console.groq.com/docs/deprecations). The command bar (Copilot), quick-entry category guess and voice repair/fill for collections and complaints call Groq ONLY when its key is set — no fallback — so their AI step has failed silently for ~3 months (rules-only).
+- On a phone the Admin tab row runs off the screen and cannot scroll: "Copilot log" and "AI impact" are unreachable.
+- Audit Log cards on a phone label the action row "PAYS".
+Correction: the earlier plan ("add voice to collections and complaints") was wrong — both already have voice and photo input.
+
+| ID | Acceptance criterion | Review |
+|---|---|---|
+| S20-1 | **AI text never depends on one provider.** One text helper is used by every AI text call (Copilot routing, quick-entry category, voice repair/fill for collections and complaints): Groq first when configured, and on any Groq failure the same request goes to Gemini. After a Groq failure, Groq is skipped for 10 minutes (no extra wait on patchy 4G). Which provider answered is recorded where the Copilot log already records the source | QA |
+| S20-2 | Groq's model is a current one by default (configurable with `GROQ_MODEL`); "Test AI connection" shows both providers and says which one the app is using now | OPS |
+| S20-3 | **Admin on a phone:** all six Admin tabs are reachable at 360 and 390 px (the row scrolls or wraps), with 44 px tap targets | UX |
+| S20-4 | Audit Log cards on a phone carry the right labels (no "PAYS") | UX |
+| S20-5 | Backlog: the resident app's notice list respects room/floor targeting (a notice for one room is not shown to everyone); a 401 from change-password caused by an expired or turned-off login logs out instead of showing "Invalid token" | PRIVACY, UX |
+| S20-6 | Gates 12/12 twice; tests prove the fallback (Groq failing → Gemini answers; skip window), the tabs and the labels at 360/390, the notice targeting; independent review before merge | QA |

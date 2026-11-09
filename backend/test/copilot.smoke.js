@@ -235,6 +235,23 @@ async function run(mode) {
     ok(auditRows.some(x => /record 2500 rent/i.test(x.request_text)), 'audit screen data includes asks');
     ok(auditRows.some(x => x.request_text === 'confirm' && x.confirmed_at), 'audit screen data includes confirms');
     ok(auditRows.some(x => x.error === 'forbidden'), 'audit screen data includes refusals');
+
+    // ── Sprint 20: Groq retired its model (16 Aug 2026) — the command bar keeps working through Gemini
+    {
+      stubModel();
+      const groqWas = ai.providers.groqText;
+      ai.providers.groqDownUntil = 0;
+      ai.providers.groqText = async () => { throw new Error('Groq 404: The model `llama-3.3-70b-versatile` does not exist'); };
+      ai.providers.geminiText = async ({ prompt }) => /how much money/i.test(prompt) ? JSON.stringify({ tool: 'get_month_performance', args: {} }) : 'OK';
+      const rr = await askAs(adminTok, 'how much money came in');
+      ok(rr.data.tool === 'get_month_performance' && rr.data.via === 'model', `S20-1 with Groq down, Gemini routes the command bar request (${rr.data.tool} via ${rr.data.via})`);
+      const row = (await pool.query(`SELECT interpretation FROM ai_actions WHERE request_text='how much money came in' ORDER BY id DESC LIMIT 1`)).rows[0];
+      eq(row && row.interpretation && row.interpretation.provider, 'gemini', 'S20-1 the Copilot log records that Gemini answered');
+      ai.providers.groqText = groqWas; ai.providers.groqDownUntil = 0;
+      const rg = await askAs(adminTok, 'how much money did we make');
+      const rowg = (await pool.query(`SELECT interpretation FROM ai_actions WHERE request_text='how much money did we make' ORDER BY id DESC LIMIT 1`)).rows[0];
+      ok(rg.data.tool === 'get_month_performance' && rowg.interpretation.provider === 'groq', 'S20-1 …and Groq when it works');
+    }
     console.log(`\n✅ Copilot gate passed — ${count} assertions`);
   } catch (e) {
     console.error(`\n❌ Copilot gate FAILED after ${count} assertions:\n`, e.stack || e.message); process.exitCode = 1;

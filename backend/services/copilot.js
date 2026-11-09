@@ -106,12 +106,11 @@ async function modelIntent(text, user, context) {
   const system = `You route a PG (paying-guest hostel) warden's request to exactly one tool. Reply ONLY with JSON: {"tool": <name or null>, "args": {...}, "clarify": <question or null>}. Use the screen context for words like "here", "her", "this room". If the request is ambiguous, set tool null and ask a short clarifying question. Never invent residents, rooms or amounts. Tools:\n${cat}`;
   const user_ = `${ctxLine}\nRequest: ${text}`;
   try {
-    const reply = process.env.GROQ_API_KEY || ai.providers._stub
-      ? await ai.providers.groqText({ system, user: user_, json: true })
-      : await ai.providers.geminiText({ prompt: system + '\n\n' + user_ });
+    const meta = {};
+    const reply = await ai.providers.text({ system, user: user_, json: true }, meta);   // Sprint 20: Groq → Gemini
     const parsed = ai._internal.parseJsonLoose(reply);
     if (!parsed) return null;
-    return { tool: parsed.tool || null, args: parsed.args || {}, clarify: parsed.clarify || null, via: 'model' };
+    return { tool: parsed.tool || null, args: parsed.args || {}, clarify: parsed.clarify || null, via: 'model', provider: meta.provider };
   } catch (e) { return { error: e.message, via: 'model' }; }
 }
 
@@ -168,7 +167,7 @@ async function ask({ user, text, context, tap, voice, alternatives, authorizatio
   if (!intent.tool && intent.clarify) { audit.interpretation = { tool: null, via: intent.via, clarify: intent.clarify }; return finish({ answer: intent.clarify, clarify: intent.clarify, retry_text: intent.retry_text || null, actions: [], confidence: 'low', via: intent.via }); }
 
   const tool = tools.TOOLS[intent.tool];
-  audit.interpretation = { tool: intent.tool, args: intent.args, via: intent.via };
+  audit.interpretation = { tool: intent.tool, args: intent.args, via: intent.via, ...(intent.provider ? { provider: intent.provider } : {}) };
   if (!tool) return finish({ answer: `I don't have a "${intent.tool}" action.`, actions: [], confidence: 'low', tool: intent.tool, via: intent.via });
   if (!tools.allowed(tool, user)) { audit.error = 'forbidden'; return finish({ answer: `That needs an admin login.`, actions: [], forbidden: true, confidence: 'high', tool: intent.tool, via: intent.via }); }
   if (tool.level === 'execute') { audit.error = 'execute-without-confirm'; return finish({ answer: `That changes records, so it needs a preview first. Tell me the details and I'll prepare it for you to confirm.`, actions: [], confidence: 'high', tool: intent.tool, via: intent.via }); }
