@@ -190,11 +190,11 @@ const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toI
     ok(/zzquark/.test(seen[0]), 'it sees the item words only');
     ai.providers.groqText = async () => { throw new Error('boom'); };
     i = await quick.intent('zzquark 750', adminUser, {}); eq(i.args.category, 'Other', 'model failure → Other, never an error to the warden');
-    ai.providers._stub = realStub; ai.providers.groqText = realGroq;
+    ai.providers._stub = realStub; ai.providers.groqText = realGroq; ai.providers.groqDownUntil = 0;   // Sprint 20: a simulated outage starts the 10-min skip — end it with the stub
 
     // ── 14.1 Voice repair: what Chrome heard vs what she said ───────────
     const vseen = [];
-    ai.providers._stub = true;
+    ai.providers._stub = true; ai.providers.groqDownUntil = 0;
     ai.providers.groqText = async ({ system, user }) => {
       vseen.push(system + '\n' + user);
       if (/category/i.test(system) && !/Transcripts/.test(user)) return JSON.stringify({ category: 'Other' });
@@ -237,7 +237,7 @@ const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toI
     ai.providers.groqText = async () => { throw new Error('down'); };
     i = await quick.intent('opinion hundred rupees', adminUser, {}, { voice: true, alternatives: [] });
     eq(i.tool, 'prepare_expense', 'model down: still an expense'); eq(i.args.description, 'opinion', '…as heard'); ok(!i.heard, '…no false repair');
-    ai.providers._stub = realStub; ai.providers.groqText = realGroq;
+    ai.providers._stub = realStub; ai.providers.groqText = realGroq; ai.providers.groqDownUntil = 0;   // Sprint 20: a simulated outage starts the 10-min skip — end it with the stub
     i = await quick.intent('opinion hundred rupees', adminUser, {}, { voice: true, alternatives: [] });
     eq(i.args.category, 'Other', 'KEYLESS: voice still files, as Other');
     // A forged request cannot smuggle a phrase past the bounds.
