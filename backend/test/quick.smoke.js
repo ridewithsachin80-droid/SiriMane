@@ -315,6 +315,77 @@ const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toI
     ok(/filed "zzkumbla" under Groceries/.test(i.category_basis), '…and says it learned it from her');
     console.log('✓ kannada/hindi + learn loop');
 
+    // ── Sprint 21: she speaks Kannada ─────────────────────────────────────
+    // S21-1 Kannada script is spelt out the way WhatsApp Kannada is typed.
+    for (const [kn, lat] of [['ಈರುಳ್ಳಿ', 'eerulli'], ['ಬೆಳ್ಳುಳ್ಳಿ', 'bellulli'], ['ಹಾಲು', 'haalu'], ['ಸಂಬಳ', 'sambala'], ['ತೊಂಬತ್ತು', 'tombattu'], ['ಎಂಟು', 'entu'], ['ಜಾನವಿ', 'jaanavi'],
+                             ['ಕ್ಯಾಶ್', 'cash'], ['ಯುಪಿಐ', 'upi'], ['ಗೂಗಲ್ ಪೇ', 'google pay'], ['ಫೋನ್ ಪೇ', 'phonepe'], ['ರೂಮ್ ನಂಬರ್ ೧೦೬', 'room number 106'], ['ಟೊಮ್ಯಾಟೊ', 'tomato'], ['100 ರೂಪಾಯಿ', '100 rupees']]) {
+      eq(SMParse.toLatin(kn), lat, `S21-1 toLatin "${kn}"`);
+    }
+    for (const typed of ['onion 100rs', 'Jhanavi paid ₹5,000 UPI', 'tap leaking room 106', 'rent', 'bil', 'tee 20']) eq(SMParse.toLatin(typed), typed, `S21-1 typed English is returned untouched: "${typed}"`);
+    // S21-2 Kannada number words — digits, words, and the one-word hundreds
+    for (const [kn, n] of [['ಐದು ಸಾವಿರ', 5000], ['ಎರಡು ಸಾವಿರದ ಐನೂರು', 2500], ['ಐನೂರು', 500], ['ಹತ್ತು ಸಾವಿರ', 10000], ['ನೂರು ಇಪ್ಪತ್ತು', 120], ['ತೊಂಬತ್ತು', 90], ['೫೦', 50], ['ಹದಿನೈದು', 15]]) {
+      const a = SMParse.extractAmount(SMParse.toLatin(kn)); eq(a && a.amount, n, `S21-2 "${kn}" is ₹${n}`);
+    }
+    // S21-3 Kannada script all the way through Quick Entry
+    for (const [kn, cat, amt, mode] of [['ಈರುಳ್ಳಿ 100 ರೂಪಾಯಿ', 'Groceries', 100], ['ಹಾಲು ಅರವತ್ತು', 'Groceries', 60], ['ಸೌತೆಕಾಯಿ 30', 'Groceries', 30], ['ಹೀರೇಕಾಯಿ 40', 'Groceries', 40],
+                                        ['ತರಕಾರಿ 350 ಕ್ಯಾಶ್', 'Groceries', 350, 'Cash'], ['ಫಿನಾಯಿಲ್ 120', 'Cleaning', 120], ['ಪ್ಲಂಬರ್ 500 ಯುಪಿಐ', 'Repairs', 500, 'UPI'], ['ಕರೆಂಟ್ ಬಿಲ್ 4500', 'Electricity', 4500], ['ಸಂಬಳ ಹತ್ತು ಸಾವಿರ', 'Salary', 10000]]) {
+      i = await quick.intent(kn, adminUser, {});
+      ok(i && i.tool === 'prepare_expense' && i.args.category === cat && i.args.amount === amt && (!mode || i.args.mode === mode), `S21-3 "${kn}" → ${cat} ₹${amt}${mode ? ' ' + mode : ''} (got ${JSON.stringify(i && i.args)})`);
+    }
+    i = await quick.intent('ಈರುಳ್ಳಿ 100', adminUser, {});
+    eq(i.args.description, 'eerulli', 'S21-3 the expense is filed as "eerulli" — the same word typed entries learn from');
+    // A resident's name said in Kannada is still a collection, never an expense.
+    r = await ask('ಜಾನವಿ ಐದು ಸಾವಿರ ಯುಪಿಐ');
+    ok(r.data.tool === 'prepare_payment' || /Jhanavi/.test(r.data.answer), `S21-3 "ಜಾನವಿ ಐದು ಸಾವಿರ ಯುಪಿಐ" is a payment by Jhanavi (${r.data.tool} · ${String(r.data.answer).slice(0, 90)})`);
+    ok(!/expense|Groceries|Other/i.test(r.data.answer || ''), 'S21-3 …and not an expense called "jaanavi"');
+    i = await quick.intent('ಜಾನವಿ ಐದು ಸಾವಿರ ಯುಪಿಐ', adminUser, {});
+    ok(i.tool === 'prepare_payment' && i.args.amount === 5000 && i.args.mode === 'UPI', `S21-3 …₹5,000 by UPI (got ${JSON.stringify(i.args)})`);
+    // S21-4 A complaint in Kannada keeps her own words; the room is read.
+    for (const [kn, room] of [['ರೂಮ್ 106 ನಲ್ಲಿ ನಲ್ಲಿ ಸೋರುತ್ತಿದೆ', '106'], ['ಫ್ಯಾನ್ ಕೆಲಸ ಮಾಡ್ತಿಲ್ಲ ರೂಮ್ 12', '12'], ['ನೀರು ಬರುತ್ತಿಲ್ಲ', undefined], ['current illa room 7', '7'], ['nalli soruttide', undefined]]) {
+      i = await quick.intent(kn, adminUser, {});
+      ok(i && i.tool === 'prepare_complaint' && i.args.description === kn && i.args.room === room, `S21-4 "${kn}" is a complaint${room ? ' for room ' + room : ''}, worded as she said it (got ${JSON.stringify(i && i.args)})`);
+    }
+    // S21-5 An item with no amount asks how much — instead of "I'm not sure".
+    for (const t of ['pudina soppu', 'eerulli', 'ಈರುಳ್ಳಿ', 'phenyl']) {
+      r = await ask(t);
+      ok(/^How much was the /.test(r.data.answer || '') && r.data.clarify, `S21-5 "${t}" asks how much (got "${String(r.data.answer).slice(0, 80)}")`);
+      ok(/ $/.test(r.data.retry_text || '') && !/\d/.test(r.data.retry_text), `S21-5 …and puts "${(r.data.retry_text || '').trim()}" back in the box for her to add the amount`);
+      ok(!r.data.proposal, 'S21-5 …and prepares nothing');
+    }
+    r = await ask('pudina soppu 20'); eq(r.data.proposal && r.data.proposal.preview.amount, 20, 'S21-5 adding the amount then prepares the expense');
+    // …but only for things she buys: commands, questions and unknown words are untouched.
+    for (const t of ['rent', 'rent due', 'milk finished', 'onion price', 'wifi', 'fan', 'laptop', 'Erode']) {
+      i = await quick.classify(t, adminUser, {}, { allowModel: false });
+      ok(!i || !/How much was/.test(i.clarify || ''), `S21-5 "${t}" is not mistaken for an item without an amount`);
+    }
+    // S21-6 A question in Kannada is left for the Copilot.
+    for (const t of ['ಯಾರು ರೆಂಟ್ ಕೊಟ್ಟಿಲ್ಲ', 'eshtu collection aaytu']) { i = await quick.classify(t, adminUser, {}, { allowModel: false }); eq(i, null, `S21-6 "${t}" is a question, not an entry`); }
+    // S21-7 The spoken Kannada path is local: a clear phrase never calls the model.
+    {
+      let calls = 0; const keep = ai.providers.groqText, keepStub = ai.providers._stub;
+      ai.providers._stub = true; ai.providers.groqDownUntil = 0; ai.providers.groqText = async () => { calls++; return '{}'; };
+      try {
+        i = await quick.intent('ಈರುಳ್ಳಿ ನೂರು ರೂಪಾಯಿ', adminUser, {}, { voice: true, alternatives: ['ಈರುಳ್ಳಿ ನೂರು ರೂಪಾಯಿ'] });
+        ok(i.tool === 'prepare_expense' && i.args.amount === 100 && i.args.category === 'Groceries', 'S21-7 spoken "ಈರುಳ್ಳಿ ನೂರು ರೂಪಾಯಿ" → onion ₹100 Groceries');
+        eq(calls, 0, 'S21-7 …with no AI call');
+      } finally { ai.providers.groqText = keep; ai.providers._stub = keepStub; ai.providers.groqDownUntil = 0; }
+    }
+    // S21-8 /copilot/category — the purchase form asks for words its own list lacks.
+    for (const [item, cat] of [['Eerulli', 'Groceries'], ['ಹಾಲು', 'Groceries'], ['phenyl', 'Cleaning'], ['zzkumbla', 'Groceries'], ['laptop', null]]) {
+      r = await A('POST', '/copilot/category', { item });
+      ok(r.status === 200 && r.data.category === cat, `S21-8 category for "${item}" is ${cat} (got ${r.status} ${JSON.stringify(r.data)})`);
+    }
+    r = await S('POST', '/copilot/category', { item: 'eerulli' }); eq(r.status, 200, 'S21-8 staff may use it (the purchase form is theirs too)');
+    r = await api('POST', '/copilot/category', { item: 'eerulli' }); eq(r.status, 401, 'S21-8 not without a login');
+    r = await A('POST', '/copilot/category', {}); eq(r.status, 400, 'S21-8 an empty item is refused');
+    {
+      let calls = 0; const keep = ai.providers.groqText, keepStub = ai.providers._stub;
+      ai.providers._stub = true; ai.providers.groqText = async () => { calls++; return '{"category":"Repairs"}'; };
+      try { r = await A('POST', '/copilot/category', { item: 'laptop' }); eq(r.data.category, null, 'S21-8 an unknown word stays unknown'); eq(calls, 0, 'S21-8 …the model is never asked (no text leaves the server)'); }
+      finally { ai.providers.groqText = keep; ai.providers._stub = keepStub; ai.providers.groqDownUntil = 0; }
+    }
+    console.log('✓ S21 Kannada');
+
     // ── Audit ────────────────────────────────────────────────────────────
     const au = await pool.query(`SELECT COUNT(*)::int AS n FROM ai_actions WHERE interpretation::text LIKE '%"via":"quick"%' OR interpretation::text LIKE '%quick%'`);
     ok(au.rows[0].n >= 2, 'quick entries are in the Copilot log');

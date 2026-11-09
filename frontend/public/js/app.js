@@ -1726,7 +1726,8 @@ function startPurchaseVoice() {
   try {
     const rec = new Ctor();
     purchaseRecognition = rec;
-    rec.lang = 'en-IN';
+    const lang = smVoiceLang();   // S21: same per-phone choice as every other mic
+    rec.lang = lang;
     rec.continuous = false;
     rec.interimResults = false;
     rec.maxAlternatives = 1;
@@ -1736,7 +1737,8 @@ function startPurchaseVoice() {
       micBtn.classList.add('listening');
       micBtn.textContent = '⏹';
       statusEl.classList.remove('voice-error');
-      statusEl.textContent = 'Listening… speak now';
+      statusEl.textContent = `Listening in ${SM_VOICE_LANGS[lang]}… speak now `;
+      statusEl.appendChild(smLangButton(() => purchaseRecognition, startPurchaseVoice));
     };
 
     rec.onresult = (e) => {
@@ -1748,8 +1750,9 @@ function startPurchaseVoice() {
           return;
         }
         statusEl.classList.remove('voice-error');
-        statusEl.textContent = `Heard: "${transcript}"`;
-        parsePurchaseVoiceText(transcript);
+        statusEl.textContent = `Heard: "${transcript}" `;
+        statusEl.appendChild(smLangButton(() => purchaseRecognition, startPurchaseVoice));
+        parsePurchaseVoiceText(SMParse.toLatin(transcript));
       } catch (err) {
         statusEl.textContent = 'Couldn\'t process that, please fill the form manually';
         statusEl.classList.add('voice-error');
@@ -1757,22 +1760,18 @@ function startPurchaseVoice() {
     };
 
     rec.onerror = (e) => {
-      const messages = {
-        'no-speech': 'Didn\'t hear anything, tap the mic and try again',
-        'audio-capture': 'No microphone found on this device',
-        'not-allowed': 'Microphone permission denied, allow it in your browser settings',
-        'network': 'Network error, check your connection and try again',
-        'aborted': ''
-      };
+      if (e && e.error === 'language-not-supported') smSetVoiceLang('en-IN');
+      const messages = SM_VOICE_ERRORS;
       const msg = e && e.error in messages ? messages[e.error] : 'Voice input failed, please fill the form manually';
       if (msg) { statusEl.textContent = msg; statusEl.classList.add('voice-error'); }
     };
 
     rec.onend = () => {
       purchaseListening = false;
-      purchaseRecognition = null;
+      if (purchaseRecognition === rec) purchaseRecognition = null;
       micBtn.classList.remove('listening');
       micBtn.textContent = '🎤';
+      if (rec.__then) { const go = rec.__then; rec.__then = null; go(); }
     };
 
     rec.start();
@@ -1808,11 +1807,15 @@ function parsePurchaseVoiceText(rawText) {
     if (!text) return;
     let lower = text.toLowerCase();
 
-    // Amount: first number in the phrase (supports decimals like "499.50")
+    // Amount: first number in the phrase (supports decimals like "499.50");
+    // S21: else spoken numbers — "aidu nooru", "five hundred", "ainooru".
     const amtMatch = lower.match(/\d+(\.\d+)?/);
     if (amtMatch) {
       setVoicePurchaseField('pu-amt', amtMatch[0]);
       lower = lower.replace(amtMatch[0], ' ');
+    } else {
+      const spoken = SMParse.extractAmount(lower);
+      if (spoken) { setVoicePurchaseField('pu-amt', String(spoken.amount)); lower = lower.replace(spoken.matched, ' '); }
     }
 
     // Category: check longer synonym phrases before the bare category name
@@ -1855,6 +1858,17 @@ function parsePurchaseVoiceText(rawText) {
     const description = leftoverWords.join(' ').trim();
     if (description) {
       setVoicePurchaseField('pu-desc', description.charAt(0).toUpperCase() + description.slice(1));
+    }
+    // S21: "eerulli", "phenyl", "haalu" — the words this form's own list
+    // doesn't know. The server's item dictionary (and this PG's own past
+    // purchases) names the category; no AI call, nothing is saved.
+    if (!matchedCategory && description) {
+      const cat0 = document.getElementById('pu-cat'), before = cat0 ? cat0.value : null;
+      apiFetch('/copilot/category', { method: 'POST', body: { item: description } }).then(r => {
+        const el = document.getElementById('pu-cat');
+        // Same form still open, and she hasn't picked a category meanwhile.
+        if (r && r.category && PURCHASE_CATEGORIES.includes(r.category) && el && el === cat0 && el.value === before) setVoicePurchaseField('pu-cat', r.category);
+      }).catch(() => {});
     }
   } catch (err) {
     const statusEl = document.getElementById('pu-voice-status');
@@ -3485,35 +3499,58 @@ async function loadAiStatus() {
 // ── Generic on-device voice engine (Web Speech API) ─────────────
 // One engine for Collect and Complaints; the Purchase modal keeps its own
 // (older) copy untouched.
+// ── S21: the language the mic listens in ─────────────────────────
+// English mode hears "eerulli" as "heroine". In ಕನ್ನಡ mode Chrome writes
+// Kannada script, which SMParse.toLatin spells out for the parser. The
+// choice is per phone (browser storage), and one tap on the status line
+// switches it and listens again — no settings screen to find.
+const SM_VOICE_LANGS = { 'en-IN': 'English', 'kn-IN': 'ಕನ್ನಡ' };
+function smVoiceLang() { try { const v = localStorage.getItem('sm_voice_lang'); if (v && SM_VOICE_LANGS[v]) return v; } catch (e) {} return 'en-IN'; }
+function smSetVoiceLang(v) { try { localStorage.setItem('sm_voice_lang', SM_VOICE_LANGS[v] ? v : 'en-IN'); } catch (e) {} }
+// A button that switches the mic language and listens again at once.
+// `active` is the recogniser still running (stopped first), `again` starts a new one.
+function smLangButton(active, again) {
+  const other = smVoiceLang() === 'kn-IN' ? 'en-IN' : 'kn-IN';
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'voice-lang';
+  b.textContent = other === 'kn-IN' ? 'ಕನ್ನಡದಲ್ಲಿ ಹೇಳಿ' : 'Speak English';
+  b.setAttribute('aria-label', other === 'kn-IN' ? 'Listen in Kannada' : 'Listen in English');
+  b.onclick = ev => { ev.preventDefault(); ev.stopPropagation(); smSetVoiceLang(other); const r = active(); if (r) { r.__then = again; try { r.abort(); } catch (e) { again(); } } else again(); };
+  return b;
+}
+const SM_VOICE_ERRORS = { 'no-speech': 'Didn\'t hear anything — tap the mic and try again', 'audio-capture': 'No microphone found', 'not-allowed': 'Microphone permission denied — allow it in Chrome settings', 'network': 'Network error — check your signal', 'language-not-supported': 'ಕನ್ನಡ voice isn\'t available on this phone — switched back to English', 'aborted': '' };
+
 let smRec = null;
 function smVoice(btnId, statusId, onText, hint) {
   const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition || null;
   const btn = document.getElementById(btnId);
   const status = document.getElementById(statusId);
   if (!btn || !status) return;
-  const say = (msg, err) => { status.textContent = msg; status.classList.toggle('voice-error', !!err); };
+  const again = () => smVoice(btnId, statusId, onText, hint);
+  const say = (msg, err, offer) => { status.textContent = msg; status.classList.toggle('voice-error', !!err); if (offer) { status.appendChild(document.createTextNode(' ')); status.appendChild(smLangButton(() => smRec, again)); } };
   if (!Ctor) { say('Voice needs Chrome on Android. Please type instead.', true); return; }
   if (smRec) { try { smRec.stop(); } catch {} smRec = null; return; }
   try {
     const rec = new Ctor();
     smRec = rec;
+    const lang = smVoiceLang();
     // 14.1: Chrome's 2nd or 3rd guess is often the right one for Indian
     // English and Kannada words — keep five and let the server choose.
-    rec.lang = 'en-IN'; rec.continuous = false; rec.interimResults = false; rec.maxAlternatives = 5;
-    rec.onstart = () => { btn.classList.add('listening'); btn.textContent = '⏹'; say('Listening… ' + (hint || 'speak now')); };
+    rec.lang = lang; rec.continuous = false; rec.interimResults = false; rec.maxAlternatives = 5;
+    rec.onstart = () => { btn.classList.add('listening'); btn.textContent = '⏹'; say(`Listening in ${SM_VOICE_LANGS[lang]}… ` + (hint || 'speak now'), false, true); };
     rec.onresult = e => {
       const t = e.results && e.results[0] && e.results[0][0] ? e.results[0][0].transcript : '';
-      if (!t) { say('Didn\'t catch that — tap the mic and try again', true); return; }
+      if (!t) { say('Didn\'t catch that — tap the mic and try again', true, true); return; }
       const alts = e.results && e.results[0] ? Array.from(e.results[0]).map(a => a.transcript).filter(Boolean) : [t];
-      say(`Heard: "${t}"`);
+      say(`Heard: "${t}"`, false, true);
       try { onText(t, alts); } catch (err) { console.error(err); say('Couldn\'t understand that — please fill the form', true); }
     };
     rec.onerror = e => {
-      const m = { 'no-speech': 'Didn\'t hear anything — tap the mic and try again', 'audio-capture': 'No microphone found', 'not-allowed': 'Microphone permission denied — allow it in Chrome settings', 'network': 'Network error — check your signal', 'aborted': '' };
-      const msg = e && e.error in m ? m[e.error] : 'Voice input failed — please fill the form';
-      if (msg) say(msg, true);
+      if (e && e.error === 'language-not-supported') smSetVoiceLang('en-IN');
+      const msg = e && e.error in SM_VOICE_ERRORS ? SM_VOICE_ERRORS[e.error] : 'Voice input failed — please fill the form';
+      if (msg) say(msg, true, e.error === 'no-speech');
     };
-    rec.onend = () => { smRec = null; btn.classList.remove('listening'); btn.textContent = '🎤'; };
+    rec.onend = () => { if (smRec === rec) smRec = null; btn.classList.remove('listening'); btn.textContent = '🎤'; if (rec.__then) { const go = rec.__then; rec.__then = null; go(); } };
     rec.start();
   } catch { smRec = null; say('Could not start voice on this device', true); }
 }
@@ -3599,7 +3636,7 @@ function showCollectPreview(text, p) {
   if (!box) return;
   box.classList.remove('hidden');
   if (!p.guest) {
-    box.innerHTML = `<div class="alert alert-warning" style="display:block">I heard <em>"${text}"</em> but couldn't tell which resident. Tap her name below, then say it again or type the amount.</div>`;
+    box.innerHTML = `<div class="alert alert-warning" style="display:block">I heard <em>"${esc(text)}"</em> but couldn't tell which resident. Tap her name below, then say it again or type the amount.</div>`;
     return;
   }
   const due = parseFloat(p.guest.amount_due) || 0;
@@ -3607,7 +3644,7 @@ function showCollectPreview(text, p) {
     <div class="card" style="padding:14px;border:2px solid var(--primary);background:var(--accent-soft)">
       <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted,var(--text-muted))">AI heard — please check</div>
       <div style="font-size:16px;font-weight:700;margin:6px 0 2px">${esc(p.guest.name)}${p.guest.room_number ? ' · Room ' + p.guest.room_number : ''}</div>
-      <div style="font-size:14px">${p.amount ? '<strong>' + fmt(p.amount) + '</strong>' : '<span class="text-red">amount not heard</span>'} · ${p.mode || 'mode not heard'} · ${p.type}</div>
+      <div style="font-size:14px">${p.amount ? '<strong>' + fmt(p.amount) + '</strong>' : '<span class="text-red">amount not heard</span>'} · ${esc(p.mode || 'mode not heard')} · ${esc(p.type)}</div>
       ${p.amount && due > 0 && Math.abs(p.amount - due) > 0.5 ? `<div style="font-size:12px;color:var(--amber);margin-top:4px">Her running balance is ${fmt(due)} — different from what was said.</div>` : ''}
       <div class="flex gap-2" style="margin-top:10px">
         <button class="btn btn-primary btn-sm" onclick="collectUseVoice()">✓ Use this</button>
@@ -3644,7 +3681,7 @@ async function complaintApplyVoice(text) {
   box.innerHTML = `
     <div class="card" style="padding:12px;border:2px solid var(--primary);background:var(--accent-soft);margin-bottom:12px">
       <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted,var(--text-muted))">AI heard — please check</div>
-      <div style="font-size:14px;margin:6px 0"><strong>${category}</strong>${p.room ? ' · Room ' + p.room : ''}<br>${description}</div>
+      <div style="font-size:14px;margin:6px 0"><strong>${esc(category)}</strong>${p.room ? ' · Room ' + esc(p.room) : ''}<br>${esc(description)}</div>
       <div class="flex gap-2">
         <button class="btn btn-primary btn-sm" onclick="complaintUseVoice(${jsAttr({ category, description, room: p.room })})">✓ Use this</button>
         <button class="btn btn-outline btn-sm" onclick="document.getElementById('cp-preview').classList.add('hidden')">✗ Ignore</button>
@@ -4085,7 +4122,9 @@ async function renderAdminCopilotTab() {
         const i = r.interpretation || {};
         const did = r.request_text === 'confirm' ? `Confirmed ${i.tool || r.proposal_tool || ''}` : (i.tool ? `${i.tool}${i.via ? ' · ' + i.via : ''}` : (i.clarify ? 'Asked: ' + i.clarify : '—'));
         const outcome = r.error ? `<span class="badge badge-red">${esc(r.error)}</span>` : r.confirmed_at ? `<span class="badge badge-green">done</span>` : r.proposal_id && !r.proposal_confirmed_at ? `<span class="badge badge-amber">prepared, not confirmed</span>` : `<span class="badge badge-gray">answered</span>`;
-        return `<tr><td>${new Date(r.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td><td>${esc(r.username || '—')}</td><td>${r.request_text === 'confirm' ? `<em>${esc(r.preview_text || 'confirm')}</em>` : esc(r.request_text)}</td><td>${esc(did)}</td><td>${outcome}${r.result_text && r.request_text !== 'confirm' ? `<div class="text-muted" style="font-size:11px;margin-top:2px">${esc(r.result_text.slice(0, 80))}</div>` : ''}</td></tr>`;
+        // S21: badge and reply in ONE block, so on a phone the reply sits under
+        // the badge at full width instead of squeezing beside it.
+        return `<tr><td>${new Date(r.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td><td>${esc(r.username || '—')}</td><td>${r.request_text === 'confirm' ? `<em>${esc(r.preview_text || 'confirm')}</em>` : esc(r.request_text)}</td><td>${esc(did)}</td><td><div class="cl-outcome">${outcome}${r.result_text && r.request_text !== 'confirm' ? `<div class="text-muted cl-reply">${esc(r.result_text.slice(0, 160))}</div>` : ''}</div></td></tr>`;
       }).join('')}</tbody></table></div></div>`;
   } catch (e) { host.innerHTML = `<div class="alert alert-danger">${esc(e.message)}</div>`; }
 }

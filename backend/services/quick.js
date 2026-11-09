@@ -43,7 +43,7 @@ const DICT = {
 // spellings each is enough: matching below is phonetic, so eruli / eerulli /
 // irulli / eerulli all land on the same entry.
 const DICT_KN_HI = {
-  Groceries: 'eerulli eruli irulli pyaz pyaaz tamate tamatar aloogadde alugadde aalu aloo akki chawal bele togari bele dal daal godhi atta sakkare cheeni uppu namak enne tel haalu halu doodh mosaru dahi tuppa ghee motte anda balehannu bale hannu kela tenginakayi tengina kayi kobbari nariyal menasinakayi menasu mirchi hunase imli bella gud tarkari sabzi sabji soppu saag kottambari dhaniya pudina shunti adrak bellulli lehsun lahsun nimbe nimbu huralikayi hurali badanekayi badane baingan bendekayi bende bhindi kosu gobi patta gajjari gajar kumbalakayi kaddu southekayi sowthe kheera nuggekayi drumstick hagalakayi karela dappa menasinakayi shimla mirch mulangi mooli beetroot avarekayi avare kadalekayi kadale chana bataani matar palak methi menthya chapati roti idli dosa dose upittu uppittu chitranna avalakki poha ragi mudde jola navane sajje rava thindi tiffin oota bhojana naashta nasta kirani kirana anganadi angadi bakery brede biscat biskut'.split(/\s+/),
+  Groceries: 'sautekaayi soutekayi hal haal hittu pudi hannu koli meenu maamsa mamsa rave heerekaayi heerekayi kaayi tarakaari maidaa eerulli eruli irulli pyaz pyaaz tamate tamatar aloogadde alugadde aalu aloo akki chawal bele togari bele dal daal godhi atta sakkare cheeni uppu namak enne tel haalu halu doodh mosaru dahi tuppa ghee motte anda balehannu bale hannu kela tenginakayi tengina kayi kobbari nariyal menasinakayi menasu mirchi hunase imli bella gud tarkari sabzi sabji soppu saag kottambari dhaniya pudina shunti adrak bellulli lehsun lahsun nimbe nimbu huralikayi hurali badanekayi badane baingan bendekayi bende bhindi kosu gobi patta gajjari gajar kumbalakayi kaddu southekayi sowthe kheera nuggekayi drumstick hagalakayi karela dappa menasinakayi shimla mirch mulangi mooli beetroot avarekayi avare kadalekayi kadale chana bataani matar palak methi menthya chapati roti idli dosa dose upittu uppittu chitranna avalakki poha ragi mudde jola navane sajje rava thindi tiffin oota bhojana naashta nasta kirani kirana anganadi angadi bakery brede biscat biskut'.split(/\s+/),
   Cleaning: 'sabbu sabun soap fenail phenyl phenoyl pore porake kasabarige jhadu jhaadu balti bakeet bucket mugu mug bleach harpik lizol safai swachhata dustbin kasa kasada dabbi tholeyuva powder washing powder'.split(/\s+/),
   Repairs: 'nalli nal tap nalli repair pipu pipe geyser giser heater fan fanu bulbu bulb tube light tubelight switch swich socket wire wiring current repair karpentar carpenter bagilu darwaza door kitaki khidki window beega lock chavi key kili welding painting bannna paint sement cement marali sand itige eent brick plumber plumbar electrician electrishian mistri mechanic motoru motor pump pumpu'.split(/\s+/),
   Water: 'neeru pani water tanker tankar borewell bore motor water bill'.split(/\s+/),
@@ -55,10 +55,13 @@ for (const [cat, words] of Object.entries(DICT_KN_HI)) DICT[cat] = (DICT[cat] ||
 const DICT_INDEX = new Map();
 for (const [cat, words] of Object.entries(DICT)) for (const w of words) if (!DICT_INDEX.has(w)) DICT_INDEX.set(w, cat);
 
-const FAULT_WORDS = /\b(leak\w*|not working|not workin|notworking|broken|broke|damaged|jammed|stuck|no water|no power|no current|no light|no wifi|no internet|blocked|clogged|overflow\w*|smell\w*|noise|noisy|repair needed|complaint|complain|problem|issue|fused|flicker\w*|sparking|dripping)\b/i;
-const QUESTION = /^(who|what|which|how|when|where|why|is|are|do|does|did|can|could|should|show|list|find|tell|give|any|whats|what's)\b|\?\s*$/i;
+// S21: and as she says it in Kannada — "nalli soruttide" (tap leaking),
+// "fan kelasa maadtilla" (fan not working), "neeru baruttilla" (no water),
+// "light haalaagide" (light gone bad), "current illa" (no power).
+const FAULT_WORDS = /\b(sorut\w*|kelasa?\s+maa?d\w*illa|\w+\s+aag\w*illa|baruttilla|bartilla|barta\s+illa|baratilla|haala?agide|haalaagide|haalagide|kettide|kettu\s+hogide|muridide|murididhe|block\s+aagide|(?:neeru|niru|current|karent|light|fan|wifi|net|nalli|bisi\s+neeru|geyser)\s+illa|leak\w*|not working|not workin|notworking|broken|broke|damaged|jammed|stuck|no water|no power|no current|no light|no wifi|no internet|blocked|clogged|overflow\w*|smell\w*|noise|noisy|repair needed|complaint|complain|problem|issue|fused|flicker\w*|sparking|dripping)\b/i;
+const QUESTION = /^(who|what|which|how|when|where|why|is|are|do|does|did|can|could|should|show|list|find|tell|give|any|whats|what's|yaaru|yaru|eshtu|estu|yaavaga|yavaga|elli|yaake|yake|enu|yenu|yaava|yava)\b|\?\s*$/i;
 const MODE_WORDS = /\b(upi|gpay|google pay|phonepe|phone pe|paytm|cash|nagadu|bank|neft|imps|transfer|card)\b/gi;
-const NOISE = /\b(rs\.?|rupees?|rupaye|rupai|inr|paid|pay|payment|gave|give|given|got|received|collected|collect|for|of|to|the|a|an|and|today|yesterday|bought|brought|bougt|buy|purchased|purchsed|purchase|spent|expense|expenses|bill|by|via|from|on|in|at|rent|deposit|advance)\b/gi;
+const NOISE = /\b(rs\.?|rupees?|rupaye|rupai|rupaayi|rupayi|roopaayi|inr|kottaru|kottlu|kotlu|kottidaare|kottidaale|tagondu|tagonde|tegedukonde|kharchu|kharch|ge|ige|ke|paid|pay|payment|gave|give|given|got|received|collected|collect|for|of|to|the|a|an|and|today|yesterday|bought|brought|bougt|buy|purchased|purchsed|purchase|spent|expense|expenses|bill|by|via|from|on|in|at|rent|deposit|advance)\b/gi;
 
 // "100rs", "rs100", "rs.100", "₹100", "100/-", "1k" → a number the parser sees.
 function normaliseAmount(text) {
@@ -113,6 +116,9 @@ async function categorise(item, opts = {}) {
       if (skw.length >= 4 && dw.skel === skw) return { category: c, basis: `"${w}" sounds like ${dw.word} (${c})` };
     }
   }
+  // S21: Kannada names most vegetables "<something>kaayi" (ಸೌತೆಕಾಯಿ, ಹೀರೇಕಾಯಿ)
+  // and greens "<something> soppu" — a safe Groceries guess for any of them.
+  for (const w of words) if (w.length >= 6 && /(kaa?yi|kaai)$/.test(w)) return { category: 'Groceries', basis: `"${w}" is a vegetable (-kaayi)` };
   // (c) the model — item words only. Never a name, never a rupee figure.
   if (opts.allowModel !== false && (process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY || ai.providers._stub)) {
     try {
@@ -141,7 +147,7 @@ async function repairVoice(raw, alternatives, residents) {
   if (!modelReady()) return null;
   const alts = [raw, ...(alternatives || [])].map(a => String(a || '').trim()).filter(Boolean).filter((a, i, arr) => arr.indexOf(a) === i).slice(0, 5);
   const roster = residents.map(r => `${r.name}${r.room_number ? ' (room ' + r.room_number + ')' : ''}`).join('; ');
-  const system = `A paying-guest hostel warden in Karnataka spoke to her phone. Chrome's transcripts are listed best-first; they may contain mis-heard English, Kannada or Hindi words and spoken numbers. Decide what she most likely said and rewrite it as ONE short phrase in exactly one of these shapes:
+  const system = `A paying-guest hostel warden in Karnataka spoke to her phone. Chrome's transcripts are listed best-first; they may contain mis-heard English, Kannada or Hindi words and spoken numbers, and may be written in Kannada script (ಕನ್ನಡ) or spelt out in English letters (eerulli = onion, haalu = milk, soppu = greens). Decide what she most likely said and rewrite it as ONE short phrase in exactly one of these shapes:
 - "<item> <amount> [upi|cash|bank]"  for something bought (item in plain English, e.g. onion, phenyl, plumber, bescom, wifi)
 - "<resident name exactly as in the list> <amount> [upi|cash|bank] [deposit|advance]"  for money a resident paid
 - "<fault> room <number>"  for a complaint
@@ -183,8 +189,13 @@ async function intent(text, user, context, opts = {}) {
 }
 
 async function classify(text, user, context, copts = {}) {
-  const raw = String(text || '').trim();
-  if (!raw || raw.length > 200) return null;
+  // S21: Kannada script (the mic set to ಕನ್ನಡ) is spelt out first — ಈರುಳ್ಳಿ
+  // → eerulli — so names, amounts and the item dictionary all apply. Typed
+  // English comes back unchanged. A complaint keeps her own words.
+  const orig = String(text || '').trim();
+  if (!orig || orig.length > 200) return null;
+  const raw = SMParse.toLatin(orig);
+  if (!raw) return null;
   if (QUESTION.test(raw)) return null;
   const norm = normaliseAmount(raw);
   // Read the room FIRST and take it out — "room 106" is not ₹106.
@@ -214,7 +225,7 @@ async function classify(text, user, context, copts = {}) {
 
   // 3. Fault words and no money → a request.
   if (FAULT_WORDS.test(norm) && !amount) {
-    return { tool: 'prepare_complaint', args: { description: raw, room: room || undefined }, via: 'quick', kind: 'request' };
+    return { tool: 'prepare_complaint', args: { description: orig, room: room || undefined }, via: 'quick', kind: 'request' };
   }
 
   // 3b. A name that is nearly a resident's ("janavi" → Jhanavi) → still a
@@ -237,8 +248,23 @@ async function classify(text, user, context, copts = {}) {
     const { category, basis, via } = await categorise(vendor ? item.replace(new RegExp(vendor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), ' ') : item, { allowModel: copts.allowModel !== false });
     return { tool: 'prepare_expense', args: { amount, category: category || 'Other', description: item, mode: mode || undefined, paid_to: vendor || undefined }, via: 'quick', kind: 'expense', category_basis: basis, category_via: via || (category ? 'local' : 'none') };
   }
+  // 5. S21: an item she buys, with no amount — "pudina soppu", "eerulli" —
+  //    asks how much, instead of "I'm not sure". Only when EVERY word is a
+  //    known grocery or cleaning item, so a question or a command that merely
+  //    contains one ("rent due", "milk finished?") still goes to the Copilot.
+  const itemOnly = sansRoom.replace(MODE_WORDS, ' ').replace(NOISE, ' ').replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim();
+  const words = tokens(itemOnly).filter(w => w.length >= 2);
+  if (words.length && words.length <= 4 && !/\d/.test(itemOnly)) {
+    let allKnown = true;
+    for (const w of words) {
+      const c = await categorise(w, { allowModel: false });
+      if (!c.category || !BUYABLE.has(c.category)) { allKnown = false; break; }
+    }
+    if (allKnown) return { tool: null, clarify: `How much was the ${itemOnly}? Add the amount — e.g. "${itemOnly} 100".`, retry_text: itemOnly + ' ', via: 'quick', kind: 'expense' };
+  }
   return null;
 }
+const BUYABLE = new Set(['Groceries', 'Cleaning']);
 
 // ── Fuzzy resident matching (14.2) ──────────────────────────────────────────
 // "janavi", "jhanvi", "jahnavi", "janvi" are all Jhanavi. Indian names have

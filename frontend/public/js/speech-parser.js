@@ -12,6 +12,70 @@
   else root.SMParse = factory();
 }(typeof self !== 'undefined' ? self : this, function () {
 
+  // ── Kannada script → the Latin spellings the rest of this file knows (S21) ─
+  // With the mic set to ಕನ್ನಡ, Chrome writes "ಈರುಳ್ಳಿ 100 ರೂಪಾಯಿ". Everything
+  // downstream (amounts, names, the item dictionary) reads a–z, so the script
+  // is spelt out the way people type Kannada on WhatsApp: ಈರುಳ್ಳಿ → eerulli,
+  // ಜಾನವಿ → jaanavi, ನೂರು → nooru. Text with no Kannada letters is returned
+  // exactly as given, so typed English is never touched.
+  const KN_VOWELS = { 'ಅ': 'a', 'ಆ': 'aa', 'ಇ': 'i', 'ಈ': 'ee', 'ಉ': 'u', 'ಊ': 'oo', 'ಋ': 'ru', 'ೠ': 'ru', 'ಎ': 'e', 'ಏ': 'e', 'ಐ': 'ai', 'ಒ': 'o', 'ಓ': 'o', 'ಔ': 'au' };
+  const KN_SIGNS = { 'ಾ': 'aa', 'ಿ': 'i', 'ೀ': 'ee', 'ು': 'u', 'ೂ': 'oo', 'ೃ': 'ru', 'ೄ': 'ru', 'ೆ': 'e', 'ೇ': 'e', 'ೈ': 'ai', 'ೊ': 'o', 'ೋ': 'o', 'ೌ': 'au' };
+  const KN_CONS = {
+    'ಕ': 'k', 'ಖ': 'kh', 'ಗ': 'g', 'ಘ': 'gh', 'ಙ': 'n', 'ಚ': 'ch', 'ಛ': 'chh', 'ಜ': 'j', 'ಝ': 'jh', 'ಞ': 'n',
+    'ಟ': 't', 'ಠ': 'th', 'ಡ': 'd', 'ಢ': 'dh', 'ಣ': 'n', 'ತ': 't', 'ಥ': 'th', 'ದ': 'd', 'ಧ': 'dh', 'ನ': 'n',
+    'ಪ': 'p', 'ಫ': 'ph', 'ಬ': 'b', 'ಭ': 'bh', 'ಮ': 'm', 'ಯ': 'y', 'ರ': 'r', 'ಱ': 'r', 'ಲ': 'l', 'ವ': 'v',
+    'ಶ': 'sh', 'ಷ': 'sh', 'ಸ': 's', 'ಹ': 'h', 'ಳ': 'l', 'ೞ': 'l'
+  };
+  const VIRAMA = '್', NUKTA = '಼', ANUSVARA = 'ಂ', VISARGA = 'ಃ';
+  const HAS_KN = /[ಀ-೿]/;
+  // English words Chrome writes in Kannada letters, and Kannada words that
+  // need one fixed spelling. Applied to transliterated text only.
+  const KN_LOAN = [
+    [/\bgoo?gal\s*pe\b/g, 'google pay'], [/\bphon\s*pe\b/g, 'phonepe'], [/\bpetiem\b/g, 'paytm'],
+    [/\byu\s*pi\s*ai\b|\byupiai\b|\byupiyai\b|\byupi\b/g, 'upi'], [/\bkyaash\b|\bkyash\b|\bkyaas\b/g, 'cash'], [/\bbyaank\b|\bbyank\b/g, 'bank'],
+    [/\b(roopaayi|rupaayi|roopaay|rupaay|roopayi|rupayi)\b/g, 'rupees'], [/\bnambar\b/g, 'number'], [/\bkothadi\b|\bkotadi\b/g, 'room'],
+    [/\bdepaasit\b|\bdipaasit\b/g, 'deposit'], [/\badvaans\b|\badvaansu\b/g, 'advance'], [/\brent\b|\brentu\b/g, 'rent'],
+    [/\blaitu?\b/g, 'light'], [/\bphyaanu?\b|\bphaanu?\b/g, 'fan'], [/\bvaiphai\b|\bvaipai\b/g, 'wifi'], [/\bkarentu?\b/g, 'current'],
+    [/\bgeesar\b|\bgijar\b|\bgeejar\b/g, 'geyser'], [/\btyaapu?\b/g, 'tap'], [/\bpaipu?\b/g, 'pipe'], [/\bbalbu?\b/g, 'bulb'], [/\bsvichu?\b/g, 'switch'],
+    [/\btaayilet\b|\btaaylet\b|\btaayletu\b/g, 'toilet'], [/\bbaat\s*room\b|\bbaatroom\b/g, 'bathroom'], [/\bbred\b|\bbredu\b/g, 'bread'],
+    [/\bgyaasu?\b/g, 'gas'], [/\bsilindar\b|\bsilindaru\b/g, 'cylinder'], [/\bphinaayil\b|\bphinaail\b/g, 'phenyl'], [/\bbaket\b|\bbakettu\b/g, 'bucket'],
+    [/\bplambar\b|\bplambaru\b/g, 'plumber'], [/\belektrishiyan\b|\belektrishan\b/g, 'electrician'], [/\bkyaan\b/g, 'can'], [/\bbil\b|\bbillu\b/g, 'bill'],
+    [/\baaniyan\b|\baaniyanu\b/g, 'onion'], [/\btomyaato\b|\btometo\b|\btomeeto\b|\btomaato\b|\btomyaatoo\b/g, 'tomato'], [/\bpoteto\b|\bpoteeto\b/g, 'potato'],
+    [/\bditarjent\b|\bditarjentu\b/g, 'detergent'], [/\bsopu\b/g, 'soap'], [/\bkaaphi\b|\bkaapi\b/g, 'coffee'], [/\btee\b/g, 'tea'], [/\bmilk\b/g, 'milk']
+  ];
+  function toLatin(text) {
+    const s = String(text == null ? '' : text);
+    if (!HAS_KN.test(s)) return s;
+    const ch = Array.from(s.replace(/[‌‍]/g, ''));
+    let out = '';
+    for (let i = 0; i < ch.length; i++) {
+      const c = ch[i];
+      if (c >= '೦' && c <= '೯') { out += String(c.charCodeAt(0) - 0x0CE6); continue; }
+      if (KN_VOWELS[c]) { out += KN_VOWELS[c]; continue; }
+      if (KN_CONS[c]) {
+        let base = KN_CONS[c];
+        let j = i + 1;
+        if (ch[j] === NUKTA) { base = base === 'ph' ? 'f' : base === 'j' ? 'z' : base; j++; }
+        const next = ch[j];
+        if (next === VIRAMA) { out += base; i = j; continue; }
+        if (KN_SIGNS[next]) { out += base + KN_SIGNS[next]; i = j; continue; }
+        out += base + 'a'; i = j - 1; continue;
+      }
+      if (c === ANUSVARA) {
+        // ಸಂಬಳ → sambala, ತೊಂಬತ್ತು → tombattu; ಎಂಟು → entu; at a word's end → m.
+        const nx = ch[i + 1];
+        out += (!nx || !KN_CONS[nx]) ? 'm' : /^(p|ph|b|bh|m)$/.test(KN_CONS[nx]) ? 'm' : 'n';
+        continue;
+      }
+      if (c === VISARGA) { out += 'h'; continue; }
+      if (c === VIRAMA || c === NUKTA || KN_SIGNS[c]) continue;   // stray mark
+      out += c;
+    }
+    let lat = out.toLowerCase();
+    for (const [re, to] of KN_LOAN) lat = lat.replace(re, to);
+    return lat.replace(/\s+/g, ' ').trim();
+  }
+
   // ── Numbers: English words, Indian units, Kannada & Hindi transliterations ─
   const UNITS = {
     zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9,
@@ -22,6 +86,12 @@
     ondu: 1, eradu: 2, mooru: 3, muru: 3, naalku: 4, nalku: 4, aidu: 5, aaru: 6, aru: 6,
     elu: 7, yelu: 7, entu: 8, ombattu: 9, hattu: 10, ippattu: 20, moovattu: 30, nalavattu: 40,
     aivattu: 50, aravattu: 60, eppattu: 70, embattu: 80, tombattu: 90,
+    // S21: as spelt out from Kannada script (ಎರಡು → eradu, ಏಳು → elu …),
+    // teens, and the hundreds that Kannada says as one word (ಐನೂರು = 500).
+    naalku: 4, onbattu: 9, ombattu: 9, moovattu: 30, muvattu: 30, nalavattu: 40, tombhattu: 90,
+    hannondu: 11, hanneradu: 12, hadimooru: 13, hadinaalku: 14, hadinaidu: 15, hadinaaru: 16, hadinelu: 17, hadinentu: 18, hattombattu: 19,
+    innooru: 200, innuru: 200, munnooru: 300, munnuru: 300, naanooru: 400, nanuru: 400, ainooru: 500, ainuru: 500,
+    aarunooru: 600, aaraanooru: 600, elunooru: 700, entunooru: 800, ombainooru: 900, onbainooru: 900,
     // Hindi
     ek: 1, do: 2, teen: 3, char: 4, chaar: 4, paanch: 5, panch: 5, chhe: 6, che: 6, saat: 7,
     aath: 8, nau: 9, das: 10, bees: 20, tees: 30, chalis: 40, pachas: 50, saath: 60, sattar: 70,
@@ -30,6 +100,7 @@
   const MULTIPLIERS = {
     hundred: 100, hundreds: 100, nooru: 100, sau: 100,
     thousand: 1000, thousands: 1000, saavira: 1000, savira: 1000, sasira: 1000, hazaar: 1000, hazar: 1000, hajar: 1000,
+    saavirada: 1000, saviradha: 1000, savirada: 1000,
     lakh: 100000, lakhs: 100000, laksha: 100000
   };
   const HALF = { half: 0.5, ardha: 0.5, aadha: 0.5 };
@@ -135,7 +206,7 @@
   }
 
   function parseCollection(text, residents) {
-    const raw = String(text || '').trim();
+    const raw = toLatin(String(text || '').trim());
     if (!raw) return { guest: null, amount: null, mode: null, type: 'rent', room: null, leftover: '' };
     const room = extractRoom(raw);
     // Strip the room phrase first so "room 12" can never be read as ₹12.
@@ -153,28 +224,31 @@
 
   // ── Complaints ──────────────────────────────────────────────────────────
   const COMPLAINT_CATEGORIES = {
-    'Water': ['water', 'tap', 'geyser', 'heater', 'leak', 'leaking', 'bathroom', 'toilet', 'flush', 'drain', 'neeru', 'paani'],
-    'Electrical': ['light', 'fan', 'switch', 'socket', 'power', 'electric', 'current', 'bulb', 'tube', 'charging', 'plug', 'wire'],
+    'Water': ['water', 'tap', 'geyser', 'heater', 'leak', 'leaking', 'bathroom', 'toilet', 'flush', 'drain', 'neeru', 'niru', 'paani', 'nalli', 'bisi', 'sorut'],
+    'Electrical': ['light', 'fan', 'switch', 'socket', 'power', 'electric', 'current', 'bulb', 'tube', 'charging', 'plug', 'wire', 'karent', 'deepa'],
     'Wifi/Internet': ['wifi', 'wi-fi', 'internet', 'network', 'signal', 'router', 'net'],
-    'Cleanliness': ['clean', 'dirty', 'garbage', 'dust', 'smell', 'stink', 'cockroach', 'insects', 'mosquito', 'mosquitoes', 'sweep', 'mop'],
-    'Food': ['food', 'breakfast', 'lunch', 'dinner', 'meal', 'menu', 'rice', 'chapati', 'sambar', 'oota', 'khana'],
-    'Furniture': ['bed', 'cot', 'mattress', 'cupboard', 'almirah', 'table', 'chair', 'door', 'lock', 'window', 'curtain', 'shelf'],
-    'Security': ['security', 'safety', 'stranger', 'gate', 'cctv', 'theft', 'stolen', 'missing'],
-    'Noise': ['noise', 'loud', 'shouting', 'music', 'disturb']
+    'Cleanliness': ['clean', 'dirty', 'garbage', 'dust', 'smell', 'stink', 'cockroach', 'insects', 'mosquito', 'mosquitoes', 'sweep', 'mop', 'kasa', 'galeej', 'vaasane', 'vasane', 'jirale', 'solle', 'gaba'],
+    'Food': ['food', 'breakfast', 'lunch', 'dinner', 'meal', 'menu', 'rice', 'chapati', 'sambar', 'oota', 'khana', 'tindi', 'thindi', 'anna', 'saaru', 'palya'],
+    'Furniture': ['bed', 'cot', 'mattress', 'cupboard', 'almirah', 'table', 'chair', 'door', 'lock', 'window', 'curtain', 'shelf', 'mancha', 'bagilu', 'kitaki', 'beega', 'kurchi', 'meju'],
+    'Security': ['security', 'safety', 'stranger', 'gate', 'cctv', 'theft', 'stolen', 'missing', 'kalla', 'kaanutilla'],
+    'Noise': ['noise', 'loud', 'shouting', 'music', 'disturb', 'galate', 'shabda']
   };
   function parseComplaint(text) {
     const raw = String(text || '').trim();
-    const lower = ' ' + raw.toLowerCase() + ' ';
+    // The description stays exactly as she said it (Kannada script reads fine
+    // to staff); only the matching uses the spelt-out form.
+    const lat = toLatin(raw);
+    const lower = ' ' + lat.toLowerCase() + ' ';
     let category = 'Other', bestHits = 0;
     for (const cat of Object.keys(COMPLAINT_CATEGORIES)) {
       const hits = COMPLAINT_CATEGORIES[cat].filter(k => lower.includes(' ' + k)).length;
       if (hits > bestHits) { bestHits = hits; category = cat; }
     }
-    const room = extractRoom(raw);
+    const room = extractRoom(lat);
     return { category, description: raw, room: room ? room.room : null };
   }
 
   function escape(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
-  return { parseCollection, parseComplaint, extractAmount, extractMode, extractRoom, matchResident, COMPLAINT_CATEGORIES, MODE_SYNONYMS };
+  return { parseCollection, parseComplaint, extractAmount, extractMode, extractRoom, matchResident, toLatin, COMPLAINT_CATEGORIES, MODE_SYNONYMS };
 }));
