@@ -35,7 +35,7 @@ const A = (m, p, b) => api(m, p, b, adminTok);
 const S = (m, p, b) => api(m, p, b, staffTok);
 const uniq = Date.now().toString().slice(-6);
 const istToday = () => new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
-const daysAgo = n => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
+const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toISOString().slice(0, 10);   // Sprint 18: India dates, like the forms
 
 // A stable fingerprint of every number the money rules produce.
 async function moneyFingerprint() {

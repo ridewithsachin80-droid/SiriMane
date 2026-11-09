@@ -11,6 +11,7 @@ const zlib = require('zlib');
 const PDFDocument = require('pdfkit');
 const pool = require('../db');
 const routes = require('../routes/index');
+const { IST_TODAY_SQL, istDateSql } = require('./istdate');   // Sprint 18: one clock
 
 // "Rs" not "₹": the PDF's built-in Helvetica has no rupee glyph (it prints
 // as "¹"), and the same text goes into the PDF, WhatsApp and the screen —
@@ -41,14 +42,14 @@ async function computeOwnerFacts(yyyymm) {
                        (SELECT COUNT(*) FROM guests g JOIN rooms r ON r.id=g.room_id WHERE g.is_active=true AND r.is_active=true)::int AS occupied`),
     pool.query(`SELECT COUNT(*)::int AS n FROM guests WHERE join_date BETWEEN $1 AND $2`, [from, to]),
     pool.query(`SELECT COUNT(*)::int AS n FROM guests WHERE leave_date BETWEEN $1 AND $2`, [from, to]),
-    pool.query(`SELECT COUNT(*)::int AS n, COALESCE(SUM(refund_amount),0) AS total FROM deposit_refunds WHERE created_at::date BETWEEN $1 AND $2`, [from, to]),
-    pool.query(`SELECT COUNT(*) FILTER (WHERE created_at::date BETWEEN $1 AND $2)::int AS raised,
-                       COUNT(*) FILTER (WHERE resolved_at::date BETWEEN $1 AND $2)::int AS resolved,
+    pool.query(`SELECT COUNT(*)::int AS n, COALESCE(SUM(refund_amount),0) AS total FROM deposit_refunds WHERE ${istDateSql('created_at')} BETWEEN $1 AND $2`, [from, to]),
+    pool.query(`SELECT COUNT(*) FILTER (WHERE ${istDateSql('created_at')} BETWEEN $1 AND $2)::int AS raised,
+                       COUNT(*) FILTER (WHERE ${istDateSql('resolved_at')} BETWEEN $1 AND $2)::int AS resolved,
                        COUNT(*) FILTER (WHERE status NOT IN ('resolved','closed'))::int AS open_now,
                        COUNT(*) FILTER (WHERE status NOT IN ('resolved','closed') AND priority='high')::int AS open_high
                   FROM complaints`, [from, to]),
     pool.query(`SELECT COALESCE(AVG(EXTRACT(EPOCH FROM (resolved_at - created_at))/86400),0) AS days
-                  FROM complaints WHERE resolved_at::date BETWEEN $1 AND $2`, [from, to]),
+                  FROM complaints WHERE ${istDateSql('resolved_at')} BETWEEN $1 AND $2`, [from, to]),
     pool.query(`SELECT 'collection' AS kind, COALESCE(source,'manual') AS source, COUNT(*)::int AS n FROM collections WHERE is_deleted=false AND collection_date BETWEEN $1 AND $2 GROUP BY source
                 UNION ALL
                 SELECT 'purchase', COALESCE(source,'manual'), COUNT(*)::int FROM purchases WHERE is_deleted=false AND purchase_date BETWEEN $1 AND $2 GROUP BY source`, [from, to]),
@@ -104,17 +105,17 @@ async function computeAnomalies() {
                  WHERE g.is_active=true AND g.rent_variance_approved=false AND g.created_at < NOW() - INTERVAL '3 days'`),
     pool.query(`WITH avg6 AS (
                   SELECT category, AVG(amount) AS avg_amt, COUNT(*) AS n FROM purchases
-                   WHERE is_deleted=false AND purchase_date >= CURRENT_DATE - INTERVAL '6 months' AND purchase_date < CURRENT_DATE - INTERVAL '30 days'
+                   WHERE is_deleted=false AND purchase_date >= ${IST_TODAY_SQL} - INTERVAL '6 months' AND purchase_date < ${IST_TODAY_SQL} - INTERVAL '30 days'
                    GROUP BY category HAVING COUNT(*) >= 3)
                 SELECT p.id, p.amount, p.category, p.paid_to, p.purchase_date, a.avg_amt
                   FROM purchases p JOIN avg6 a ON a.category=p.category
-                 WHERE p.is_deleted=false AND p.purchase_date >= CURRENT_DATE - INTERVAL '30 days' AND p.amount > 2*a.avg_amt
+                 WHERE p.is_deleted=false AND p.purchase_date >= ${IST_TODAY_SQL} - INTERVAL '30 days' AND p.amount > 2*a.avg_amt
                  ORDER BY p.amount DESC LIMIT 10`),
     routes.computeRentDueList(),
     pool.query(`SELECT d.guest_name, d.refund_amount, d.deposit_amount FROM deposit_refunds d
                  WHERE d.created_at >= NOW() - INTERVAL '90 days' AND d.refund_amount > COALESCE(d.deposit_amount,0) + 0.5`).catch(() => ({ rows: [] })),
     pool.query(`SELECT log_date, 100.0*COUNT(*) FILTER (WHERE is_checked)/NULLIF((SELECT COUNT(*) FROM checklist_items WHERE is_active=true),0) AS pct
-                  FROM checklist_log WHERE log_date >= CURRENT_DATE - INTERVAL '3 days' AND log_date < CURRENT_DATE GROUP BY log_date ORDER BY log_date`),
+                  FROM checklist_log WHERE log_date >= ${IST_TODAY_SQL} - INTERVAL '3 days' AND log_date < ${IST_TODAY_SQL} GROUP BY log_date ORDER BY log_date`),
     pool.query(`SELECT COUNT(*)::int AS n, COALESCE(SUM(amount),0) AS total FROM collections WHERE is_deleted=false AND status='pending_verification' AND created_at < NOW() - INTERVAL '2 days'`),
     pool.query(`SELECT COUNT(*)::int AS n, COALESCE(SUM(amount),0) AS total FROM collections WHERE is_deleted=false AND status='pending_approval' AND created_at < NOW() - INTERVAL '2 days'`),
     pool.query(`SELECT COUNT(*)::int AS n FROM checklist_items WHERE is_active=true`)
@@ -379,7 +380,7 @@ async function buildAccountantZip(from, to) {
                   FROM collections c LEFT JOIN guests g ON g.id=c.guest_id LEFT JOIN rooms r ON r.id=g.room_id
                  WHERE c.is_deleted=false AND c.collection_date BETWEEN $1 AND $2 ORDER BY c.collection_date, c.id`, [from, to]),
     pool.query(`SELECT id, purchase_date, category, description, paid_to, amount, payment_mode, receipt_number, status, source FROM purchases WHERE is_deleted=false AND purchase_date BETWEEN $1 AND $2 ORDER BY purchase_date, id`, [from, to]),
-    pool.query(`SELECT id, created_at::date AS refund_date, guest_name, deposit_amount, deductions, refund_amount, deduction_notes FROM deposit_refunds WHERE created_at::date BETWEEN $1 AND $2 ORDER BY created_at`, [from, to]).catch(() => ({ rows: [] })),
+    pool.query(`SELECT id, ${istDateSql('created_at')} AS refund_date, guest_name, deposit_amount, deductions, refund_amount, deduction_notes FROM deposit_refunds WHERE ${istDateSql('created_at')} BETWEEN $1 AND $2 ORDER BY created_at`, [from, to]).catch(() => ({ rows: [] })),
     pool.query(`SELECT g.id, g.name, r.room_number, g.join_date, g.leave_date, g.monthly_rent, g.deposit_amount, g.is_active FROM guests g LEFT JOIN rooms r ON r.id=g.room_id ORDER BY g.name`),
     pool.query(`SELECT id, room_number, floor, total_beds, room_type, monthly_rent, is_active FROM rooms ORDER BY room_number`),
     pool.query(`SELECT id, name, category, value, purchase_date FROM fixed_assets WHERE is_deleted=false ORDER BY purchase_date`).catch(() => ({ rows: [] })),

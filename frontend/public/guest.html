@@ -617,7 +617,8 @@ async function loadPortalHome() {
     homeData = h;
     const bal = parseFloat((portal && portal.current_balance) || 0);
     const due = bal < -0.5 ? Math.abs(bal) : 0;
-    const dueDay = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + 1, 1));
+    const istN = new Date(Date.now() + 5.5 * 3600000);   // Sprint 18: the 1st of next month, India time
+    const dueDay = new Date(Date.UTC(istN.getUTCFullYear(), istN.getUTCMonth() + 1, 1) - 5.5 * 3600000);
     const daysToDue = Math.max(0, Math.round((dueDay - Date.now()) / 86400000));
     host.innerHTML = `
       <div style="font-size:18px;font-weight:700;margin:2px 2px 10px">${escH(h.greeting)}, ${escH(h.resident.name ? h.resident.name.split(' ')[0] : '')}</div>

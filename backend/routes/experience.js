@@ -12,6 +12,7 @@ const router = express.Router();
 const auth = require('../middleware/auth');
 const pool = require('../db');
 const routes = require('./index');
+const { IST_TODAY_SQL, istDateSql } = require('../services/istdate');   // Sprint 18: one clock
 const guestAuth = routes.guestAuth;
 
 const requireAdmin = (req, res, next) => req.user && req.user.role === 'admin' ? next() : res.status(403).json({ error: 'Admin only' });
@@ -93,13 +94,13 @@ router.get('/food-insight', auth, wrap(async (req, res) => {
     pool.query(`SELECT m.items AS dish, r.meal_type, ROUND(AVG(r.stars)::numeric,1)::float AS avg_stars, COUNT(*)::int AS votes
                   FROM meal_ratings r
                   JOIN daily_menu m ON m.meal_type=r.meal_type AND m.day_of_week=TRIM(TO_CHAR(r.rating_date,'Day'))
-                 WHERE r.rating_date >= CURRENT_DATE - ($1||' days')::interval
+                 WHERE r.rating_date >= ${IST_TODAY_SQL} - ($1||' days')::interval
                  GROUP BY m.items, r.meal_type HAVING COUNT(*) >= 2 ORDER BY AVG(r.stars) DESC`, [days]),
     pool.query(`SELECT TRIM(TO_CHAR(rating_date,'Day')) AS day_of_week, meal_type, ROUND(AVG(stars)::numeric,1)::float AS avg_stars, COUNT(*)::int AS votes
-                  FROM meal_ratings WHERE rating_date >= CURRENT_DATE - ($1||' days')::interval
+                  FROM meal_ratings WHERE rating_date >= ${IST_TODAY_SQL} - ($1||' days')::interval
                  GROUP BY 1,2 ORDER BY AVG(stars)`, [days]),
     pool.query(`SELECT comment, stars, meal_type, rating_date FROM meal_ratings
-                 WHERE comment IS NOT NULL AND rating_date >= CURRENT_DATE - ($1||' days')::interval
+                 WHERE comment IS NOT NULL AND rating_date >= ${IST_TODAY_SQL} - ($1||' days')::interval
                  ORDER BY rating_date DESC LIMIT 10`, [days])
   ]);
   const worst = byDay.rows[0];
@@ -132,7 +133,7 @@ router.get('/guest-visitors', guestAuth, wrap(async (req, res) => {
 router.get('/visitors', auth, wrap(async (req, res) => {
   const p = []; const where = [];
   if (req.query.status) { p.push(req.query.status); where.push(`v.status=$${p.length}`); }
-  if (req.query.today === '1') where.push(`(v.expected_at::date = CURRENT_DATE OR v.checked_in_at::date = CURRENT_DATE)`);
+  if (req.query.today === '1') where.push(`(v.expected_at::date = ${IST_TODAY_SQL} OR ${istDateSql('v.checked_in_at')} = ${IST_TODAY_SQL})`   /* Sprint 18: expected_at is India wall-clock (typed by her); checked_in_at is NOW() */);
   const r = await pool.query(`SELECT v.*, g.name AS resident_name, rm.room_number
                                 FROM visitors v JOIN guests g ON g.id=v.guest_id LEFT JOIN rooms rm ON rm.id=g.room_id
                                ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
@@ -219,12 +220,12 @@ router.get('/experience-insight', auth, requireAdmin, wrap(async (req, res) => {
   const [byRoom, byFloor, byCategory] = await Promise.all([
     pool.query(`SELECT c.room_number, COUNT(*)::int AS requests, COUNT(DISTINCT c.category)::int AS kinds,
                        STRING_AGG(DISTINCT c.category, ', ') AS categories
-                  FROM complaints c WHERE c.room_number IS NOT NULL AND c.created_at >= CURRENT_DATE - 90
+                  FROM complaints c WHERE c.room_number IS NOT NULL AND c.created_at >= ${IST_TODAY_SQL} - 90
                  GROUP BY c.room_number HAVING COUNT(*) >= 2 ORDER BY COUNT(*) DESC LIMIT 10`),
     pool.query(`SELECT r.floor, COUNT(c.id)::int AS requests
                   FROM complaints c JOIN rooms r ON r.room_number=c.room_number
-                 WHERE c.created_at >= CURRENT_DATE - 90 GROUP BY r.floor ORDER BY COUNT(c.id) DESC`),
-    pool.query(`SELECT category, COUNT(*)::int AS n FROM complaints WHERE created_at >= CURRENT_DATE - 90 GROUP BY category ORDER BY COUNT(*) DESC LIMIT 5`)
+                 WHERE c.created_at >= ${IST_TODAY_SQL} - 90 GROUP BY r.floor ORDER BY COUNT(c.id) DESC`),
+    pool.query(`SELECT category, COUNT(*)::int AS n FROM complaints WHERE created_at >= ${IST_TODAY_SQL} - 90 GROUP BY category ORDER BY COUNT(*) DESC LIMIT 5`)
   ]);
   const findings = byRoom.rows.map(r => ({
     room_number: r.room_number, requests: r.requests, categories: r.categories,

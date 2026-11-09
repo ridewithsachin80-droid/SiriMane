@@ -11,6 +11,7 @@ const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/auth');
 const pool = require('../db');
+const { IST_TODAY_SQL, istDateSql } = require('../services/istdate');   // Sprint 18: one clock
 
 const requireAdmin = (req, res, next) => req.user && req.user.role === 'admin' ? next() : res.status(403).json({ error: 'Admin only' });
 const MAX_PHOTO_BYTES = 200 * 1024;
@@ -336,7 +337,7 @@ router.get('/rooms/:id/360', auth, async (req, res) => {
       pool.query(`SELECT h.id, h.guest_id, g.name, h.from_room_number, h.to_room_number, h.to_bed_number, h.effective_from, h.note
                     FROM guest_room_history h JOIN guests g ON g.id=h.guest_id
                    WHERE h.to_room_id=$1 OR h.to_room_number=$2 OR h.from_room_number=$2 ORDER BY h.effective_from DESC, h.id DESC`, [room.id, rn]),
-      pool.query(`SELECT id, name, join_date, leave_date, is_active FROM guests WHERE room_id=$1 ORDER BY is_active DESC, COALESCE(leave_date, CURRENT_DATE) DESC`, [room.id]),
+      pool.query(`SELECT id, name, join_date, leave_date, is_active FROM guests WHERE room_id=$1 ORDER BY is_active DESC, COALESCE(leave_date, ${IST_TODAY_SQL}) DESC`, [room.id]),
       pool.query(`SELECT i.id, i.inspected_on, i.condition, i.note, u.username FROM room_inspections i LEFT JOIN users u ON u.id=i.inspected_by
                    WHERE i.room_id=$1 ORDER BY i.inspected_on DESC, i.id DESC LIMIT 3`, [room.id]).catch(() => ({ rows: [] }))
     ]);

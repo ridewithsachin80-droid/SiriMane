@@ -225,3 +225,50 @@ Process note: the first D16.4-b test (delayed /purchases fetch) passed with the 
 Backlog from review: `pool.connect()` outside try/catch in setDisabled (same pre-existing pattern at index.js ~1971) — an unhandled rejection if the DB is down · quick Table/Map double tap can draw the older response (pre-existing drawSeq root cause) · missing asset paths serve home.html (pre-existing catch-all).
 Implementer gates: 6f8a498 12/12 ×2, 2,747 · 6498749 12/12 ×2, 2,773. Implementer mutations: 7 (round 1) + 8 (round 2), all caught; one test rewritten after its mutation survived (sheet cache).
 Release: run `node backend/scripts/migrate-all.js` after Online (adds users.disabled_at); check Google Analytics Realtime on the home page.
+
+### Hotfix 17.1 — Google Analytics blocked on the home page (production, 9 Nov)
+Owner's console on sirimane.in: `connect-src` blocked `www.google.com/g/collect` (GA4 property linked to Google Ads). Fix f3703a5 adds Google's published "GA with Ads-related endpoints" hosts to the HOME policy only (*.google.com, *.google.co.in, *.g.doubleclick.net, pagead2.googlesyndication.com; frame-src googletagmanager). App policy byte-identical.
+Review: **APPROVE** (1 round). Browser check: g/collect, ccm/collect, ga-audiences, stats/googleads doubleclick, pagead2, GTM iframe now allowed on `/`; all still blocked on /MANAGEMENT; 41 paths × GET/HEAD, 0 policy mismatches. Mutations m1–m4 caught.
+Gates: 10/12 green; api and notify stop at the D-15-2 date checks between 18:30–24:00 UTC — identical on the parent af6f6b7. With node's clock shifted 7 h (dates agree), api 418 and notify 64 pass on the hotfix (parent 416 / 64).
+Accepted residual risk: `*.google.com` on the home page is another possible exfiltration endpoint; equivalent paths (own GA property, own GTM container, navigation) were already open — real fix is D-17-1 (token out of localStorage) or a separate origin for the home page. Other-country Google domains (e.g. google.ae) still blocked for ga-audiences — console noise only.
+D-15-2 is a real app bug, not test-only: between 00:00–05:30 IST the server's "today" is yesterday (dashboard computes today as a UTC date in node; DB CURRENT_DATE is UTC) — affects early-morning checklist ticks and maintenance dates. Recommended as the next sprint.
+
+### Sprint 18 — one clock (D-15-2): implementer evidence
+**Root cause.** Railway's Node and Postgres run in UTC. Between 00:00 and 05:30 IST: `new Date().toISOString()`, `CURRENT_DATE`, `NOW()` used as a date, `col::date` on stored time stamps, and the phones' `nowDate()` all gave **yesterday**. The database session time zone is deliberately left alone: 58 `timestamp without time zone` columns hold UTC wall-clock time.
+
+**MONEY — before/after (measured, not estimated)**
+| Case | Before | After |
+|---|---|---|
+| Collection form default date, entered 01:00 IST on 1 Dec | 2026-11-30 (counted in November) | 2026-12-01 (December) |
+| Additional-deposit `collection_date` written by the server at 01:00 IST on 1 Dec | 2026-11-30 | 2026-12-01 |
+| Rent ledger of a resident (₹6,000/month, joined 1 Sep, paid Sep–Nov) at 01:00 IST on 1 Dec | months Sep–Nov, balance ₹0 | months Sep–Dec, balance −₹6,000 (same as both versions show from 05:30) |
+| Year-to-date report range on an IST phone (any hour) | 2025-12-31 … today | 2026-01-01 … today |
+| YTD income with sample collections ₹6,000 on 2025-12-31 and ₹5,000 on 2026-01-05 (report's own WHERE clause) | ₹11,000 | ₹5,000 |
+Also moved to India's date: dashboard "income/expenses this month", the resident UPI claim's `collection_date`, checkout `leave_date`, rent-change effective date, report default month, balance-sheet `asOf`, trend end month. Existing rows are untouched; `pending_verification` handling is unchanged.
+
+**Found on the way.** Checkout reminders had never been drafted: pg returns a DATE as a JS Date and `String(date).slice(0,10)` gave "Wed Nov 11", which never compares ≤ "2026-11-15". Fixed (date as text); reminders cover today … +7 days.
+
+**Test harness.** `backend/test/fakeclock.js` (new, test-only) shifts `Date` in Node and in every browser page; Postgres runs on libfaketime in a separate UTC cluster (port 5436, like Railway). Browser pages now emulate Asia/Kolkata like every phone at the PG. Test fixtures write India dates (CURRENT_DATE → IST; `daysAgo()` in quick/bulk). The outbox test no longer depends on the day of the month (a resident leaving within a week guarantees a draft; the overdue follow-up is asserted only from the 7th).
+Process note: two early sweeps (1 am / 14:00) were contaminated by an earlier faked-clock batch still running on the same cluster and were discarded and rerun alone.
+
+**Mutations (at 01:00 IST on 1 Dec), all caught:** ledger on the UTC month (assistant: "Kavya (settled) not listed") · screens' today = UTC date (ui) · SQL today = CURRENT_DATE (api: "additional deposit is dated India's today, got 2026-11-30") · year-to-date from 31 Dec (ui: S18-3).
+
+Backlog from this sprint: visitors' `expected_at` is stored as India wall-clock (typed by the resident) while `checked_in_at` is UTC wall-clock — handled per column here, but should be unified · quick-entry category guesses learn from purchases other suites saved (order-dependent test; G-1) · `CURRENT_DATE` remains only as column defaults (`collections.collection_date`, `purchases.purchase_date`, `room_inspections.inspected_on`) — every insert in the app passes the date explicitly (scanned), so the default is never used.
+**Implementer gates on f5ea735 (12/12 each, run one at a time):** 01:00 IST on 1 Dec 2,793 · 14:00 IST 2,791 · 23:45 IST 2,791 · real clock (≈02:10 and 02:15 IST, inside the window) 2,791 ×2. (ui has two extra assertions on the 1st of a month.)
+
+### Sprint 18 — independent review round 1: **BLOCK** (4a2ebac) → fixes 85b11d1
+- **Blocker:** POST /collections and /purchases with a blank date used `new Date()` (UTC date) — and a blank-date collection skipped the closed-day lock (measured: stored on a closed 30 Nov at 01:00 IST on 1 Dec, 201). Now India's today, and the lock checks it. My "every insert passes the date explicitly" claim was wrong: the scan only looked for omitted columns, not `x || new Date()` fallbacks.
+- Should-fix: the ledger end month used local getters on a shifted instant — right only with Node in UTC (wrong from 18:30 IST on the last day with Node in IST). Now built from India's date string; verified identical with Node TZ=UTC and TZ=Asia/Kolkata at 23:30 IST 30 Nov (Sep–Nov) and 01:00 / 06:00 IST 1 Dec (Sep–Dec). server.js pins TZ=UTC.
+- Should-fix: dashboard month income and the UPI claim date had no test (mutations survived) — tests added; mutations R1–R3 now caught. Rent-due PDF "As of" in India's date. Screens on a non-India phone: one ui pass on America/New_York (R4 caught). Checkout reminders: +10 days and past dates not drafted; date named plainly.
+
+**MONEY — more before/after (measured on sample rows, UTC session like Railway, event at 01:00 IST on 1 Dec)**
+| Case | Before | After |
+|---|---|---|
+| Deposit refund saved at 01:00 IST 1 Dec — its day | 2026-11-30 | 2026-12-01 |
+| Owner report refunds, November / December (₹4,000 refund) | ₹4,000 / ₹0 | ₹0 / ₹4,000 |
+| Balance sheet as of 30 Nov includes that refund | yes | no (it happened on 1 Dec) |
+| Dashboard "income this month" (₹5,000 on 20 Nov, ₹6,000 on 1 Dec) | ₹5,000 (November) | ₹6,000 (December) |
+| Resident UPI claim date | 2026-11-30 | 2026-12-01 — status `pending_verification` either way, never income |
+| Collection / purchase saved with a blank date | 2026-11-30, could land in a closed day | 2026-12-01; refused if that day is closed |
+- fba857c: **APPROVE** (round 2). Reviewer: 12/12 on the real clock (03:26 IST, inside the window) 2,802; faked 01:00 IST 1 Dec 2,804; faked 00:30 IST 1 Jan 2027 2,804. Blank-date matrix at 01:00 IST 1 Dec with 30 Nov closed: blank/missing/null → 201 dated 1 Dec; explicit 30 Nov → 409; blank after closing 1 Dec → 409. Ledger agrees with Node in UTC and IST at five times around the boundary. Mutations R5 (lock on explicit date only), R6 (no lower bound on checkout reminders), R7 (month picker on phone clock) caught.
+Minor, backlog: the 409 text says "record this against today" even when today is the closed day · the non-India-phone ui pass does not cover post-save month navigation or the move-in duplicate lookup (correct by reading) · with TZ pinned to UTC, a Node-time-zone bug can no longer be caught by a test (the ledger no longer depends on it).
