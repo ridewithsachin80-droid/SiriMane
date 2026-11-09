@@ -403,6 +403,20 @@ async function main() {
         ok(r.status === 200 && !('token' in (await r.json())), 'S19-1 SECURITY: her login from the app screen never puts the token in the body');
         await A('DELETE', `/guests/${g19.id}`);
       }
+      // ── Sprint 19 (review): staff never receive a resident's password hash
+      {
+        const gh = (await A('POST', '/guests', { name: 'S19 Hash', phone: '6' + String(Date.now() + 7).slice(-9), join_date: today, monthly_rent: 5000, deposit_amount: 0, id_proof_type: 'Aadhaar', id_proof_number: '5555-6666-7777' })).data;
+        await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', ['$2b$06$hashhashhashhashhashha', gh.id]);
+        const noHash = x => !JSON.stringify(x).includes('password_hash') && !JSON.stringify(x).includes('$2b$06$hashhash');
+        for (const [who, call] of [['staff', S], ['admin', A]]) {
+          ok(noHash((await call('GET', '/guests')).data), `S19 SECURITY: ${who} /guests carries no password hash`);
+          ok(noHash((await call('GET', `/guests/${gh.id}`)).data), `S19 SECURITY: ${who} /guests/:id carries no password hash`);
+          ok(noHash((await call('GET', '/dashboard')).data), `S19 SECURITY: ${who} /dashboard carries no password hash`);
+        }
+        ok(noHash((await A('PUT', `/guests/${gh.id}/approve-rent`)).data), 'S19 SECURITY: approve-rent (RETURNING *) carries no password hash');
+        ok(JSON.stringify((await S('GET', `/guests/${gh.id}`)).data).includes('5555-6666-7777'), 'S19 staff still see the ID number they need');
+        await A('DELETE', `/guests/${gh.id}`);
+      }
       // ── Hotfix 19.1: the old public guest lookup leaked her password hash and ID number
       {
         const gl = await A('POST', '/guests', { name: 'HF Lookup', phone: '6' + String(Date.now()).slice(-9), join_date: today, monthly_rent: 5000, deposit_amount: 0, id_proof_type: 'Aadhaar', id_proof_number: '1234-5678-9012' });
