@@ -228,7 +228,7 @@
     <div class="card">
       <div class="card-h">🔐 Set your own password</div>
       <div class="card-b">
-        <p class="text-muted" style="margin:0 0 12px">You logged in with your phone number. Anyone who knows your number could do the same, so please choose your own password now.</p>
+        <p class="text-muted" id="fpw-why" style="margin:0 0 12px">You logged in with your phone number. Anyone who knows your number could do the same, so please choose your own password now.</p>
         <div id="fpw-alert" class="hidden"></div>
         <!-- S16.3-5: label above a full-width box (.form-row is a 2-column grid) -->
         <div class="fpw-field"><label for="fpw-new">New password (at least 6 characters)</label><input type="password" id="fpw-new" autocomplete="new-password"></div>
@@ -572,6 +572,10 @@ async function guestLogin() {
       // S16-2: this token only allows setting a password — not saved, so
       // closing the app here means logging in again, never a half-open session.
       forcePw = { current: password, remember: document.getElementById('login-remember')?.checked };
+      // Hotfix 19.2: say why — first login, or the PG asked everyone for a new password
+      document.getElementById('fpw-why').textContent = data.password_reason === 'refresh'
+        ? 'For your safety, Siri Mane is asking every resident to choose a new password. Please pick one you have not used here before.'
+        : 'You logged in with your phone number. Anyone who knows your number could do the same, so please choose your own password now.';
       document.getElementById('login-section').classList.add('hidden');
       document.getElementById('force-pw-section').classList.remove('hidden');
       document.getElementById('fpw-new').focus();

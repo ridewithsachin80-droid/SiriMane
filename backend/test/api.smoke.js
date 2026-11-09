@@ -417,15 +417,46 @@ async function main() {
         ok(JSON.stringify((await S('GET', `/guests/${gh.id}`)).data).includes('5555-6666-7777'), 'S19 staff still see the ID number they need');
         await A('DELETE', `/guests/${gh.id}`);
       }
-      // ── Hotfix 19.1: the old public guest lookup leaked her password hash and ID number
+      // ── Hotfix 19.1/19.2: the old public guest lookup is gone (it leaked password hashes and ID numbers)
       {
-        const gl = await A('POST', '/guests', { name: 'HF Lookup', phone: '6' + String(Date.now()).slice(-9), join_date: today, monthly_rent: 5000, deposit_amount: 0, id_proof_type: 'Aadhaar', id_proof_number: '1234-5678-9012' });
-        await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', ['$2b$06$secretsecretsecretsecretse', gl.data.id]);
-        eq((await fetch(BASE + '/api/guest-lookup?phone=' + gl.data.phone)).status, 401, 'HF19.1 SECURITY: the guest lookup needs a login');
-        eq((await S('GET', '/guest-lookup?phone=' + gl.data.phone)).status, 403, 'HF19.1 SECURITY: …and an admin');
-        const lk = await A('GET', '/guest-lookup?phone=' + gl.data.phone);
-        ok(lk.status === 200 && lk.data.name === 'HF Lookup' && !('password_hash' in lk.data) && !('id_proof_number' in lk.data) && !JSON.stringify(lk.data).includes('1234-5678-9012'), 'HF19.1 SECURITY: even for the admin it never returns the password hash or the ID number');
-        await A('DELETE', `/guests/${gl.data.id}`);
+        eq((await fetch(BASE + '/api/guest-lookup?phone=9876543210')).status, 404, 'HF19.2 SECURITY: the guest lookup no longer exists (no login)');
+        eq((await A('GET', '/guest-lookup?phone=9876543210')).status, 404, 'HF19.2 …not even for the admin');
+      }
+      // ── Hotfix 19.2: every resident is asked to choose a new password
+      {
+        const XF = { 'Content-Type': 'application/json', 'X-Forwarded-For': '198.51.100.192' };
+        const gr = (await A('POST', '/guests', { name: 'HF Refresh', phone: '6' + String(Date.now() + 3).slice(-9), join_date: today, monthly_rent: 5000, deposit_amount: 0 })).data;
+        await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [await require('bcrypt').hash('Old-Own-Pass', 6), gr.id]);
+        const gone = (await A('POST', '/guests', { name: 'HF Left', phone: '6' + String(Date.now() + 9).slice(-9), join_date: today, monthly_rent: 5000, deposit_amount: 0 })).data;
+        await pool.query('UPDATE guests SET is_active=false WHERE id=$1', [gone.id]);
+        // The owner's script: dry run changes nothing, --apply asks every active resident
+        const run = args => require('child_process').execFileSync(process.execPath, [require('path').join(__dirname, '../scripts/require-password-change.js'), ...args], { env: process.env, encoding: 'utf8' });
+        const dry = run([]);
+        ok(/DRY RUN/.test(dry) && (await pool.query('SELECT must_change_password FROM guests WHERE id=$1', [gr.id])).rows[0].must_change_password === false, 'HF19.2 the script\'s dry run changes nothing');
+        const applied = run(['--apply']);
+        ok(/Asked: \d+/.test(applied) && (await pool.query('SELECT must_change_password FROM guests WHERE id=$1', [gr.id])).rows[0].must_change_password === true, 'HF19.2 --apply asks every active resident');
+        eq((await pool.query('SELECT must_change_password FROM guests WHERE id=$1', [gone.id])).rows[0].must_change_password, false, 'HF19.2 …but never a checked-out resident');
+        ok(/Nothing to do/.test(run(['--apply'])), 'HF19.2 running it again says there is nothing to do');
+        // She logs in with her CURRENT password → only "choose a new password"
+        let lg = await fetch(BASE + '/api/guest-login', { method: 'POST', headers: XF, body: JSON.stringify({ mobile: gr.phone, password: 'Old-Own-Pass' }) }).then(r => r.json());
+        ok(lg.must_change_password === true && lg.password_reason === 'refresh', 'HF19.2 her current password still logs her in, straight to "choose a new password"');
+        eq((await api('GET', '/guest-portal', null, lg.token)).status, 403, 'HF19.2 SECURITY: …and nothing else until she does');
+        eq((await fetch(BASE + '/api/guest-login', { method: 'POST', headers: XF, body: JSON.stringify({ mobile: gr.phone, password: 'wrong-pass' }) })).status, 401, 'HF19.2 a wrong password is still refused');
+        eq((await api('POST', '/guest-change-password', { currentPassword: 'Old-Own-Pass', newPassword: 'Old-Own-Pass' }, lg.token)).status, 400, 'HF19.2 the new password must be different');
+        const ch = await api('POST', '/guest-change-password', { currentPassword: 'Old-Own-Pass', newPassword: 'Fresh-Own-19' }, lg.token);
+        eq(ch.status, 200, 'HF19.2 she chooses a new password');
+        lg = await fetch(BASE + '/api/guest-login', { method: 'POST', headers: XF, body: JSON.stringify({ mobile: gr.phone, password: 'Fresh-Own-19' }) }).then(r => r.json());
+        ok(lg.must_change_password === false && !lg.password_reason, 'HF19.2 after that she is not asked again');
+        eq((await fetch(BASE + '/api/guest-login', { method: 'POST', headers: XF, body: JSON.stringify({ mobile: gr.phone, password: 'Old-Own-Pass' }) })).status, 401, 'HF19.2 SECURITY: the old password no longer works');
+        // Before the migration runs (production between deploy and migrate-all), nothing breaks
+        await pool.query('ALTER TABLE guests DROP COLUMN must_change_password');
+        try {
+          lg = await fetch(BASE + '/api/guest-login', { method: 'POST', headers: XF, body: JSON.stringify({ mobile: gr.phone, password: 'Fresh-Own-19' }) }).then(r => r.json());
+          ok(lg.token && lg.must_change_password === false, 'HF19.2 OPS: before the migration, login works');
+          eq((await api('POST', '/guest-change-password', { currentPassword: 'Fresh-Own-19', newPassword: 'Again-Own-20' }, lg.token)).status, 200, 'HF19.2 OPS: before the migration, changing a password works');
+        } finally { await pool.query('ALTER TABLE guests ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT false'); }
+        await A('DELETE', `/guests/${gr.id}`); await pool.query('DELETE FROM guests WHERE id=$1', [gone.id]).catch(() => {});
+        await pool.query('UPDATE guests SET must_change_password=false');   // other suites log residents in normally
       }
       // ── Sprint 18: one clock — India's date at every hour (the gate also runs on a faked clock at 01:00 IST on the 1st)
       {
