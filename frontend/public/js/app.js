@@ -2825,7 +2825,7 @@ function renderAdminPage() {
   __draw(`
     <div class="page-header"><h1>Admin</h1><p>Staff accounts, audit trail, deposit refunds, and app settings</p></div>
     <div id="schema-banner"></div>
-    <div class="flex gap-2 mb-5 admin-tabs" role="tablist">
+    <div class="flex gap-2 mb-5 admin-tabs">
       <button class="btn ${adminActiveTab==='staff'?'btn-primary':'btn-outline'} btn-sm" onclick="switchAdminTab('staff')">Staff Users</button>
       <button class="btn ${adminActiveTab==='audit'?'btn-primary':'btn-outline'} btn-sm" onclick="switchAdminTab('audit')">Audit Log</button>
       <button class="btn ${adminActiveTab==='refunds'?'btn-primary':'btn-outline'} btn-sm" onclick="switchAdminTab('refunds')">Deposit Refunds</button>

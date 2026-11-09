@@ -192,6 +192,18 @@ const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toI
     i = await quick.intent('zzquark 750', adminUser, {}); eq(i.args.category, 'Other', 'model failure → Other, never an error to the warden');
     ai.providers._stub = realStub; ai.providers.groqText = realGroq; ai.providers.groqDownUntil = 0;   // Sprint 20: a simulated outage starts the 10-min skip — end it with the stub
 
+    // ── Review S20: quick entry really falls back to Gemini, item words only
+    {
+      const keepG = ai.providers.geminiText, keepQ = ai.providers.groqText; let gp = '';
+      ai.providers._stub = true; ai.providers.groqDownUntil = 0;
+      ai.providers.groqText = async () => { const e = new Error('Groq 404: retired'); e.status = 404; throw e; };
+      ai.providers.geminiText = async ({ prompt }) => { gp = prompt; return JSON.stringify({ category: 'Groceries' }); };
+      const fb = await quick.categorise('zzfallbackitem');
+      ok(fb.category === 'Groceries' && fb.via === 'model', `S20-1 quick entry: Groq down → Gemini picks the category (${fb.category} via ${fb.via})`);
+      ok(/Item: zzfallbackitem/.test(gp) && !/jhanavi|9\d{9}/i.test(gp), 'S20-1 PRIVACY: Gemini sees the item words only');
+      ai.providers.groqText = keepQ; ai.providers.geminiText = keepG; ai.providers._stub = realStub; ai.providers.groqDownUntil = 0;
+    }
+
     // ── 14.1 Voice repair: what Chrome heard vs what she said ───────────
     const vseen = [];
     ai.providers._stub = true; ai.providers.groqDownUntil = 0;
@@ -233,6 +245,14 @@ const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toI
     r = await api('POST', '/copilot/ask', { text: 'opinion hundred rupees', voice: true, alternatives: ['opinion hundred rupees', 'onion hundred rupees'] }, adminTok);
     eq(r.data.tool, 'prepare_expense', 'API: voice repair reaches the preview'); ok(/Heard “opinion hundred rupees” — understood as “onion 100”/.test(r.data.answer), 'API: the answer says what was heard and what was understood');
     eq(r.data.proposal.preview.description, 'onion', 'API: the preview is for onion'); eq(r.data.proposal.preview.source, 'quick', 'API: still source=quick');
+    // Review S20: Groq down → Gemini repairs the voice phrase instead
+    { const keepG = ai.providers.geminiText, keepQ = ai.providers.groqText;
+      ai.providers.groqDownUntil = 0;
+      ai.providers.groqText = async () => { const e = new Error('Groq 404: retired'); e.status = 404; throw e; };
+      ai.providers.geminiText = async ({ prompt }) => /Transcripts/.test(prompt) && /opinion/i.test(prompt) ? JSON.stringify({ phrase: 'onion 100', confidence: 'high' }) : JSON.stringify({ category: 'Groceries' });
+      const vr = await quick.intent('opinion hundred rupees', adminUser, {}, { voice: true, alternatives: ['opinion hundred rupees', 'onion hundred rupees'] });
+      eq(vr.args.description, 'onion', 'S20-1 voice repair: Groq down → Gemini repairs "opinion" to onion');
+      ai.providers.groqText = keepQ; ai.providers.geminiText = keepG; ai.providers.groqDownUntil = 0; }
     // Model down or keyless → behaves exactly as before, never an error.
     ai.providers.groqText = async () => { throw new Error('down'); };
     i = await quick.intent('opinion hundred rupees', adminUser, {}, { voice: true, alternatives: [] });
