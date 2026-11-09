@@ -388,3 +388,12 @@ Backlog (minor): the probe still starts the skip window in a Groq-only setup (pr
   - With a resident named Noora, the spaced "noora aivattu" reads as her name + ₹50, which is the pre-S21 result; the joined "ನೂರೈವತ್ತು" stays ₹150.
   - "aidu noora" now gives no amount, so she is asked.
 - Mutations T1–T3 caught. Gates on 950f54b: 12/12 ×2, 3,164 each (quick 417, ui 958).
+
+### Sprint 21 — independent review round 5: **BLOCK**, one narrow item (950f54b) → fix d103b88
+- N2 was verified fixed against base on about 230 phrases. The masking also fixes some errors that predate Sprint 21:
+  - "Priya Das five thousand": ₹15,000 → ₹5,000;
+  - "five thousand.": ₹5 → ₹5,000;
+  - "eradu saavirada ainooru": ₹2 → ₹2,500.
+- N3: a surname that is also a number ("Das" = 10) could shrink someone else's amount. With a Priya Das living here, "Kavya das hazaar" was read as ₹1,000.
+- Fix: a multiplier straight after a blanked name gives no amount, so she is asked. Mutation U1 is caught.
+- Gates on d103b88: 12/12 ×2, 3,169 each (quick 422, ui 958).
