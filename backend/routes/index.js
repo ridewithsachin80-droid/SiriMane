@@ -156,7 +156,10 @@ router.post('/auth/login', async (req, res) => {
     if (user.disabled_at) return res.status(403).json({ error: 'This account is turned off — ask the owner.' });
     const token = auth.signToken({ userId: user.id }, { expiresIn: '8h' });
     await pool.query(`INSERT INTO activity_log(user_id,action,ip_address) VALUES($1,'login',$2)`, [user.id, req.ip]);
-    res.json({ token, user: { id: user.id, username: user.username, role: user.role } });
+    // Sprint 19: the browser keeps the login in an HttpOnly cookie (the app no
+    // longer stores the token). It is still in the body for API clients.
+    auth.setAuthCookie(req, res, auth.STAFF_COOKIE, token, 8 * 3600 * 1000);
+    res.json({ ...auth.bodyToken(req, token), user: { id: user.id, username: user.username, role: user.role } });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1137,19 +1140,8 @@ router.get('/balance-sheet/export/pdf', auth, requireAdmin, async (req, res) => 
   } catch (err) { if (!res.headersSent) res.status(500).json({ error: err.message }); }
 });
 
-// ── PUBLIC GUEST LOOKUP ──────────────────────────
-router.get('/guest-lookup', async (req, res) => {
-  const { phone } = req.query;
-  if (!phone) return res.status(400).json({ error: 'Phone required' });
-  try {
-    const g = await pool.query(`SELECT g.*,r.room_number FROM guests g LEFT JOIN rooms r ON g.room_id=r.id WHERE g.phone=$1 LIMIT 1`, [phone]);
-    if (!g.rows[0]) return res.status(404).json({ error: 'Not found' });
-    const c = await pool.query('SELECT amount,collection_date,collection_type,payment_mode FROM collections WHERE guest_id=$1 AND is_deleted=false AND status=\'confirmed\' ORDER BY collection_date DESC LIMIT 12', [g.rows[0].id]);
-    const a = await pool.query('SELECT title,message,priority,created_at FROM announcements WHERE is_active=true ORDER BY created_at DESC LIMIT 5');
-    const m = await pool.query('SELECT * FROM daily_menu ORDER BY CASE day_of_week WHEN \'Monday\' THEN 1 WHEN \'Tuesday\' THEN 2 WHEN \'Wednesday\' THEN 3 WHEN \'Thursday\' THEN 4 WHEN \'Friday\' THEN 5 WHEN \'Saturday\' THEN 6 WHEN \'Sunday\' THEN 7 END');
-    res.json({ ...g.rows[0], payments: c.rows, announcements: a.rows, menu: m.rows });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+// (GET /guest-lookup removed — Hotfix 19.2, owner-approved 9 Nov 2026: it was
+// public and leaked password hashes and ID numbers; no screen used it.)
 
 // ── PUBLIC GUEST MESSAGE ─────────────────────────
 router.post('/guest-message', async (req, res) => {
@@ -1555,7 +1547,7 @@ router.post('/guest-login', async (req, res) => {
     // CREDENTIAL that verified, not from how she typed it (review F16-1):
     // no hash yet → default; a hash that is of her own number → default.
     const guestKey = String(normPhone(guest.phone) || '').slice(-10);
-    const onDefault = !guest.password_hash
+    let onDefault = !guest.password_hash
       // what verified is her own number in some phone format ("+91 …", "0…") —
       // before 15.5 the first login hashed it exactly as typed (review F16-1b)
       || (phoneLike && guestKey.length === 10 && typedKey === guestKey)
@@ -1563,10 +1555,19 @@ router.post('/guest-login', async (req, res) => {
       // "+91.98…", "98…/", "98… (s)") — the rule change-password uses (F16-1c)
       || (guestKey.length === 10 && String(password).replace(/\D/g, '').includes(guestKey))
       || (guestKey.length === 10 && await bcrypt.compare(guestKey, guest.password_hash));
-    const token = auth.signToken({ guestId: guest.id, type: 'guest', ...(onDefault ? { pwc: 1 } : {}) }, { expiresIn: onDefault ? '1h' : '24h' });
+    // Hotfix 19.2: the owner asked every resident to choose a new password
+    // (after the 19.1 leak). She logged in with her current one; same flow.
+    const refresh = !onDefault && guest.must_change_password === true;
+    if (refresh) onDefault = true;
+    const remember = !!(req.body && req.body.remember);
+    const token = auth.signToken({ guestId: guest.id, type: 'guest', ...(onDefault ? { pwc: 1 } : {}), ...(remember ? { rem: 1 } : {}) }, { expiresIn: onDefault ? '1h' : '24h' });
+    // Sprint 19: HttpOnly cookie. "Remember me" keeps it across browser restarts
+    // for the token's life; otherwise it ends when the browser closes.
+    auth.setAuthCookie(req, res, auth.GUEST_COOKIE, token, remember ? (onDefault ? 3600 : 24 * 3600) * 1000 : null);
     res.json({
-      token,
+      ...auth.bodyToken(req, token),
       must_change_password: onDefault,
+      password_reason: refresh ? 'refresh' : (onDefault ? 'default' : undefined),
       guest: {
         id: guest.id, name: guest.name, phone: guest.phone,
         room_number: guest.room_number, bed_number: guest.bed_number
@@ -1575,13 +1576,18 @@ router.post('/guest-login', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// POST /api/auth/logout — Sprint 19: end the browser's staff session
+router.post('/auth/logout', (req, res) => { auth.clearAuthCookie(req, res, auth.STAFF_COOKIE); res.json({ ok: true }); });
+
 // Guest middleware
 const guestAuth = async (req, res, next) => {
   try {
-    const token = req.headers.authorization?.split(' ')[1];
+    const { token, via } = auth.tokenFrom(req, auth.GUEST_COOKIE);   // Sprint 19: cookie or Bearer
     if (!token) return res.status(401).json({ error: 'No token' });
+    if (!auth.csrfOk(req, via)) return res.status(403).json({ error: 'Request refused (missing app header).' });
     const decoded = auth.verifyToken(token);
     if (decoded.type !== 'guest') return res.status(401).json({ error: 'Invalid token type' });
+    req.guestClaims = decoded;
     // S16-2: a default-password login may only set a new password
     if (decoded.pwc && req.path !== '/guest-change-password') return res.status(403).json({ error: 'Please set your own password first.', must_change_password: true });
     const r = await pool.query('SELECT * FROM guests WHERE id=$1', [decoded.guestId]);
@@ -1590,6 +1596,9 @@ const guestAuth = async (req, res, next) => {
     next();
   } catch { res.status(401).json({ error: 'Invalid token' }); }
 };
+
+// POST /api/guest-logout — Sprint 19: end the browser's resident session
+router.post('/guest-logout', (req, res) => { auth.clearAuthCookie(req, res, auth.GUEST_COOKIE); res.json({ ok: true }); });
 
 // GET /api/guest-portal - full guest data
 router.get('/guest-portal', guestAuth, async (req, res) => {
@@ -1644,10 +1653,16 @@ router.post('/guest-change-password', guestAuth, async (req, res) => {
     if (guestKey.length === 10 && String(newPassword).replace(/\D/g, '').includes(guestKey)) return res.status(400).json({ error: 'Choose a password that is not your phone number.' });
     if (newPassword === currentPassword) return res.status(400).json({ error: 'The new password must be different.' });
     const hash = await bcrypt.hash(newPassword, 10);
-    await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [hash, g.id]);
+    // Hotfix 19.2: the new password and "stop asking" in ONE statement (review),
+    // so she can never end up changed-but-still-asked. Before the migration the
+    // column doesn't exist (42703): save the password alone.
+    await pool.query('UPDATE guests SET password_hash=$1, must_change_password=false WHERE id=$2', [hash, g.id])
+      .catch(e => { if (e.code !== '42703') throw e; return pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [hash, g.id]); });
     // A fresh, unrestricted token — the default-password one only allowed this call
-    const token = auth.signToken({ guestId: g.id, type: 'guest' }, { expiresIn: '24h' });
-    res.json({ message: 'Password changed successfully', token });
+    const rem = !!(req.guestClaims && req.guestClaims.rem);
+    const token = auth.signToken({ guestId: g.id, type: 'guest', ...(rem ? { rem: 1 } : {}) }, { expiresIn: '24h' });
+    auth.setAuthCookie(req, res, auth.GUEST_COOKIE, token, rem ? 24 * 3600 * 1000 : null);   // Sprint 19
+    res.json({ message: 'Password changed successfully', ...auth.bodyToken(req, token) });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

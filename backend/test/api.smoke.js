@@ -362,6 +362,102 @@ async function main() {
         ok(r16.status === 200 && r16.data.must_change_password === false, 'S16-4 a resident password hashed by bcrypt 5 still logs in (non-ASCII too)');
         await A('DELETE', `/users/${u16.id}`); await A('DELETE', `/guests/${g16.id}`);
       }
+      // ── Sprint 19: the login lives in an HttpOnly cookie (D-17-1)
+      {
+        const XF19 = { 'Content-Type': 'application/json', 'X-Forwarded-For': '198.51.100.191' };
+        const cookieOf = (res, name) => (res.headers.getSetCookie ? res.headers.getSetCookie() : [res.headers.get('set-cookie') || '']).find(c => c.startsWith(name + '=')) || '';
+        let r = await fetch(BASE + '/api/auth/login', { method: 'POST', headers: XF19, body: JSON.stringify({ username: 'admin', password: process.env.ADMIN_PASSWORD || 'SiriMane@2024' }) });
+        const sc = cookieOf(r, 'sm_staff');
+        ok(/HttpOnly/i.test(sc) && /SameSite=Strict/i.test(sc) && /Path=\/api/i.test(sc) && /Max-Age=28800/i.test(sc), `S19-1 SECURITY: staff login sets an HttpOnly, SameSite=Strict cookie for /api, 8 h (${sc.replace(/=[^;]+/, '=…').slice(0, 110)})`);
+        const C = { Cookie: sc.split(';')[0] };
+        eq((await fetch(BASE + '/api/auth/me', { headers: C })).status, 200, 'S19-4 the cookie alone logs her in for reads');
+        eq((await fetch(BASE + '/api/auth/change-password', { method: 'POST', headers: { ...C, 'Content-Type': 'application/json' }, body: JSON.stringify({ currentPassword: 'x', newPassword: 'y' }) })).status, 403, 'S19-3 SECURITY: a cookie write without the app header is refused (cross-site forgery)');
+        ok((await fetch(BASE + '/api/auth/change-password', { method: 'POST', headers: { ...C, 'Content-Type': 'application/json', 'X-Requested-With': 'sirimane' }, body: JSON.stringify({ currentPassword: 'x', newPassword: 'y' }) })).status !== 403, 'S19-3 …with the app header it reaches the route');
+        eq((await api('POST', '/auth/change-password', { currentPassword: 'x', newPassword: 'y' })).status !== 403, true, 'S19-4 a Bearer header (API clients, internal calls) needs no app header');
+        r = await fetch(BASE + '/api/auth/logout', { method: 'POST', headers: { ...C, 'X-Requested-With': 'sirimane' } });
+        ok(/sm_staff=;/.test(cookieOf(r, 'sm_staff')) && /Expires=Thu, 01 Jan 1970/i.test(cookieOf(r, 'sm_staff')) && /Path=\/api/i.test(cookieOf(r, 'sm_staff')), 'S19-2 logout clears the staff cookie (same path, so the browser really drops it)');
+        // Review S19-2: the app's own screens never get the token in the body
+        r = await fetch(BASE + '/api/auth/login', { method: 'POST', headers: { ...XF19, 'X-Requested-With': 'sirimane' }, body: JSON.stringify({ username: 'admin', password: process.env.ADMIN_PASSWORD || 'SiriMane@2024' }) });
+        const rb = await r.json();
+        ok(r.status === 200 && !('token' in rb) && rb.user && /HttpOnly/i.test(cookieOf(r, 'sm_staff')), 'S19-1 SECURITY: a login from the app screen gets the cookie, never the token in the body');
+        // Other websites still cannot make logged-in requests (CORS gives no credentials)
+        r = await fetch(BASE + '/api/auth/me', { method: 'OPTIONS', headers: { Origin: 'https://evil.example', 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'x-requested-with' } });
+        ok(!r.headers.get('access-control-allow-credentials') && !/x-requested-with/i.test(r.headers.get('access-control-allow-headers') || ''), 'S19-3 SECURITY: CORS lets no other site send credentials or the app header');
+        // Resident: remembered → kept for the token's life; not remembered → ends with the browser
+        const g19 = (await A('POST', '/guests', { name: 'S19 Cookie', phone: '7' + String(Date.now()).slice(-9), join_date: today, monthly_rent: 5000, deposit_amount: 0 })).data;
+        await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [await require('bcrypt').hash('Her-Own-19', 6), g19.id]);
+        r = await fetch(BASE + '/api/guest-login', { method: 'POST', headers: XF19, body: JSON.stringify({ mobile: g19.phone, password: 'Her-Own-19', remember: true }) });
+        const gc = cookieOf(r, 'sm_guest');
+        ok(/HttpOnly/i.test(gc) && /SameSite=Strict/i.test(gc) && /Max-Age=86400/i.test(gc), 'S19-2 "keep me signed in": an HttpOnly cookie kept for 24 h');
+        r = await fetch(BASE + '/api/guest-login', { method: 'POST', headers: XF19, body: JSON.stringify({ mobile: g19.phone, password: 'Her-Own-19' }) });
+        const gs = cookieOf(r, 'sm_guest');
+        ok(/HttpOnly/i.test(gs) && !/Max-Age|Expires/i.test(gs), 'S19-2 not remembered: the cookie ends when the browser closes');
+        const GC = { Cookie: gs.split(';')[0] };
+        eq((await fetch(BASE + '/api/guest-portal', { headers: GC })).status, 200, 'S19-4 her cookie opens the portal');
+        eq((await fetch(BASE + '/api/guest-complaint', { method: 'POST', headers: { ...GC, 'Content-Type': 'application/json' }, body: JSON.stringify({ category: 'Other', description: 'forged' }) })).status, 403, 'S19-3 SECURITY: a resident cookie write without the app header is refused');
+        eq((await fetch(BASE + '/api/guest-portal', { headers: { Cookie: sc.split(';')[0] } })).status, 401, 'S19-1 SECURITY: the staff cookie is not a resident login');
+        eq((await fetch(BASE + '/api/auth/me', { headers: GC })).status, 401, 'S19-1 SECURITY: her cookie is not a staff login');
+        r = await fetch(BASE + '/api/guest-logout', { method: 'POST', headers: { ...GC, 'X-Requested-With': 'sirimane' } });
+        ok(/sm_guest=;/.test(cookieOf(r, 'sm_guest')) && /Path=\/api/i.test(cookieOf(r, 'sm_guest')), 'S19-2 logout clears her cookie (same path)');
+        r = await fetch(BASE + '/api/guest-login', { method: 'POST', headers: { ...XF19, 'X-Requested-With': 'sirimane' }, body: JSON.stringify({ mobile: g19.phone, password: 'Her-Own-19' }) });
+        ok(r.status === 200 && !('token' in (await r.json())), 'S19-1 SECURITY: her login from the app screen never puts the token in the body');
+        await A('DELETE', `/guests/${g19.id}`);
+      }
+      // ── Sprint 19 (review): staff never receive a resident's password hash
+      {
+        const gh = (await A('POST', '/guests', { name: 'S19 Hash', phone: '6' + String(Date.now() + 7).slice(-9), join_date: today, monthly_rent: 5000, deposit_amount: 0, id_proof_type: 'Aadhaar', id_proof_number: '5555-6666-7777' })).data;
+        await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', ['$2b$06$hashhashhashhashhashha', gh.id]);
+        const noHash = x => !JSON.stringify(x).includes('password_hash') && !JSON.stringify(x).includes('$2b$06$hashhash');
+        for (const [who, call] of [['staff', S], ['admin', A]]) {
+          ok(noHash((await call('GET', '/guests')).data), `S19 SECURITY: ${who} /guests carries no password hash`);
+          ok(noHash((await call('GET', `/guests/${gh.id}`)).data), `S19 SECURITY: ${who} /guests/:id carries no password hash`);
+          ok(noHash((await call('GET', '/dashboard')).data), `S19 SECURITY: ${who} /dashboard carries no password hash`);
+        }
+        ok(noHash((await A('PUT', `/guests/${gh.id}/approve-rent`)).data), 'S19 SECURITY: approve-rent (RETURNING *) carries no password hash');
+        ok(JSON.stringify((await S('GET', `/guests/${gh.id}`)).data).includes('5555-6666-7777'), 'S19 staff still see the ID number they need');
+        await A('DELETE', `/guests/${gh.id}`);
+      }
+      // ── Hotfix 19.1/19.2: the old public guest lookup is gone (it leaked password hashes and ID numbers)
+      {
+        eq((await fetch(BASE + '/api/guest-lookup?phone=9876543210')).status, 404, 'HF19.2 SECURITY: the guest lookup no longer exists (no login)');
+        eq((await A('GET', '/guest-lookup?phone=9876543210')).status, 404, 'HF19.2 …not even for the admin');
+      }
+      // ── Hotfix 19.2: every resident is asked to choose a new password
+      {
+        const XF = { 'Content-Type': 'application/json', 'X-Forwarded-For': '198.51.100.192' };
+        const gr = (await A('POST', '/guests', { name: 'HF Refresh', phone: '6' + String(Date.now() + 3).slice(-9), join_date: today, monthly_rent: 5000, deposit_amount: 0 })).data;
+        await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [await require('bcrypt').hash('Old-Own-Pass', 6), gr.id]);
+        const gone = (await A('POST', '/guests', { name: 'HF Left', phone: '6' + String(Date.now() + 9).slice(-9), join_date: today, monthly_rent: 5000, deposit_amount: 0 })).data;
+        await pool.query('UPDATE guests SET is_active=false WHERE id=$1', [gone.id]);
+        // The owner's script: dry run changes nothing, --apply asks every active resident
+        const run = args => require('child_process').execFileSync(process.execPath, [require('path').join(__dirname, '../scripts/require-password-change.js'), ...args], { env: process.env, encoding: 'utf8' });
+        const dry = run([]);
+        ok(/DRY RUN/.test(dry) && (await pool.query('SELECT must_change_password FROM guests WHERE id=$1', [gr.id])).rows[0].must_change_password === false, 'HF19.2 the script\'s dry run changes nothing');
+        const applied = run(['--apply']);
+        ok(/Asked: \d+/.test(applied) && (await pool.query('SELECT must_change_password FROM guests WHERE id=$1', [gr.id])).rows[0].must_change_password === true, 'HF19.2 --apply asks every active resident');
+        eq((await pool.query('SELECT must_change_password FROM guests WHERE id=$1', [gone.id])).rows[0].must_change_password, false, 'HF19.2 …but never a checked-out resident');
+        ok(/Nothing to do/.test(run(['--apply'])), 'HF19.2 running it again says there is nothing to do');
+        // She logs in with her CURRENT password → only "choose a new password"
+        let lg = await fetch(BASE + '/api/guest-login', { method: 'POST', headers: XF, body: JSON.stringify({ mobile: gr.phone, password: 'Old-Own-Pass' }) }).then(r => r.json());
+        ok(lg.must_change_password === true && lg.password_reason === 'refresh', 'HF19.2 her current password still logs her in, straight to "choose a new password"');
+        eq((await api('GET', '/guest-portal', null, lg.token)).status, 403, 'HF19.2 SECURITY: …and nothing else until she does');
+        eq((await fetch(BASE + '/api/guest-login', { method: 'POST', headers: XF, body: JSON.stringify({ mobile: gr.phone, password: 'wrong-pass' }) })).status, 401, 'HF19.2 a wrong password is still refused');
+        eq((await api('POST', '/guest-change-password', { currentPassword: 'Old-Own-Pass', newPassword: 'Old-Own-Pass' }, lg.token)).status, 400, 'HF19.2 the new password must be different');
+        const ch = await api('POST', '/guest-change-password', { currentPassword: 'Old-Own-Pass', newPassword: 'Fresh-Own-19' }, lg.token);
+        eq(ch.status, 200, 'HF19.2 she chooses a new password');
+        lg = await fetch(BASE + '/api/guest-login', { method: 'POST', headers: XF, body: JSON.stringify({ mobile: gr.phone, password: 'Fresh-Own-19' }) }).then(r => r.json());
+        ok(lg.must_change_password === false && !lg.password_reason, 'HF19.2 after that she is not asked again');
+        eq((await fetch(BASE + '/api/guest-login', { method: 'POST', headers: XF, body: JSON.stringify({ mobile: gr.phone, password: 'Old-Own-Pass' }) })).status, 401, 'HF19.2 SECURITY: the old password no longer works');
+        // Before the migration runs (production between deploy and migrate-all), nothing breaks
+        await pool.query('ALTER TABLE guests DROP COLUMN must_change_password');
+        try {
+          lg = await fetch(BASE + '/api/guest-login', { method: 'POST', headers: XF, body: JSON.stringify({ mobile: gr.phone, password: 'Fresh-Own-19' }) }).then(r => r.json());
+          ok(lg.token && lg.must_change_password === false, 'HF19.2 OPS: before the migration, login works');
+          eq((await api('POST', '/guest-change-password', { currentPassword: 'Fresh-Own-19', newPassword: 'Again-Own-20' }, lg.token)).status, 200, 'HF19.2 OPS: before the migration, changing a password works');
+        } finally { await pool.query('ALTER TABLE guests ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT false'); }
+        await A('DELETE', `/guests/${gr.id}`); await pool.query('DELETE FROM guests WHERE id=$1', [gone.id]).catch(() => {});
+        await pool.query('UPDATE guests SET must_change_password=false');   // other suites log residents in normally
+      }
       // ── Sprint 18: one clock — India's date at every hour (the gate also runs on a faked clock at 01:00 IST on the 1st)
       {
         const ym = today.slice(0, 7);

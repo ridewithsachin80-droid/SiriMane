@@ -209,3 +209,15 @@ Survey: Railway's Postgres and Node run in UTC. 58 `timestamp without time zone`
 | S18-3 | **Year-to-date report starts on 1 January.** Today it starts on 31 December of the previous year (phone time zone bug, at every hour). Before/after totals on sample data | MONEY |
 | S18-4 | **Proven at the hard hours.** The full 12-suite gate passes with the whole stack (Node, Postgres and Chrome) on a faked clock at: 14:00 IST; 01:00 IST on the 1st of a month (inside the window and across a month boundary); 23:45 IST — plus twice on the real clock. New tests assert the exact dates in the window | QA |
 | S18-5 | Independent review before merge; mutation check of the window tests | QA |
+
+## Sprint 19 — login in a protected cookie (D-17-1) (criteria recorded before build)
+Owner, 9 Nov 06:35: "go". Closes the remaining risk recorded in Sprint 17: an injected script could read the login token from browser storage and carry it off by navigating the page.
+
+| ID | Acceptance criterion | Review |
+|---|---|---|
+| S19-1 | Staff and resident logins live in **HttpOnly, SameSite=Strict** cookies (Secure on HTTPS, Path=/api): no page script can read them. After login nothing token-like is in localStorage or sessionStorage; tokens stored by the old app are deleted on first load | SEC REQUIRED |
+| S19-2 | Logout ends the session on the server side of the browser (cookie cleared). Staff session 8 h as today. Resident: "Remember me" keeps her logged in across browser restarts for the token's life; otherwise until the browser closes. The forced first-login password change still works end to end | SEC, UX |
+| S19-3 | **Cross-site request forgery blocked twice over:** SameSite=Strict, and every state-changing request that authenticates by cookie must carry the app's own request header — without it the server refuses (403). Cross-origin sites still cannot read or send credentialed requests (CORS unchanged, no credentials) | SEC REQUIRED |
+| S19-4 | Nothing else changes for the user: every screen, PDF/CSV downloads, request photos, her ID photo, receipts, Copilot and bulk actions (internal calls), turned-off accounts, login limits, environment-bound tokens. API clients that send `Authorization: Bearer` (the gates, internal calls) keep working | QA |
+| S19-5 | **Release is safe:** a phone that was logged in before the release is asked to log in once — no error loop, no blank screen | OPS |
+| S19-6 | Gates 12/12 twice; new tests prove page JS cannot read the token (not in `document.cookie`, not in storage) and that a cookie-authenticated write without the header is refused; independent review before merge | QA |

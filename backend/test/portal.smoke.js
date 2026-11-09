@@ -77,8 +77,9 @@ async function runAtWidth(browser, BASE, width, fixtures) {
     // S16-2: default password → the set-your-own screen, nothing else
     await page.waitForFunction(() => !document.getElementById('force-pw-section').classList.contains('hidden'), { timeout: 8000 });
     ok(await page.evaluate(() => document.getElementById('portal-section').classList.contains('hidden')), `${tag} S16-2 the default password shows ONLY the set-your-own screen`);
-    const s16Tok = await page.evaluate(() => guestToken);
-    eq((await fetch(BASE + '/api/guest-portal', { headers: { Authorization: 'Bearer ' + s16Tok } })).status, 403, `${tag} S16-2 SECURITY: that login cannot read her data through the API either`);
+    // Sprint 19: the page holds no token — the login is an HttpOnly cookie, so ask through it
+    eq(await page.evaluate(async () => (await fetch('/api/guest-portal')).status), 403, `${tag} S16-2 SECURITY: that login cannot read her data through the API either`);
+    ok(await page.evaluate(() => !/sm_guest/.test(document.cookie) && !Object.keys(localStorage).concat(Object.keys(sessionStorage)).some(k => /token/i.test(k))), `${tag} S19-1 SECURITY: the page can't read her login (not in document.cookie, not in storage)`);
     // S16.3-5: label ABOVE a full-width box at phone widths
     const s163L = await page.evaluate(() => { const l = document.querySelector('label[for=fpw-new]').getBoundingClientRect(), i = document.getElementById('fpw-new').getBoundingClientRect(), c = document.querySelector('#force-pw-section .card-b').getBoundingClientRect(); return { above: l.bottom <= i.top + 1, ratio: i.width / c.width }; });
     ok(s163L.above && s163L.ratio > 0.8, `${tag} S16.3-5 the label sits above a full-width box (${Math.round(s163L.ratio * 100)}% wide)`);
@@ -182,7 +183,7 @@ async function runAtWidth(browser, BASE, width, fixtures) {
   await fits('complaint');
 
   // Warden resolves it; the resident sees the note.
-  const cid = await page.evaluate(async () => (await (await fetch('/api/guest-complaints', { headers: { Authorization: 'Bearer ' + guestToken } })).json())[0].id);
+  const cid = await page.evaluate(async () => (await (await fetch('/api/guest-complaints')).json())[0].id);   // Sprint 19: the login cookie travels by itself
   await fetch(`${BASE}/api/complaints/${cid}`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + fixtures.adminTok },
     body: JSON.stringify({ status: 'resolved', resolution_notes: 'Tube light replaced' })
@@ -205,10 +206,16 @@ async function runAtWidth(browser, BASE, width, fixtures) {
     return false;
   });
   eq(cachedApi, false, `${tag} PRIVACY/MONEY: no API response is ever cached`);
-  const remembered = await page.evaluate(() => !!localStorage.getItem('guest_token') && !!localStorage.getItem('guest_expires'));
-  ok(remembered, `${tag} "keep me signed in" stores a 30-day session`);
-  const days30 = await page.evaluate(() => Math.round((Number(localStorage.getItem('guest_expires')) - Date.now()) / 86400000));
-  eq(days30, 30, `${tag} session expiry is 30 days`);
+  // Sprint 19: only her (non-secret) details are stored; the login is a cookie for the token's life (24 h)
+  const remembered = await page.evaluate(() => !!localStorage.getItem('guest_data') && !!localStorage.getItem('guest_expires') && !localStorage.getItem('guest_token'));
+  ok(remembered, `${tag} "keep me signed in" keeps her details on this phone, never the token`);
+  const hrs = await page.evaluate(() => Math.round((Number(localStorage.getItem('guest_expires')) - Date.now()) / 3600000));
+  eq(hrs, 24, `${tag} the remembered session lasts as long as her login (24 h)`);
+  const gCookie = (await page.cookies(BASE + '/api/guest-portal')).find(c => c.name === 'sm_guest');
+  ok(gCookie && gCookie.httpOnly && gCookie.sameSite === 'Strict' && gCookie.path === '/api' && gCookie.expires > Date.now() / 1000 + 23 * 3600, `${tag} S19-1 SECURITY: her login is an HttpOnly, SameSite=Strict cookie for /api, kept for 24 h when remembered`);
+  ok(!/sm_guest/.test(await page.evaluate(() => document.cookie)), `${tag} S19-1 SECURITY: page scripts cannot read it`);
+  // S19-3: a write that rides on the cookie must carry the app header
+  eq(await page.evaluate(async () => (await fetch('/api/guest-complaint', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ category: 'Other', description: 'forged' }) })).status), 403, `${tag} S19-3 SECURITY: a cookie write without the app header is refused`);
   await page.reload({ waitUntil: 'networkidle0' });
   await page.waitForFunction(() => !document.getElementById('portal-section').classList.contains('hidden'), { timeout: 8000 });
   ok(true, `${tag} still signed in after a reload`);
@@ -217,7 +224,41 @@ async function runAtWidth(browser, BASE, width, fixtures) {
   await page.reload({ waitUntil: 'networkidle0' });
   await sleep(400);
   ok(await page.$eval('#portal-section', e => e.classList.contains('hidden')), `${tag} expired session lands back on login`);
-  eq(await page.evaluate(() => localStorage.getItem('guest_token')), null, `${tag} expired session is cleared`);
+  eq(await page.evaluate(() => localStorage.getItem('guest_data')), null, `${tag} expired session is cleared`);
+  // Review S19-3: what the screen shows and the cookie agree — the screen is logged out, so is the cookie
+  eq(await page.evaluate(async () => (await fetch('/api/guest-portal')).status), 401, `${tag} S19-3 PRIVACY: a logged-out screen leaves no usable cookie behind`);
+
+  // Review S19-3: shared phone — she logs in WITHOUT "keep me signed in", then the
+  // app is opened in a new tab: that tab shows the login screen, so her cookie must end too
+  {
+    const ctx = await browser.createBrowserContext();
+    const a = await ctx.newPage();
+    await a.goto(BASE + '/guest', { waitUntil: 'networkidle0' });
+    const st = await a.evaluate(async (m, p) => (await fetch('/api/guest-login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'sirimane' }, body: JSON.stringify({ mobile: m, password: p }) })).status, PHONE, portalPw === PHONE ? 'Resident@2026' : portalPw);
+    eq(st, 200, `${tag} S19 (fixture) logged in without "keep me signed in"`);
+    eq(await a.evaluate(async () => (await fetch('/api/guest-portal')).status), 200, `${tag} S19 (fixture) her cookie works in that tab`);
+    const b = await ctx.newPage();
+    await b.goto(BASE + '/guest', { waitUntil: 'networkidle0' });
+    await new Promise(r => setTimeout(r, 500));
+    ok(await b.$eval('#portal-section', e => e.classList.contains('hidden')), `${tag} S19-3 the new tab shows the login screen`);
+    eq(await b.evaluate(async () => (await fetch('/api/guest-portal')).status), 401, `${tag} S19-3 PRIVACY: …and her cookie no longer opens her record there`);
+    await ctx.close();
+  }
+
+  // Hotfix 19.2: a resident asked for a new password sees why, in plain words
+  {
+    const ph = '6' + String(Date.now() + width).slice(-9);
+    const g = await (await fetch(`${BASE}/api/guests`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + fixtures.adminTok }, body: JSON.stringify({ name: 'HF Ask ' + width, phone: ph, join_date: '2026-06-01', monthly_rent: 5000, deposit_amount: 0 }) })).json();
+    await pool.query('UPDATE guests SET password_hash=$1, must_change_password=true WHERE id=$2', [await require('bcrypt').hash('Her-Old-Pass', 6), g.id]);
+    const ctx = await browser.createBrowserContext(); const p2 = await ctx.newPage();
+    await p2.setViewport({ width, height: 780, isMobile: true, hasTouch: true });
+    await p2.goto(BASE + '/guest', { waitUntil: 'networkidle0' });
+    await p2.type('#login-mobile', ph); await p2.type('#login-password', 'Her-Old-Pass'); await p2.click('#login-btn');
+    await p2.waitForFunction(() => !document.getElementById('force-pw-section').classList.contains('hidden'), { timeout: 8000 });
+    ok(/asking every resident/.test(await p2.$eval('#fpw-why', e => e.textContent)), `${tag} HF19.2 the screen says the PG is asking everyone for a new password (not "you used your phone number")`);
+    await ctx.close();
+    await fetch(`${BASE}/api/guests/${g.id}`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + fixtures.adminTok } });
+  }
 
   // ── Sprint 7.1: dark theme in the portal ──────────────────────────────
   const lum = c => { const [r, g, b] = c.match(/\d+/g).map(Number).map(v => { v /= 255; return v <= .03928 ? v / 12.92 : Math.pow((v + .055) / 1.055, 2.4); }); return .2126 * r + .7152 * g + .0722 * b; };
