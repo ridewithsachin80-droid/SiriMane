@@ -371,3 +371,12 @@ Backlog (minor): the probe still starts the skip window in a Groq-only setup (pr
 - Test isolation: one quick run collided with a full gate run on the same database, so both were discarded and re-run sequentially.
 - Mutations P1–P5 (full stop, bare g/l, suffix scope, amount words in names, quantity strip) were all caught.
 - Gates on 9a776d0: 12/12 ×2, 3,133 each (quick 386, ui 958).
+
+### Sprint 21 — independent review round 3: **BLOCK** (9a776d0) → fixes f9cc936, 6e743f4
+- All round-2 findings were verified fixed against b79cae1 (full stops, G Pay, English prefixes, amount words kept out of names, quantities asking the price). Across the reviewer's 140+ typed-English phrases, every difference from base is an intended S21 change.
+- N1 (money, typed English): a resident named **Noora** got a made-up ₹100. "Noora paid" read ನೂರ (noora, the joining form I added in round 2) as ×100. The reviewer says it was already visible at 9be9c8a but missed in their round-2 report.
+- Fixed:
+  - "noora" is a number only when another number word follows it.
+  - In both quick.classify and the on-device Collect parser, an amount made only of a resident's name words is dropped, so she is asked. This also covers "Ainoor" (500).
+- Mutations Q1–Q3 were all caught. Q3 survived at first, then an Ainoor parser test was added.
+- Gates on 6e743f4: 12/12 ×2, 3,151 each (quick 404, ui 958).
