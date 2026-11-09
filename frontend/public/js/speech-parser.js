@@ -107,6 +107,8 @@
     hundred: 100, hundreds: 100, nooru: 100, noora: 100, sau: 100,
     thousand: 1000, thousands: 1000, saavira: 1000, savira: 1000, sasira: 1000, hazaar: 1000, hazar: 1000, hajar: 1000,
     saavirada: 1000, saviradha: 1000, savirada: 1000,
+    // Hotfix 21.1: how Chrome in ENGLISH mode writes ಸಾವಿರ — "I sawida upi".
+    sawida: 1000, sawira: 1000, savida: 1000, saavida: 1000, sawir: 1000, saweera: 1000, saveera: 1000, sawirada: 1000,
     lakh: 100000, lakhs: 100000, laksha: 100000
   };
   const HALF = { half: 0.5, ardha: 0.5, aadha: 0.5 };
@@ -176,10 +178,19 @@
     if (!names.size) return text;
     return String(text || '').split(/(\s+)/).map(t => names.has(t.toLowerCase().replace(/[.,!?]+$/, '')) ? 'zzname' : t).join('');
   }
-  function shortForm(w) { return w.length >= 3 && (w + 'u') in ONES ? ONES[w + 'u'] : null; }
+  function shortForm(w, nextW) {
+    if (w.length >= 3 && (w + 'u') in ONES) return ONES[w + 'u'];
+    // English-mode hearings only before a KANNADA multiplier — "I thousand" stays ₹1,000 (review 21.1 S1).
+    if (w in EN_HEARD && (KN_MULT.has(nextW) || nextW === 'nooru' || nextW === 'noora')) return EN_HEARD[w];
+    return null;
+  }
+  // Hotfix 21.1: Kannada numbers as Chrome in ENGLISH mode writes them —
+  // ಐದು ಸಾವಿರ → "I sawida", ಆರು → "aru". Only ever counted right before a
+  // ಸಾವಿರ/ನೂರು, so "I paid" or "are you" are never numbers.
+  const EN_HEARD = { i: 5, ai: 5, eye: 5, idu: 5, id: 5, aru: 6, yelu: 7, yeradu: 2, erdu: 2, yentu: 8, ombathu: 9, hathu: 10, ondh: 1, moor: 3, nalk: 4 };
   // Words that may stand before a bare "thousand" without making it a guess.
   // (ನೂರು alone is a plain 100 — "haalu nooru" — so only ಸಾವಿರ is strict.)
-  const KN_MULT = new Set(['saavira', 'savira', 'sasira', 'saavirada', 'savirada', 'saviradha']);
+  const KN_MULT = new Set(['saavira', 'savira', 'sasira', 'saavirada', 'savirada', 'saviradha', 'sawida', 'sawira', 'savida', 'saavida', 'sawir', 'saweera', 'saveera', 'sawirada']);
   const ONE_OK = new Set(['a', 'an', 'and', 'one', 'ek', 'ondu', 'rs', 'rs.', 'rupees', 'rupee', 'inr']);
 
   // Returns { amount, matched } for the first amount in the text that is not
@@ -211,7 +222,7 @@
       const nextW = (words[i + 1] || '').replace(/[^a-z.]/g, '');
       const nv = numberWord(w);
       if (nv != null) { current += nv; matchedWords.push(words[i]); seenAny = true; continue; }
-      if (!seenAny && shortForm(w) != null && nextW in MULTIPLIERS) { current += shortForm(w); matchedWords.push(words[i]); seenAny = true; continue; }
+      if (!seenAny && shortForm(w, nextW) != null && nextW in MULTIPLIERS) { current += shortForm(w, nextW); matchedWords.push(words[i]); seenAny = true; continue; }
       if (w in HALF) { pendingHalf = true; matchedWords.push(words[i]); continue; }
       if (w === 'and' || w === 'a') { if (seenAny) matchedWords.push(words[i]); continue; }
       // ನೂರ (noora) is a joining form — "noora aivattu" = 150. On its own it is a

@@ -223,7 +223,7 @@ async function classify(text, user, context, copts = {}) {
   const nameWords = new Set(residents.flatMap(r => String(r.name || '').toLowerCase().split(/\s+/)));
   if (tokens(raw).some(w => KN_QUESTION_WORDS.has(w) && !nameWords.has(w))) return null;
   // Review S21: the amount's own words ("nooraivattu", "5000") are never a name.
-  const nameText = (amt && amt.matched ? sansRoom.replace(amt.matched, ' ') : norm).replace(MODE_WORDS, ' ');
+  const nameText = (amt && amt.matched ? dropWords(sansRoom, amt.matched) : norm).replace(MODE_WORDS, ' ');
   const match = SMParse.matchResident(nameText, residents, room);
   const type = /\bdeposit\b/i.test(norm) ? 'deposit' : /\badvance\b/i.test(norm) ? 'advance' : 'rent';
   if (match) {
@@ -253,7 +253,7 @@ async function classify(text, user, context, copts = {}) {
 
   // 4. Money without a name → an expense.
   if (amount) {
-    const item = sansRoom.replace(amt.matched, ' ').replace(MODE_WORDS, ' ').replace(NOISE, ' ').replace(/\b(room|rum)\s*[a-z]?\d{1,3}[a-z]?\b/gi, ' ').replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim();
+    const item = dropWords(sansRoom, amt.matched).replace(MODE_WORDS, ' ').replace(NOISE, ' ').replace(/\b(room|rum)\s*[a-z]?\d{1,3}[a-z]?\b/gi, ' ').replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim();
     if (!item) {
       // Decision 2: never file a blind rupee figure.
       return { tool: null, clarify: `What was ₹${amount.toLocaleString('en-IN')} for? Say the item too — e.g. "onion ${amount}".`, retry_text: raw + ' ', via: 'quick', kind: 'expense' };
@@ -293,6 +293,16 @@ function buyableWord(w) {
   return false;
 }
 const BUYABLE = new Set(['Groceries', 'Cleaning']);
+// Hotfix 21.1: take the amount's words out of the text whatever their case.
+// The amount is read in lower case, but Chrome capitalises the first word it
+// hears — "Nooru rupaye" left "Nooru" behind as the item.
+function dropWords(text, matched) {
+  if (!matched) return text;
+  // Whole words only — "ten" is never cut out of "Tenzin" or "Tender" (review 21.1 S2).
+  // Edges are anything that is not a letter or digit — a space, "." "," "!"
+  // or "₹" — so "500." and "500, cash" are cleared too (review 21.1 H1).
+  return String(text).replace(new RegExp('(^|[^\\p{L}\\p{N}])' + matched.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?=[^\\p{L}\\p{N}]|$)', 'iu'), '$1 ');
+}
 
 // ── Fuzzy resident matching (14.2) ──────────────────────────────────────────
 // "janavi", "jhanvi", "jahnavi", "janvi" are all Jhanavi. Indian names have

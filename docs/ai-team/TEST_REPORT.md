@@ -408,3 +408,19 @@ Backlog (minor): the probe still starts the skip window in a Groq-only setup (pr
   - with a resident named Noora, the spaced "noora aivattu" reads as her name + ₹50, the same as base;
   - Chrome's real ಕನ್ನಡ output on an Android phone has to be checked by the owner on Test (S21-15).
 - Review: 6 rounds — BLOCK ×5, then APPROVE. Final gates 12/12 ×2, 3,169 each.
+
+### Hotfix 21.1 — the owner's phone on Test, English-mode mic (9 Nov, 19:13–19:15)
+- Evidence:
+  - "Nooru rupaye" was filed as an item called "Nooru" with a model-guessed category. `amt.matched` is lower case and was removed case-sensitively, while Chrome capitalises the first word.
+  - "Jaanvi I sawida upi" (ಐದು ಸಾವಿರ) gave no amount.
+- Fix:
+  - `dropWords` removes the amount case-insensitively, whole words only. Any non-letter or non-digit counts as an edge, so "500." and "500, cash" still ask.
+  - English-mode spellings of ಸಾವಿರ (sawida, sawira, savida …) were added, with B1 "unclear, ask" protection.
+  - `EN_HEARD` handles short hearings (I/eye → 5, aru → 6, …), only right before a Kannada multiplier.
+- Review (G3), 3 rounds:
+  - 03c6613: APPROVE with two should-fixes (I before English "thousand"; mid-word cuts such as "Tenzin").
+  - 1e7e8e0: **BLOCK**, H1: the whole-word edge missed punctuation, so "500." became a blind expense.
+  - d47f73b: **APPROVE**. About 140 phrases re-run against a80e191; no worse rupee figure anywhere.
+- Mutations H1–H6 all caught. H5 survived once, until the "Kitten food ten" and "Paneer 1500g 500" tests were added.
+- Test isolation: one full run picked up a test edit made mid-run and was discarded.
+- Gates on d47f73b: 12/12 ×2, 3,207 each (quick 460, ui 958). No migration.

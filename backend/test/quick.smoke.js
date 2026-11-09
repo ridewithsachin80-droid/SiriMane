@@ -513,6 +513,37 @@ const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toI
     i = await quick.classify('Priya Das 6000 upi', adminUser, {}, { allowModel: false }); ok(i && i.args.resident_id === pd.id && i.args.amount === 6000, 'N3 "Priya Das 6000 upi" is ₹6,000');
     await pool.query(`UPDATE guests SET is_active=false WHERE id = ANY($1)`, [[pd.id, kv.id]]);
     await pool.query(`UPDATE guests SET is_active=false WHERE id = ANY($1)`, [[nk.id, an.id]]);
+    // ── Hotfix 21.1 (owner's phone, Test site, English-mode mic) ──────────
+    // Chrome capitalises the first word: "Nooru rupaye" must not leave "Nooru" as the item.
+    i = await quick.classify('Nooru rupaye', adminUser, {}, { allowModel: false });
+    ok(i && !i.tool && /^What was ₹100 for\?/.test(i.clarify), `H21.1 "Nooru rupaye" asks what ₹100 was for — never an item called "Nooru" (got ${JSON.stringify(i && (i.clarify || i.args))})`);
+    for (const [t, d, n] of [['Eerulli Nooru rupaye', 'Eerulli', 100], ['Onion Hundred', 'Onion', 100], ['Pudina Soppu Ippattu', 'Pudina Soppu', 20], ['Milk Five Hundred', 'Milk', 500]]) {
+      i = await quick.intent(t, adminUser, {});
+      ok(i && i.tool === 'prepare_expense' && i.args.amount === n && i.args.description === d && i.args.category === 'Groceries', `H21.1 "${t}" → ${d} ₹${n} Groceries (got ${JSON.stringify(i && i.args)})`);
+    }
+    // English-mode hearings of Kannada numbers: ಐದು ಸಾವಿರ → "I sawida".
+    for (const [t, n] of [['i sawida', 5000], ['I sawida', 5000], ['aru sawira', 6000], ['yeradu savida', 2000], ['ondu sawira', 1000]]) eq(SMParse.extractAmount(t).amount, n, `H21.1 "${t}" is ₹${n}`);
+    for (const [t, n] of [['I paid 5000', 5000], ['I paid thousand', 1000]]) eq(SMParse.extractAmount(t).amount, n, `H21.1 "${t}" is unchanged (₹${n}) — "I" is only a number right before ಸಾವಿರ`);
+    for (const t of ['are you there', 'i am here', 'id proof']) eq(SMParse.extractAmount(t), null, `H21.1 "${t}" has no amount`);
+    for (const t of [`Jhanavi ${alpha} I sawida upi`, 'Jaanvi I sawida upi']) {
+      i = await quick.classify(t, adminUser, {}, { allowModel: false });
+      ok(i && i.tool === 'prepare_payment' && i.args.amount === 5000 && i.args.mode === 'UPI', `H21.1 "${t}" is a ₹5,000 UPI payment (got ${JSON.stringify(i && (i.args || i.clarify))})`);
+    }
+    eq(SMParse.extractAmount('Priya sawida'), null, 'H21.1 "sawida" after a name is unclear — she is asked, never ₹1,000');
+    // Review 21.1 S1: the English-mode "I" = 5 is only before a Kannada ಸಾವಿರ/ನೂರು.
+    for (const [t, n] of [['Priya I thousand', 1000], ['milk I hundred', 100], ['I nooru', 500]]) eq(SMParse.extractAmount(t).amount, n, `H21.1 S1 "${t}" is ₹${n}`);
+    // Review 21.1 S2: an amount word is removed only as a whole word.
+    const tz = (await A('POST', '/guests', { name: `Tenzin D${alpha}`, phone: `97${uniq}09`.slice(0, 10), room_id: room2.id, bed_number: '1', monthly_rent: 6000, deposit_amount: 0, join_date: daysAgo(30), id_proof_type: 'Aadhaar' })).data;
+    ok(tz && tz.id, 'H21.1 S2 (fixture) a resident named Tenzin');
+    i = await quick.classify('Tenzin ten', adminUser, {}, { allowModel: false }); ok(i && i.tool === 'prepare_payment' && i.args.resident_id === tz.id, `H21.1 S2 "Tenzin ten" is still her payment (got ${JSON.stringify(i && [i.tool, i.args])})`);
+    await pool.query(`UPDATE guests SET is_active=false WHERE id=$1`, [tz.id]);
+    // Review 21.1 H1: punctuation after the amount (phone voice typing adds full stops).
+    for (const t of ['500.', '₹500.', '500, cash', 'Spent 500.', '500!', 'Five hundred.']) {
+      i = await quick.classify(t, adminUser, {}, { allowModel: false });
+      ok(i && !i.tool && /^What was ₹500 for\?/.test(i.clarify), `H21.1 H1 "${t}" asks what ₹500 was for — never a blind expense (got ${JSON.stringify(i && (i.clarify || i.args))})`);
+    }
+    for (const [t, d] of [['onion 100.', 'onion'], ['onion 100, cash', 'onion'], ['Onion 100.', 'Onion'], ['Milk 500;', 'Milk'], ['onion 1.5k.', 'onion']]) { i = await quick.intent(t, adminUser, {}); eq(i.args.description, d, `H21.1 H1 "${t}" is filed as "${d}"`); }
+    for (const [t, d] of [['Tender coconut ten', 'Tender coconut'], ['Milk 2500ml 500', 'Milk 2500ml'], ['Kitten food ten', 'Kitten food'], ['Paneer 1500g 500', 'Paneer 1500g']]) { i = await quick.intent(t, adminUser, {}); eq(i.args.description, d, `H21.1 S2 "${t}" is filed as "${d}"`); }
     console.log('✓ S21 Kannada');
 
     // ── Audit ────────────────────────────────────────────────────────────
