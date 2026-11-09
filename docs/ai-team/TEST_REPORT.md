@@ -323,3 +323,23 @@ Owner, 9 Nov 07:55: "Yes for both" (delete the route; ask residents to change th
 - edba5d9: **APPROVE** with should-fixes: the skip window started on any Groq error (a one-off 400, or a Groq-only setup with nothing to fall back to); an empty/cut-off Groq answer counted as success; worst case ~50 s (Groq 25 s + Gemini 25 s); no test pinned what Gemini receives or that quick entry falls back (mutants survived). Minor: Gemini without JSON mode, max_tokens deprecated, invalid tablist role. → 86440ce.
 - 86440ce: **APPROVE**. 12/12 ×2 on fresh gate14, 2,907 each. Worst case now ~33 s (8 + 25). Mutants mA2 (extra data to Gemini), mB2 (quick Groq-only), mH (pause without Gemini), mI (cut-off accepted) caught.
 Backlog (minor): the probe still starts the skip window in a Groq-only setup (production has both keys) · no test of Gemini's request body (`responseMimeType`) · "+ Add" clipped in Admin → Staff at 360 px (pre-existing) · the Groq model and JSON/reasoning settings are unverified against the live service — "Test AI connection" after release shows it.
+
+### Sprint 21 — she speaks Kannada: implementer evidence
+- Root cause (owner's Copilot log screenshots, 9 Nov): every mic used `rec.lang='en-IN'`, so spoken Kannada ("eerulli") reached the server as English words ("heroine", "Erode"), with nothing left to repair. The typed-Kanglish failures in the same screenshots date from 17 Sept and do not reproduce on today's code (probe re-run: "eruli 500rs", "pudina soppu 500rs" → Groceries).
+- `SMParse.toLatin` (new, in the shared speech-parser.js): Kannada script → WhatsApp-style Latin, Kannada digits, loan words (ಕ್ಯಾಶ್ → cash, ಯುಪಿಐ → upi, ರೂಪಾಯಿ → rupees, ಫಿನಾಯಿಲ್ → phenyl). Input with no Kannada letters is returned unchanged. It is used by quick.classify, parseCollection, parseComplaint, the purchase-form voice and `/copilot/category`.
+- Kannada number words (teens, the one-word hundreds such as ಐನೂರು, ಸಾವಿರದ); Kannada fault phrases; Kannada question words; "-kaayi" → Groceries; more dictionary words (hal, hittu, koli …).
+- An item with no amount asks "How much was the …?". The check is every word ∈ Groceries/Cleaning, and the deterministic dictionary is used, never the model.
+- Mic language: per phone (`sm_voice_lang`, try/catch). Two buttons switch it: one while listening and one after a result. `language-not-supported` → back to English. Both voice engines share it.
+- `POST /copilot/category`: auth, 120-character cap, dictionary and history only (the model is never called; a test proves it).
+- Copilot log outcome is in one block; Collect and Complaint voice previews escape what was heard.
+- Mutations M1–M7 were all caught:
+  - M1 transliteration off;
+  - M2 no amount-question;
+  - M3 mic hard-coded to English;
+  - M4 no purchase-category lookup;
+  - M5 old log layout;
+  - M6 unescaped preview;
+  - M7 category route allowed to call the model.
+- UI flake: the second mic tap after the Kannada preview missed 2 of 5 runs. The test now waits for network idle before tapping and has a diagnostic catch, and it then passed 3/3 plus both full runs. The cause was not proven (likely a late re-layout of the preview moving the mic).
+- Gates on e19eb58: 12/12 ×2, 3,023 each (Sprint 20 approved at 2,907); quick 280, ui 954.
+- **Not verified:** Chrome's real ಕನ್ನಡ output on an Android phone (numbers as digits or words, loan-word spellings). The owner tries it on Test.
