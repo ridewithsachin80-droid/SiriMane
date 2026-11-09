@@ -461,30 +461,33 @@ let guestData = null;
 let guestToken = null;
 
 // ── INIT ──────────────────────────────────────────
-// Session store: "keep me signed in" puts the token in localStorage with a
-// 30-day expiry (her own phone); otherwise it stays in sessionStorage and dies
-// with the tab. Either way the server JWT is still the real gate.
-const SESSION_KEYS = ['guest_token', 'guest_data', 'guest_expires'];
+// Sprint 19 (D-17-1): her login is an HttpOnly cookie set by the server — no
+// page script can read it. The app only keeps her (non-secret) details to
+// draw the screen: in localStorage when "keep me signed in" is ticked (her own
+// phone; the server keeps the cookie for the token's life), otherwise in
+// sessionStorage. The server is the real gate: a 401 sends her to login.
+const GH = { 'X-Requested-With': 'sirimane' };   // writes must carry it (anti-forgery)
+const SESSION_KEYS = ['guest_token', 'guest_data', 'guest_expires'];   // guest_token: only to delete old ones
 function sessionRead(k) { return localStorage.getItem(k) || sessionStorage.getItem(k); }
 function sessionClear() { SESSION_KEYS.forEach(k => { localStorage.removeItem(k); sessionStorage.removeItem(k); }); }
-function sessionSave(token, data, remember) {
+function sessionRemembered() { return !!localStorage.getItem('guest_data'); }
+function sessionSave(_token, data, remember) {
   sessionClear();
   const store = remember ? localStorage : sessionStorage;
-  store.setItem('guest_token', token);
   store.setItem('guest_data', JSON.stringify(data));
-  if (remember) store.setItem('guest_expires', String(Date.now() + 30 * 24 * 60 * 60 * 1000));
+  if (remember) store.setItem('guest_expires', String(Date.now() + 24 * 60 * 60 * 1000));   // the cookie's life
 }
+try { localStorage.removeItem('guest_token'); sessionStorage.removeItem('guest_token'); } catch (_) {}   // tokens stored by the old app
 
 window.onload = () => {
-  const saved = sessionRead('guest_token');
   const savedData = sessionRead('guest_data');
   const expires = sessionRead('guest_expires');
   if (expires && Date.now() > Number(expires)) { sessionClear(); registerPortalSW(); return; }
   // window.onload waits for EVERY resource; on slow 4G she may already have
   // logged in by then. Restoring the saved session again would redraw the
   // app and pull her back to Home mid-task (found by the Sprint 16 gate).
-  if (saved && savedData && !guestToken) {
-    guestToken = saved;
+  if (savedData && !guestToken) {
+    guestToken = 'cookie';   // Sprint 19: "logged in on this phone" — the server decides
     guestData = JSON.parse(savedData);
     showPortal();
     loadThenHome();
@@ -548,13 +551,14 @@ async function guestLogin() {
   try {
     const res = await fetch('/api/guest-login', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mobile, password })
+      headers: { 'Content-Type': 'application/json', ...GH },
+      credentials: 'same-origin',
+      body: JSON.stringify({ mobile, password, remember: !!document.getElementById('login-remember')?.checked })
     });
     const data = await res.json();
     if (!res.ok) { showAl(al, data.error || 'Invalid credentials', 'danger'); return; }
 
-    guestToken = data.token;
+    guestToken = 'cookie';   // Sprint 19: the server set an HttpOnly cookie
     guestData = data.guest;
     al.classList.add('hidden');
     if (data.must_change_password) {
@@ -586,6 +590,7 @@ function guestLogout() {
   document.querySelector('.header')?.classList.remove('compact');
   sessionClear();
   guestToken = null; guestData = null;
+  fetch('/api/guest-logout', { method: 'POST', headers: GH, credentials: 'same-origin' }).catch(() => {});   // Sprint 19: end the cookie session
   document.getElementById('portal-section').classList.add('hidden');
   document.getElementById('login-section').classList.remove('hidden');
   document.body.classList.remove('p-in');
@@ -670,7 +675,7 @@ async function loadPortalHome() {
 async function apiGuest(path, options = {}) {
   const res = await fetch('/api' + path, {
     method: options.method || 'GET',
-    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + guestToken },
+    headers: { 'Content-Type': 'application/json', ...GH },
     body: options.body ? JSON.stringify(options.body) : undefined
   });
   const text = await res.text();
@@ -771,7 +776,7 @@ async function loadIdCard() {
   const host = document.getElementById('idcard-body');
   if (!host) return;
   try {
-    const res = await fetch('/api/guest-id', { headers: { Authorization: 'Bearer ' + guestToken } });
+    const res = await fetch('/api/guest-id', { headers: { ...GH } });
     const d = await res.json();
     if (!res.ok) throw new Error(d.error || 'Could not load your ID');
     host.innerHTML = `
@@ -799,12 +804,12 @@ async function loadIdCard() {
 async function loadGuestData() {
   try {
     const res = await fetch('/api/guest-portal', {
-      headers: { 'Authorization': 'Bearer ' + guestToken }
+      headers: { ...GH }
     });
     if (res.status === 401) { guestLogout(); return; }
     const data = await res.json();
     guestData = data;
-    (localStorage.getItem('guest_token') ? localStorage : sessionStorage).setItem('guest_data', JSON.stringify(data));
+    (sessionRemembered() ? localStorage : sessionStorage).setItem('guest_data', JSON.stringify(data));
     renderPayTab(data);
     renderDetails(data);
     renderMenu(data.menu || []);
@@ -904,7 +909,7 @@ async function claimUpiPayment(amount) {
   try {
     await fetch('/api/guest-upi-claim', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + guestToken },
+      headers: { 'Content-Type': 'application/json', ...GH },
       body: JSON.stringify({ amount })
     });
     const claimed = document.getElementById('p-pay-claimed');
@@ -948,7 +953,7 @@ function renderDetails(g) {
 
 async function downloadGuestReceipt(id) {
   try {
-    const res = await fetch(`/api/guest-receipt/${id}/pdf`, { headers: { 'Authorization': 'Bearer ' + guestToken } });
+    const res = await fetch(`/api/guest-receipt/${id}/pdf`, { headers: { ...GH } });
     if (!res.ok) { alert('Could not download receipt.'); return; }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
@@ -1015,7 +1020,7 @@ async function sendComplaint() {
   try {
     const res = await fetch('/api/guest-complaint', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + guestToken },
+      headers: { 'Content-Type': 'application/json', ...GH },
       body: JSON.stringify({ category: document.getElementById('cpg-category').value, description })
     });
     const data = await res.json();
@@ -1033,7 +1038,7 @@ async function sendComplaint() {
 async function loadComplaintHistory() {
   const el = document.getElementById('cpg-history');
   try {
-    const res = await fetch('/api/guest-complaints', { headers: { 'Authorization': 'Bearer ' + guestToken } });
+    const res = await fetch('/api/guest-complaints', { headers: { ...GH } });
     const list = await res.json();
     if (!res.ok || !list.length) { el.innerHTML = '<p style="text-align:center;color:var(--p-text-light);font-size:13px">No issues reported yet</p>'; return; }
     el.innerHTML = list.map(c => `
@@ -1099,11 +1104,11 @@ async function forcePasswordSave() {
   if (n1 !== n2) { showAl(al, 'The two passwords do not match', 'danger'); return; }
   const btn = document.getElementById('fpw-btn'); btn.disabled = true;
   try {
-    const res = await fetch('/api/guest-change-password', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + guestToken }, body: JSON.stringify({ currentPassword: forcePw.current, newPassword: n1 }) });
+    const res = await fetch('/api/guest-change-password', { method: 'POST', headers: { 'Content-Type': 'application/json', ...GH }, body: JSON.stringify({ currentPassword: forcePw.current, newPassword: n1 }) });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) { showAl(al, data.error || 'Could not save. Try again.', 'danger'); return; }
-    guestToken = data.token;
-    sessionSave(guestToken, guestData, forcePw.remember);
+    guestToken = 'cookie';   // the server replaced the cookie with a full one
+    sessionSave(null, guestData, forcePw.remember);
     forcePw = null;
     document.getElementById('force-pw-section').classList.add('hidden');
     showPortal();
@@ -1126,12 +1131,12 @@ async function changePassword() {
   try {
     const res = await fetch('/api/guest-change-password', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + guestToken },
+      headers: { 'Content-Type': 'application/json', ...GH },
       body: JSON.stringify({ currentPassword: current, newPassword: newPwd })
     });
     const data = await res.json();
     if (!res.ok) { showAl(al, data.error, 'danger'); return; }
-    if (data.token) { guestToken = data.token; try { sessionSave(guestToken, guestData, !!localStorage.getItem('guest_token')); } catch {} }
+    // Sprint 19: the server replaced the cookie; nothing to store
     document.getElementById('pwd-current').value = '';
     document.getElementById('pwd-new').value = '';
     document.getElementById('pwd-confirm').value = '';

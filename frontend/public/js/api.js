@@ -1,8 +1,17 @@
 // js/api.js
 const API_BASE = '/api';
-function getToken() { return localStorage.getItem('sm_token'); }
-function setToken(t) { localStorage.setItem('sm_token', t); }
-function clearAuth() { localStorage.removeItem('sm_token'); localStorage.removeItem('sm_user'); window.location.href = '/management.html'; }
+// Sprint 19 (D-17-1): the login is an HttpOnly cookie the server sets — no
+// page script can read it. 'sm_user' (name and role, not a secret) only tells
+// the app someone is logged in on this browser; the server decides.
+const APP_HEADER = { 'X-Requested-With': 'sirimane' };   // writes must carry it (anti-forgery)
+try { localStorage.removeItem('sm_token'); } catch (_) {}  // tokens stored by the old app
+function getToken() { try { return localStorage.getItem('sm_user') ? 'cookie' : null; } catch (_) { return null; } }
+function setToken() { /* the server set the cookie */ }
+function clearAuth() {
+  try { localStorage.removeItem('sm_token'); localStorage.removeItem('sm_user'); } catch (_) {}
+  const go = () => { window.location.href = '/management.html'; };
+  fetch('/api/auth/logout', { method: 'POST', headers: APP_HEADER, credentials: 'same-origin' }).then(go, go);
+}
 
 // Turns any HTTP response into JSON safely. A non-JSON body (e.g. an HTML
 // error page from the proxy, or an empty 502) becomes a readable message
@@ -15,9 +24,9 @@ async function readJson(res) {
 }
 
 async function apiFetch(endpoint, options = {}) {
-  const token = getToken();
   const config = {
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    headers: { 'Content-Type': 'application/json', ...APP_HEADER },   // Sprint 19: the cookie travels by itself
+    credentials: 'same-origin',
     ...options
   };
   if (options.body && typeof options.body === 'object') config.body = JSON.stringify(options.body);
@@ -113,10 +122,10 @@ const API = {
   shiftGuestRoom: (guestId,d) => apiFetch(`/guests/${guestId}/shift-room`, { method:'POST', body:d })
 };
 
-// Export downloads need the auth header, so a plain <a href> won't work —
-// fetch as a blob and trigger the download manually instead.
+// Export downloads are fetched as a blob and saved by hand (the login cookie
+// travels with same-origin fetches — Sprint 19).
 API.downloadExport = async function(path, filename) {
-  const res = await fetch('/api' + path, { headers: { 'Authorization': 'Bearer ' + getToken() } });
+  const res = await fetch('/api' + path, { headers: APP_HEADER, credentials: 'same-origin' });
   if (!res.ok) {
     const err = await readJson(res).catch(()=>({error:'Export failed'}));
     throw new Error(err.error || 'Export failed');

@@ -4891,7 +4891,7 @@ async function loadRequestPhotos() {
   for (const img of imgs) {
     if (img.dataset.loaded) continue;
     try {
-      const res = await fetch(`/api/requests/${img.dataset.req}/photos/${img.dataset.photo}`, { headers: { Authorization: 'Bearer ' + getToken() } });
+      const res = await fetch(`/api/requests/${img.dataset.req}/photos/${img.dataset.photo}`, { headers: APP_HEADER, credentials: 'same-origin' });   // Sprint 19: login cookie
       if (!res.ok) throw new Error('photo failed');
       const url = URL.createObjectURL(await res.blob());
       img.src = url; img.dataset.loaded = '1';
