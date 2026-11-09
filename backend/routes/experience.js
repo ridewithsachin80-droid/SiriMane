@@ -26,21 +26,10 @@ const MEALS = ['Breakfast', 'Lunch', 'Dinner'];
 
 // Notices this resident should see: targeted at everyone, her floor, her room
 // or her personally, published and not expired.
-function noticeWhere(alias = 'a') {
-  return `(${alias}.publish_at IS NULL OR ${alias}.publish_at <= NOW())
-      AND (${alias}.expires_at IS NULL OR ${alias}.expires_at > NOW())
-      AND (COALESCE(${alias}.target_type,'all') = 'all'
-        OR (${alias}.target_type='room' AND ${alias}.target_value = $2)
-        OR (${alias}.target_type='floor' AND ${alias}.target_value = $3)
-        OR (${alias}.target_type='resident' AND ${alias}.target_value = $1::text))`;
-}
+// Sprint 20: the notice rule and her room/floor live in services/notices.js,
+// shared with the resident portal.
+const { noticeWhere, residentContext } = require('../services/notices');
 
-async function residentContext(guestId) {
-  const r = await pool.query(`SELECT g.id, g.name, g.room_id, g.bed_number, r.room_number, r.floor
-                                FROM guests g LEFT JOIN rooms r ON r.id=g.room_id WHERE g.id=$1`, [guestId]);
-  const x = r.rows[0] || {};
-  return { id: guestId, name: x.name, room_number: x.room_number || null, floor: x.floor == null ? null : String(x.floor) };
-}
 
 // ── Portal home: one call ────────────────────────────────────────────────
 router.get('/guest-home', guestAuth, wrap(async (req, res) => {

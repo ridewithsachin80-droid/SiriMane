@@ -19,7 +19,11 @@ const pool = require('../db');
 const auth = require('../middleware/auth');
 
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+// Sprint 20: Groq retired llama-3.3-70b-versatile on 16 Aug 2026 — every Groq
+// call failed from then on. Default to a current production model; override
+// with GROQ_MODEL. Any Groq failure now falls back to Gemini (providers.text).
+const GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
+const GROQ_COOLDOWN_MS = 10 * 60 * 1000;
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // after the client's downscale a bill is ~150–400 kB
 const AI_TIMEOUT_MS = 25000;
 
@@ -78,7 +82,9 @@ const providers = {
       const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` }, signal: t.signal,
         body: JSON.stringify({
-          model: GROQ_MODEL, temperature: 0, max_tokens: 400,
+          model: GROQ_MODEL, temperature: 0, max_tokens: 1000,
+          // gpt-oss models reason before answering: keep it short so the answer fits
+          ...(/gpt-oss/.test(GROQ_MODEL) ? { reasoning_effort: 'low' } : {}),
           ...(json ? { response_format: { type: 'json_object' } } : {}),
           messages: [{ role: 'system', content: system }, { role: 'user', content: user }]
         })
@@ -87,6 +93,31 @@ const providers = {
       if (!res.ok) throw new Error(`Groq ${res.status}: ${data.error?.message || 'request failed'}`);
       return data.choices?.[0]?.message?.content || '';
     } finally { t.clear(); }
+  },
+  // ── Sprint 20: the ONE way to ask for text. Groq first when configured;
+  // on ANY Groq failure the same request goes to Gemini, and Groq is skipped
+  // for 10 minutes so a dead provider never adds a wait on patchy 4G.
+  // meta.provider says who answered ('groq' | 'gemini').
+  groqDownUntil: 0, groqLastError: null,
+  async text({ system, user, json }, meta = {}) {
+    const groqOn = !!(process.env.GROQ_API_KEY || providers._stub);
+    const geminiOn = !!(process.env.GEMINI_API_KEY || providers._stub);
+    if (groqOn && Date.now() >= providers.groqDownUntil) {
+      try {
+        const out = await providers.groqText({ system, user, json });
+        meta.provider = 'groq';
+        return out;
+      } catch (e) {
+        providers.groqDownUntil = Date.now() + GROQ_COOLDOWN_MS;
+        providers.groqLastError = e.message;
+        console.warn('[ai] Groq failed — using Gemini for 10 minutes:', e.message);
+        if (!geminiOn) throw e;
+      }
+    }
+    if (!geminiOn) throw new Error('No AI provider is configured (GROQ_API_KEY / GEMINI_API_KEY)');
+    const out = await providers.geminiText({ prompt: system + '\n\n' + user });
+    meta.provider = 'gemini';
+    return out;
   }
 };
 
@@ -171,6 +202,14 @@ router.get('/probe', auth, async (req, res) => {
     const txt = await providers.groqText({ system: 'Reply with exactly the word OK.', user: 'ping' });
     out.groq = { ok: /ok/i.test(txt), model: GROQ_MODEL, ms: Date.now() - t1, reply: String(txt).slice(0, 40) };
   } catch (e) { out.groq = { ok: false, model: GROQ_MODEL, error: e.message }; }
+  // Sprint 20: a working Groq ends any skip window; a failing one starts it.
+  if (process.env.GROQ_API_KEY || providers._stub) {
+    if (out.groq.ok) providers.groqDownUntil = 0;
+    else { providers.groqDownUntil = Date.now() + GROQ_COOLDOWN_MS; providers.groqLastError = out.groq.error || 'probe failed'; }
+  }
+  const groqUsable = !!(process.env.GROQ_API_KEY || providers._stub) && Date.now() >= providers.groqDownUntil;
+  out.in_use = groqUsable ? 'groq' : (out.gemini.ok ? 'gemini' : null);
+  out.fallback = !!(process.env.GROQ_API_KEY || providers._stub) && !groqUsable && out.gemini.ok;
   res.json(out);
 });
 
@@ -257,9 +296,7 @@ router.post('/parse', auth, async (req, res) => {
       system = `You classify a PG resident's complaint. Reply ONLY with JSON: {"category": <one of Water|Electrical|Wifi/Internet|Cleanliness|Food|Furniture|Security|Noise|Other>, "priority": <"low"|"medium"|"high">, "description": <the complaint rewritten as one clear English sentence>}. Water, electrical and security problems are usually high.`;
       user = text;
     }
-    const reply = process.env.GROQ_API_KEY || providers._stub
-      ? await providers.groqText({ system, user, json: true })
-      : await providers.geminiText({ prompt: system + '\n\n' + user });
+    const reply = await providers.text({ system, user, json: true });   // Sprint 20: Groq → Gemini
     const parsed = parseJsonLoose(reply);
     if (!parsed) return res.status(502).json({ error: 'Could not understand that — please fill the form' });
     if (kind === 'collection') {

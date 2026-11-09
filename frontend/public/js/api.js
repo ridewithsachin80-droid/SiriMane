@@ -43,7 +43,9 @@ async function apiFetch(endpoint, options = {}) {
   const data = await readJson(res);
   if (res.status === 401) {
     // A wrong password on these two is an answer, not a lost session (review S19-7)
-    if (endpoint === '/auth/login' || endpoint === '/auth/change-password') {
+    // …but only the wrong-password answer: an expired or turned-off login on
+    // change-password still logs out (Sprint 20, from the 19 review).
+    if (endpoint === '/auth/login' || (endpoint === '/auth/change-password' && /current password/i.test(data.error || ''))) {
       throw new Error(data.error || 'Invalid credentials');
     }
     clearAuth();

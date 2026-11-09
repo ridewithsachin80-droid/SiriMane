@@ -1608,7 +1608,8 @@ router.get('/guest-portal', guestAuth, async (req, res) => {
       g.room_id ? pool.query('SELECT room_number FROM rooms WHERE id=$1', [g.room_id]) : { rows: [{}] },
       pool.query('SELECT * FROM collections WHERE guest_id=$1 AND is_deleted=false ORDER BY collection_date DESC LIMIT 24', [g.id]),
       pool.query('SELECT * FROM daily_menu ORDER BY CASE day_of_week WHEN \'Monday\' THEN 1 WHEN \'Tuesday\' THEN 2 WHEN \'Wednesday\' THEN 3 WHEN \'Thursday\' THEN 4 WHEN \'Friday\' THEN 5 WHEN \'Saturday\' THEN 6 WHEN \'Sunday\' THEN 7 END'),
-      pool.query('SELECT * FROM announcements WHERE is_active=true ORDER BY created_at DESC LIMIT 10'),
+      // Sprint 20: only the notices meant for her (everyone / her room / floor / her)
+      require('../services/notices').residentContext(g.id).then(c => pool.query(`SELECT a.* FROM announcements a WHERE ${require('../services/notices').noticeWhere()} ORDER BY a.created_at DESC LIMIT 10`, [g.id, c.room_number, c.floor])),
       pool.query(`SELECT key, value FROM app_settings WHERE key IN ('upi_vpa','upi_name','pg_name','pg_phone')`),
       computeGuestLedger(g)
     ]);

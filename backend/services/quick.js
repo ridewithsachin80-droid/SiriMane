@@ -118,7 +118,7 @@ async function categorise(item, opts = {}) {
     try {
       const system = `Classify a paying-guest hostel expense into exactly one category from this list: ${CATEGORIES.join(', ')}. Reply ONLY with JSON {"category": "<one of the list>"}.`;
       const user = `Item: ${words.join(' ')}`;
-      const reply = process.env.GROQ_API_KEY || ai.providers._stub ? await ai.providers.groqText({ system, user, json: true }) : await ai.providers.geminiText({ prompt: system + '\n\n' + user });
+      const reply = await ai.providers.text({ system, user, json: true })   /* Sprint 20: Groq → Gemini */;
       const parsed = typeof reply === 'string' ? JSON.parse(reply.replace(/```json|```/g, '').trim()) : reply;
       const c = CATEGORIES.find(x => x.toLowerCase() === String(parsed && parsed.category || '').toLowerCase());
       if (c) return { category: c, basis: 'suggested by the model from the item words', via: 'model' };
@@ -150,7 +150,7 @@ Expense categories, for context only: ${CATEGORIES.join(', ')}
 Reply ONLY with JSON {"phrase": "<the phrase>", "confidence": "high"|"low"}. Never invent an amount that was not spoken.`;
   const user = `Transcripts:\n${alts.map((a, i) => `${i + 1}. ${a}`).join('\n')}`;
   try {
-    const reply = process.env.GROQ_API_KEY || ai.providers._stub ? await ai.providers.groqText({ system, user, json: true }) : await ai.providers.geminiText({ prompt: system + '\n\n' + user });
+    const reply = await ai.providers.text({ system, user, json: true })   /* Sprint 20: Groq → Gemini */;
     const parsed = typeof reply === 'string' ? JSON.parse(reply.replace(/```json|```/g, '').trim()) : reply;
     const phrase = String(parsed && parsed.phrase || '').trim().slice(0, 200);
     return phrase && phrase.toLowerCase() !== raw.toLowerCase() ? { phrase, confidence: parsed.confidence === 'high' ? 'high' : 'low' } : null;

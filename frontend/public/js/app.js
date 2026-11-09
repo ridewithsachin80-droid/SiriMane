@@ -2825,7 +2825,7 @@ function renderAdminPage() {
   __draw(`
     <div class="page-header"><h1>Admin</h1><p>Staff accounts, audit trail, deposit refunds, and app settings</p></div>
     <div id="schema-banner"></div>
-    <div class="flex gap-2 mb-5">
+    <div class="flex gap-2 mb-5 admin-tabs" role="tablist">
       <button class="btn ${adminActiveTab==='staff'?'btn-primary':'btn-outline'} btn-sm" onclick="switchAdminTab('staff')">Staff Users</button>
       <button class="btn ${adminActiveTab==='audit'?'btn-primary':'btn-outline'} btn-sm" onclick="switchAdminTab('audit')">Audit Log</button>
       <button class="btn ${adminActiveTab==='refunds'?'btn-primary':'btn-outline'} btn-sm" onclick="switchAdminTab('refunds')">Deposit Refunds</button>
@@ -3067,14 +3067,14 @@ async function renderAdminAuditTab() {
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>WHEN</th><th>USER</th><th>PAYS</th><th>ACTION</th><th>DETAILS</th></tr></thead>
+            <thead><tr><th>WHEN</th><th>USER</th><th>ACTION</th><th>DETAILS</th></tr></thead>
             <tbody id="audit-tb">
               ${log.length===0
                 ? `<tr class="empty-row"><td colspan="4">${emptyState('calendar', 'No activity yet', 'Actions taken in the app will be listed here.', '')}</td></tr>`
                 : log.map(a=>`<tr data-search="${esc((a.username||'').toLowerCase())} ${a.action.toLowerCase()} ${esc((a.details||'').toLowerCase())}">
                   <td style="white-space:nowrap">${new Date(a.created_at).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}</td>
                   <td>${esc(a.username||'—')}</td>
-                  <td><span class="badge badge-gray">${a.action}</span></td>
+                  <td><span class="badge badge-gray">${esc(a.action)}</span></td>
                   <td>${esc(a.details||'—')}</td>
                 </tr>`).join('')}
             </tbody>
@@ -3740,8 +3740,12 @@ async function runAiProbe() {
   btn.disabled = true; out.textContent = 'Testing…';
   try {
     const r = await apiFetch('/ai/probe');
-    const line = (name, x) => `${x.ok ? '✅' : '❌'} ${name} <code>${x.model}</code>${x.ok ? ` — ${x.ms} ms` : ` — ${x.error || 'unexpected reply: ' + (x.reply || '')}`}`;
-    out.innerHTML = line('Gemini', r.gemini) + '<br>' + line('Groq', r.groq);
+    const line = (name, x) => `${x.ok ? '✅' : '❌'} ${name} <code>${esc(x.model)}</code>${x.ok ? ` — ${esc(x.ms)} ms` : ` — ${esc(x.error || 'unexpected reply: ' + (x.reply || ''))}`}`;
+    // Sprint 20: say which provider the app is using right now
+    const using = r.in_use === 'groq' ? 'The app is using <strong>Groq</strong> for text (Gemini as backup).'
+      : r.in_use === 'gemini' ? (r.fallback ? 'Groq is not working — the app is using <strong>Gemini</strong> instead. Everything keeps working.' : 'The app is using <strong>Gemini</strong> for text.')
+      : 'No AI text provider is working — the app falls back to its simple rules.';
+    out.innerHTML = line('Gemini', r.gemini) + '<br>' + line('Groq', r.groq) + `<br><span id="ai-in-use">${using}</span>`;
   } catch (e) { out.textContent = e.message; }
   finally { btn.disabled = false; }
 }

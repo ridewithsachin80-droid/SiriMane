@@ -229,6 +229,33 @@ const api = async (method, path, body, token) => {
     eq(r.status, 401, 'staff token cannot open a resident portal');
     console.log('✓ ai routes, privacy, source columns, guest linkage');
 
+    // ── Sprint 20: AI text never depends on one provider
+    {
+      const realGroq = ai.providers.groqText, realGem = ai.providers.geminiText;
+      let groqCalls = 0, gemCalls = 0;
+      ai.providers.groqDownUntil = 0;
+      ai.providers.groqText = async () => { groqCalls++; throw new Error('Groq 404: The model `llama-3.3-70b-versatile` does not exist'); };
+      ai.providers.geminiText = async ({ prompt }) => { gemCalls++; return /complaint/i.test(prompt) ? JSON.stringify({ category: 'Water', priority: 'high', description: 'Tap leaking in room 4' }) : 'OK'; };
+      r = await api('POST', '/ai/parse', { kind: 'complaint', text: 'tap leaking in room 4' }, staffTok);
+      ok(r.status === 200 && r.data.category === 'Water' && groqCalls === 1 && gemCalls === 1, `S20-1 Groq failing → the same request is answered by Gemini (${r.status} ${JSON.stringify(r.data).slice(0, 80)})`);
+      r = await api('POST', '/ai/parse', { kind: 'complaint', text: 'tap leaking in room 5' }, staffTok);
+      ok(r.status === 200 && groqCalls === 1 && gemCalls === 2, 'S20-1 after a Groq failure, Groq is skipped (no extra wait) and Gemini answers');
+      ok(ai.providers.groqDownUntil > Date.now() + 9 * 60000, 'S20-1 …for 10 minutes');
+      // The probe says what's in use, and a working Groq ends the skip window
+      r = await api('GET', '/ai/probe', null, adminTok);
+      ok(r.data.groq.ok === false && r.data.in_use === 'gemini' && r.data.fallback === true, `S20-2 the connection test says Gemini is standing in (${r.data.in_use})`);
+      ai.providers.groqText = async ({ user }) => { groqCalls++; return user === 'ping' ? 'OK' : JSON.stringify({ category: 'Electrical', priority: 'low', description: 'x' }); };
+      r = await api('GET', '/ai/probe', null, adminTok);
+      ok(r.data.groq.ok === true && r.data.in_use === 'groq' && ai.providers.groqDownUntil === 0, 'S20-2 a working Groq is used again straight away');
+      // No provider at all → a clear error, not a hang
+      ai.providers.groqText = async () => { throw new Error('down'); };
+      ai.providers.geminiText = async () => { throw new Error('also down'); };
+      ai.providers.groqDownUntil = 0;
+      r = await api('POST', '/ai/parse', { kind: 'complaint', text: 'fan broken' }, staffTok);
+      ok(r.status === 502, 'S20-1 both providers down → the form says to fill it in (502), no crash');
+      ai.providers.groqText = realGroq; ai.providers.geminiText = realGem; ai.providers.groqDownUntil = 0;
+    }
+
     console.log(`\n✅ AI gate passed — ${count} assertions`);
   } catch (e) {
     console.error(`\n❌ AI gate FAILED after ${count} assertions:\n`, e.message); process.exitCode = 1;
