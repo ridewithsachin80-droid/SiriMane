@@ -3505,8 +3505,15 @@ async function loadAiStatus() {
 // choice is per phone (browser storage), and one tap on the status line
 // switches it and listens again — no settings screen to find.
 const SM_VOICE_LANGS = { 'en-IN': 'English', 'kn-IN': 'ಕನ್ನಡ' };
-function smVoiceLang() { try { const v = localStorage.getItem('sm_voice_lang'); if (v && SM_VOICE_LANGS[v]) return v; } catch (e) {} return 'en-IN'; }
-function smSetVoiceLang(v) { try { localStorage.setItem('sm_voice_lang', SM_VOICE_LANGS[v] ? v : 'en-IN'); } catch (e) {} }
+// Review S21 (S5): the choice lives in the page; storage only remembers it,
+// so the switch still works where browser storage is blocked.
+let smVoiceLangNow = null;
+function smVoiceLang() {
+  if (smVoiceLangNow) return smVoiceLangNow;
+  try { const v = localStorage.getItem('sm_voice_lang'); if (v && SM_VOICE_LANGS[v]) return (smVoiceLangNow = v); } catch (e) {}
+  return (smVoiceLangNow = 'en-IN');
+}
+function smSetVoiceLang(v) { smVoiceLangNow = SM_VOICE_LANGS[v] ? v : 'en-IN'; try { localStorage.setItem('sm_voice_lang', smVoiceLangNow); } catch (e) {} }
 // A button that switches the mic language and listens again at once.
 // `active` is the recogniser still running (stopped first), `again` starts a new one.
 function smLangButton(active, again) {
@@ -3515,7 +3522,15 @@ function smLangButton(active, again) {
   b.type = 'button'; b.className = 'voice-lang';
   b.textContent = other === 'kn-IN' ? 'ಕನ್ನಡದಲ್ಲಿ ಹೇಳಿ' : 'Speak English';
   b.setAttribute('aria-label', other === 'kn-IN' ? 'Listen in Kannada' : 'Listen in English');
-  b.onclick = ev => { ev.preventDefault(); ev.stopPropagation(); smSetVoiceLang(other); const r = active(); if (r) { r.__then = again; try { r.abort(); } catch (e) { again(); } } else again(); };
+  b.onclick = ev => {
+    ev.preventDefault(); ev.stopPropagation(); smSetVoiceLang(other);
+    const r = active();
+    if (!r) return again();
+    r.__then = again;
+    // abort() fires onend, which clears the old recogniser and calls again();
+    // if abort() itself throws, run that same onend by hand.
+    try { r.abort(); } catch (e) { if (r.onend) r.onend(); else { r.__then = null; again(); } }
+  };
   return b;
 }
 const SM_VOICE_ERRORS = { 'no-speech': 'Didn\'t hear anything — tap the mic and try again', 'audio-capture': 'No microphone found', 'not-allowed': 'Microphone permission denied — allow it in Chrome settings', 'network': 'Network error — check your signal', 'language-not-supported': 'ಕನ್ನಡ voice isn\'t available on this phone — switched back to English', 'aborted': '' };

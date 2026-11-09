@@ -483,6 +483,7 @@ async function runAtWidth(browser, BASE, width) {
   // S21-9: on a phone the outcome badge and Siri's reply stack — reply under the badge, not squeezed beside it
   const outcomeGeo = await page.evaluate(() => { const o = [...document.querySelectorAll('#admin-tab-content .cl-outcome')].find(x => x.querySelector('.cl-reply')); if (!o) return null; const b = o.querySelector('.badge').getBoundingClientRect(), t = o.querySelector('.cl-reply').getBoundingClientRect(); return { below: t.top >= b.bottom - 1, w: t.width }; });
   ok(outcomeGeo && outcomeGeo.below, `${tag} S21-9 Copilot log: the reply sits under the outcome badge (${JSON.stringify(outcomeGeo)})`);
+  eq(await page.evaluate(() => { const o = document.querySelector('#admin-tab-content .cl-outcome'); return o ? getComputedStyle(o).textAlign : null; }), 'left', `${tag} S21-9 the reply reads left to right from the badge, not ragged right`);
   ok(outcomeGeo && outcomeGeo.w >= 150, `${tag} S21-9 …with room to read (${outcomeGeo && Math.round(outcomeGeo.w)} px wide)`);
   await noHScroll('S21 Copilot log');
   await page.screenshot({ path: path.join(SHOTS, `s21-copilot-log-${width}.png`) });
@@ -496,7 +497,7 @@ async function runAtWidth(browser, BASE, width) {
     window.webkitSpeechRecognition = class { constructor() { this.lang = ''; window.__recs.push(this); }
       start() { setTimeout(() => this.onstart && this.onstart(), 0); }
       stop() { setTimeout(() => this.onend && this.onend(), 0); }
-      abort() { this.aborted = true; setTimeout(() => { this.onerror && this.onerror({ error: 'aborted' }); this.onend && this.onend(); }, 0); } };
+      abort() { this.aborted = true; if (window.__abortThrows) throw new Error('abort failed'); setTimeout(() => { this.onerror && this.onerror({ error: 'aborted' }); this.onend && this.onend(); }, 0); } };
     window.SpeechRecognition = window.webkitSpeechRecognition;
     window.__say = (t) => { const r = window.__recs[window.__recs.length - 1]; r.onresult({ results: [[{ transcript: t }]] }); r.onend && r.onend(); };
     window.__fail = (err) => { const r = window.__recs[window.__recs.length - 1]; r.onerror({ error: err }); r.onend && r.onend(); };
@@ -527,16 +528,35 @@ async function runAtWidth(browser, BASE, width) {
   await page.waitForFunction(() => window.__recs.length === 3, { timeout: 5000 }).catch(async e => { console.log('DEBUG', await page.evaluate(() => { const m = document.getElementById('copilot-mic').getBoundingClientRect(); const at = document.elementFromPoint(m.left + m.width / 2, m.top + m.height / 2); return JSON.stringify({ n: window.__recs.length, smRec: !!smRec, at: at && (at.id || at.className), m: [m.top, m.left], status: document.getElementById('copilot-voice-status').textContent }); })); throw e; });
   eq(await page.evaluate(() => window.__recs[2].lang), 'kn-IN', `${tag} S21-12 the next tap listens in Kannada again`);
   // A phone without Kannada speech falls back to English and says so.
+  // (A real recogniser starts before it can fail: wait for "Listening" first.)
+  await page.waitForFunction(() => /Listening in ಕನ್ನಡ/.test(document.getElementById('copilot-voice-status').textContent), { timeout: 5000 });
   await page.evaluate(() => window.__fail('language-not-supported'));
   await page.waitForFunction(() => /switched back to English/.test(document.getElementById('copilot-voice-status').textContent), { timeout: 5000 });
   eq(await page.evaluate(() => localStorage.getItem('sm_voice_lang')), 'en-IN', `${tag} S21-12 no Kannada voice on this phone → back to English, and it says so`);
+  // Review S21 (S5): with browser storage blocked the switch still works; and
+  // if the old recogniser's abort() throws, the mic still restarts.
+  const nBlk = await page.evaluate(() => {
+    window.__gi = Storage.prototype.getItem; window.__si = Storage.prototype.setItem;
+    Storage.prototype.getItem = function () { throw new Error('storage blocked'); };
+    Storage.prototype.setItem = function () { throw new Error('storage blocked'); };
+    smVoiceLangNow = null; window.__abortThrows = true; return window.__recs.length;
+  });
+  await page.tap('#copilot-mic');
+  await page.waitForFunction(n => window.__recs.length === n + 1, { timeout: 5000 }, nBlk);
+  await page.waitForFunction(() => /Listening in English/.test(document.getElementById('copilot-voice-status').textContent) && document.querySelector('#copilot-voice-status .voice-lang'), { timeout: 5000 });
+  await page.tap('#copilot-voice-status .voice-lang');
+  await page.waitForFunction(n => window.__recs.length === n + 2 && /Listening in ಕನ್ನಡ/.test(document.getElementById('copilot-voice-status').textContent), { timeout: 5000 }, nBlk).catch(() => {});
+  const blk = await page.evaluate(n => ({ count: window.__recs.length - n, first: window.__recs[n] && window.__recs[n].lang, second: window.__recs[n + 1] && window.__recs[n + 1].lang, status: document.getElementById('copilot-voice-status').textContent }), nBlk);
+  await page.evaluate(() => { Storage.prototype.getItem = window.__gi; Storage.prototype.setItem = window.__si; window.__abortThrows = false; const r = window.__recs[window.__recs.length - 1]; r.onend && r.onend(); });
+  ok(blk.count === 2 && blk.first === 'en-IN' && blk.second === 'kn-IN' && /Listening in ಕನ್ನಡ/.test(blk.status), `${tag} S5 storage blocked + abort() throwing: one tap still switches to ಕನ್ನಡ and listens (${JSON.stringify(blk)})`);
   // S21-13 The purchase form: Kannada words, spoken numbers, a category its own list lacks.
-  await page.evaluate(() => { localStorage.setItem('sm_voice_lang', 'kn-IN'); purchaseModal(); });
+  await page.evaluate(() => { smSetVoiceLang('kn-IN'); purchaseModal(); });
   await page.waitForSelector('#pu-mic-btn', { timeout: 8000 });
   const catBefore = await page.$eval('#pu-cat', e => e.value);
+  const nPu = await page.evaluate(() => window.__recs.length);
   await page.tap('#pu-mic-btn');
-  await page.waitForFunction(() => window.__recs.length === 4, { timeout: 5000 });
-  eq(await page.evaluate(() => window.__recs[3].lang), 'kn-IN', `${tag} S21-13 the purchase mic uses the same language`);
+  await page.waitForFunction(n => window.__recs.length === n + 1, { timeout: 5000 }, nPu);
+  eq(await page.evaluate(() => window.__recs[window.__recs.length - 1].lang), 'kn-IN', `${tag} S21-13 the purchase mic uses the same language`);
   await page.evaluate(() => window.__say('ಫಿನಾಯಿಲ್ ನೂರು ಇಪ್ಪತ್ತು ಕ್ಯಾಶ್'));
   await page.waitForFunction(() => document.getElementById('pu-cat').value === 'Cleaning', { timeout: 8000 }).catch(() => {});
   const pu = await page.evaluate(() => ({ amt: document.getElementById('pu-amt').value, cat: document.getElementById('pu-cat').value, desc: document.getElementById('pu-desc').value, mode: document.getElementById('pu-mode').value }));
@@ -553,7 +573,7 @@ async function runAtWidth(browser, BASE, width) {
     a.remove(); b.remove(); return r;
   });
   ok(!xss, `${tag} S21-14 voice previews show what was heard as plain text`);
-  await page.evaluate(() => { try { localStorage.removeItem('sm_voice_lang'); } catch (e) {} });
+  await page.evaluate(() => { try { localStorage.removeItem('sm_voice_lang'); } catch (e) {} smVoiceLangNow = null; });
   await page.evaluate(() => switchAdminTab('settings'));
   await page.waitForSelector('#set-evening-time', { timeout: 8000 });
   ok(await page.$('#set-evening-time'), `${tag} evening time is editable in Settings`);

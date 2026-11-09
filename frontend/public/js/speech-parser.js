@@ -39,14 +39,22 @@
     [/\bgeesar\b|\bgijar\b|\bgeejar\b/g, 'geyser'], [/\btyaapu?\b/g, 'tap'], [/\bpaipu?\b/g, 'pipe'], [/\bbalbu?\b/g, 'bulb'], [/\bsvichu?\b/g, 'switch'],
     [/\btaayilet\b|\btaaylet\b|\btaayletu\b/g, 'toilet'], [/\bbaat\s*room\b|\bbaatroom\b/g, 'bathroom'], [/\bbred\b|\bbredu\b/g, 'bread'],
     [/\bgyaasu?\b/g, 'gas'], [/\bsilindar\b|\bsilindaru\b/g, 'cylinder'], [/\bphinaayil\b|\bphinaail\b/g, 'phenyl'], [/\bbaket\b|\bbakettu\b/g, 'bucket'],
-    [/\bplambar\b|\bplambaru\b/g, 'plumber'], [/\belektrishiyan\b|\belektrishan\b/g, 'electrician'], [/\bkyaan\b/g, 'can'], [/\bbil\b|\bbillu\b/g, 'bill'],
+    [/\bplambar\b|\bplambaru\b/g, 'plumber'], [/\belektrishiyan\b|\belektrishan\b/g, 'electrician'], [/\bkyaan\b/g, 'can'], [/\bke\.?\s?ji\b/g, 'kg'], [/\bpyaaket\b|\bpaaket\b/g, 'packet'], [/\bleetar\b|\blitar\b/g, 'litre'], [/\bdajan\b/g, 'dozen'], [/\broo\.?(?=\s|$)/g, 'rupees'], [/\bbil\b|\bbillu\b/g, 'bill'],
     [/\baaniyan\b|\baaniyanu\b/g, 'onion'], [/\btomyaato\b|\btometo\b|\btomeeto\b|\btomaato\b|\btomyaatoo\b/g, 'tomato'], [/\bpoteto\b|\bpoteeto\b/g, 'potato'],
     [/\bditarjent\b|\bditarjentu\b/g, 'detergent'], [/\bsopu\b/g, 'soap'], [/\bkaaphi\b|\bkaapi\b/g, 'coffee'], [/\btee\b/g, 'tea'], [/\bmilk\b/g, 'milk']
   ];
   function toLatin(text) {
-    const s = String(text == null ? '' : text);
-    if (!HAS_KN.test(s)) return s;
-    const ch = Array.from(s.replace(/[‌‍]/g, ''));
+    const s0 = String(text == null ? '' : text);
+    if (!HAS_KN.test(s0)) return s0;
+    // Review S21: only Kannada words are spelt out (and lower-cased); English
+    // words typed in the same message keep her capitals. NFC first, in case the
+    // text arrives decomposed.
+    let lat = s0.normalize('NFC').replace(/[\u200C\u200D]/g, '').split(/(\s+)/).map(tok => HAS_KN.test(tok) ? knWord(tok) : tok).join('');
+    for (const [re, to] of KN_LOAN) lat = lat.replace(re, to);
+    return lat.replace(/\s+/g, ' ').trim();
+  }
+  function knWord(tok) {
+    const ch = Array.from(tok);
     let out = '';
     for (let i = 0; i < ch.length; i++) {
       const c = ch[i];
@@ -68,12 +76,10 @@
         continue;
       }
       if (c === VISARGA) { out += 'h'; continue; }
-      if (c === VIRAMA || c === NUKTA || KN_SIGNS[c]) continue;   // stray mark
+      if (c === VIRAMA || c === NUKTA || KN_SIGNS[c] || c === '\u0CD5' || c === '\u0CD6') continue;   // stray or length mark
       out += c;
     }
-    let lat = out.toLowerCase();
-    for (const [re, to] of KN_LOAN) lat = lat.replace(re, to);
-    return lat.replace(/\s+/g, ' ').trim();
+    return out.toLowerCase();
   }
 
   // ── Numbers: English words, Indian units, Kannada & Hindi transliterations ─
@@ -98,19 +104,73 @@
     assi: 80, nabbe: 90
   };
   const MULTIPLIERS = {
-    hundred: 100, hundreds: 100, nooru: 100, sau: 100,
+    hundred: 100, hundreds: 100, nooru: 100, noora: 100, sau: 100,
     thousand: 1000, thousands: 1000, saavira: 1000, savira: 1000, sasira: 1000, hazaar: 1000, hazar: 1000, hajar: 1000,
     saavirada: 1000, saviradha: 1000, savirada: 1000,
     lakh: 100000, lakhs: 100000, laksha: 100000
   };
   const HALF = { half: 0.5, ardha: 0.5, aadha: 0.5 };
 
-  // Returns { amount, consumed:[start,end] } for the first amount in the text, or null.
+  // ── Review S21 (B1, S4, S6): Kannada numbers as people say them ─────────
+  // ಐದೂವರೆ (aidoovare) = 5½ · ಇಪ್ಪತ್ತೈದು (ippattaidu) = 25 · ನೂರೈವತ್ತು
+  // (nooraivattu) = 150 · ಇನ್ನೂರ ಐವತ್ತು (innoora aivattu) = 250 · ಆರ್ ಸಾವಿರ
+  // (aar saavira) = 6000 · ಐದು ಕೆಜಿ ಅಕ್ಕಿ ಐನೂರು: the 5 is kilos, the price is 500.
+  const ONES = { ondu: 1, eradu: 2, mooru: 3, naalku: 4, nalku: 4, aidu: 5, aaru: 6, elu: 7, entu: 8, ombattu: 9, onbattu: 9 };
+  const TENS = { ippatt: 20, moovatt: 30, muvatt: 30, nalavatt: 40, aivatt: 50, aravatt: 60, eppatt: 70, embatt: 80, tombatt: 90 };
+  const HUNDREDS = { ombainoor: 900, onbainoor: 900, entunoor: 800, elunoor: 700, elnoor: 700, aarunoor: 600, aaranoor: 600, aaraanoor: 600, ainoor: 500, naanoor: 400, munnoor: 300, innoor: 200, noor: 100 };
+  const HUNDRED_KEYS = Object.keys(HUNDREDS).sort((a, b) => b.length - a.length);
+  // A spoken unit word right after a number makes it a quantity, not rupees.
+  const QTY = /^(kg|kgs|kilo|kilos|kilogram|kilograms|keji|g|gm|gms|gram|grams|graam|l|ltr|ltrs|litre|litres|liter|liters|leetar|ml|packet|packets|pkt|pkts|pyaaket|paaket|pocket|pockets|dozen|dajan|doz|box|boxes|bag|bags|chiil|pcs|pc|piece|pieces|bottle|bottles|tin|tins|bundle|bundles|kattu|meter|metre|meters|metres|mitar)$/;
+  function tensOnes(w) {
+    if (w in UNITS) return UNITS[w];
+    for (const t of Object.keys(TENS)) {
+      // ippatt+aidu → ippattaidu; ippat+mooru → ippatmooru (the double t drops before a consonant)
+      for (const stem of [t, t.slice(0, -1)]) {
+        if (!w.startsWith(stem)) continue;
+        const rest = w.slice(stem.length);
+        if (rest === '' || rest === 'u') return TENS[t];
+        if (rest in ONES) return TENS[t] + ONES[rest];
+        if (('u' + rest) in ONES) continue;
+      }
+    }
+    return null;
+  }
+  function numberWord(w) {
+    if (!w) return null;
+    let v = tensOnes(w);
+    if (v != null) return v;
+    // ನೂರೈವತ್ತು (nooraivattu), ಐನೂರೈವತ್ತು, ನೂರ (noora) as a joining form
+    for (const h of HUNDRED_KEYS) {
+      if (!w.startsWith(h)) continue;
+      const rest = w.slice(h.length);
+      if (rest === '' || rest === 'u' || rest === 'a') { if (h === 'noor') return null; return HUNDREDS[h]; }   // bare ನೂರು is the ×100 multiplier ("aidu nooru" = 500)
+      const r = tensOnes(rest) != null ? tensOnes(rest) : tensOnes(rest.replace(/^[au]/, ''));
+      if (r != null && r < 100) return HUNDREDS[h] + r;
+    }
+    // ಐದೂವರೆ (aidoovare), ಒಂದೂವರೆ, aiduvare → n½
+    const half = w.match(/^(.+?)(oo|u|o)vare$/);
+    if (half) { const b = tensOnes(half[1] + 'u'); if (b != null) return b + 0.5; }
+    return null;
+  }
+  // Short spoken forms — ಆರ್ ಸಾವಿರ (aar saavira) — only count right before a multiplier.
+  function shortForm(w) { return w.length >= 3 && (w + 'u') in ONES ? ONES[w + 'u'] : null; }
+  // Words that may stand before a bare "thousand" without making it a guess.
+  // (ನೂರು alone is a plain 100 — "haalu nooru" — so only ಸಾವಿರ is strict.)
+  const KN_MULT = new Set(['saavira', 'savira', 'sasira', 'saavirada', 'savirada', 'saviradha']);
+  const ONE_OK = new Set(['a', 'an', 'and', 'one', 'ek', 'ondu', 'rs', 'rs.', 'rupees', 'rupee', 'inr']);
+
+  // Returns { amount, matched } for the first amount in the text that is not
+  // a quantity ("5 kg"), or null. A multiplier after a word we cannot read
+  // ("ಐದ್ಓವರೆ ಸಾವಿರ" misheard) gives null — ask her, never guess ₹1,000.
   function extractAmount(text) {
     const lower = ' ' + text.toLowerCase().replace(/[,]/g, '') + ' ';
     // 1) Plain digits, possibly followed by a unit word: "6000", "6 thousand", "2.5 lakh", "1.5k"
-    let m = lower.match(/\s(\d+(?:\.\d+)?)\s*(k\b|thousand|saavira|savira|hazaar|hazar|hajar|lakh|lakhs|laksha|hundred|nooru|sau)?\b/);
-    if (m) {
+    const re = /\s(\d+(?:\.\d+)?)\s*(k\b|thousand|saavira|savira|hazaar|hazar|hajar|lakh|lakhs|laksha|hundred|nooru|sau)?(?=\s|[^a-z0-9.]|$)/g;
+    let m;
+    while ((m = re.exec(lower))) {
+      const after = lower.slice(m.index + m[0].length).trim().split(/\s+/)[0] || '';
+      const glued = (lower.slice(m.index + 1).match(/^\d+(?:\.\d+)?([a-z]+)/) || [])[1] || '';
+      if (!m[2] && (QTY.test(after.replace(/[^a-z]/g, '')) || QTY.test(glued))) continue;   // "5 kg", "5kg"
       let n = parseFloat(m[1]);
       const unit = m[2] ? m[2].trim() : '';
       if (unit === 'k') n *= 1000;
@@ -120,19 +180,32 @@
     // 2) Number words: "six thousand", "aaru saavira", "chhe hazaar", "five hundred", "one and a half thousand"
     const words = lower.trim().split(/\s+/);
     let total = 0, current = 0, matchedWords = [], seenAny = false, pendingHalf = false;
+    const reset = () => { total = 0; current = 0; matchedWords = []; seenAny = false; pendingHalf = false; };
     for (let i = 0; i < words.length; i++) {
       const w = words[i].replace(/[^a-z.]/g, '');
-      if (w in UNITS) { current += UNITS[w]; matchedWords.push(words[i]); seenAny = true; continue; }
+      const nextW = (words[i + 1] || '').replace(/[^a-z.]/g, '');
+      const nv = numberWord(w);
+      if (nv != null) { current += nv; matchedWords.push(words[i]); seenAny = true; continue; }
+      if (!seenAny && shortForm(w) != null && nextW in MULTIPLIERS) { current += shortForm(w); matchedWords.push(words[i]); seenAny = true; continue; }
       if (w in HALF) { pendingHalf = true; matchedWords.push(words[i]); continue; }
       if (w === 'and' || w === 'a') { if (seenAny) matchedWords.push(words[i]); continue; }
       if (w in MULTIPLIERS) {
-        if (!seenAny && !pendingHalf) current = 1;
+        if (!seenAny && !pendingHalf) {
+          const prev = (words[i - 1] || '').replace(/[^a-z.]/g, '');
+          // B1: a Kannada ಸಾವಿರ/ನೂರು after a word we could not read ("ಐದೂವ್ರೆ ಸಾವಿರ") is a
+          // number we missed — no amount, so she is asked. English "onion hundred" stays ₹100.
+          if (KN_MULT.has(w) && prev && !ONE_OK.has(prev) && /[a-z]/.test(prev)) return null;
+          current = 1;
+        }
         if (pendingHalf) { current = (current || 0) + 0.5; pendingHalf = false; }
         current = current * MULTIPLIERS[w];
         total += current; current = 0; matchedWords.push(words[i]); seenAny = true;
         continue;
       }
-      if (seenAny) break; // number phrase ended
+      if (seenAny) {
+        if (QTY.test(w)) { reset(); continue; }   // "aidu keji" — that was kilos; keep looking for the price
+        break; // number phrase ended
+      }
       matchedWords = [];
     }
     total += current;

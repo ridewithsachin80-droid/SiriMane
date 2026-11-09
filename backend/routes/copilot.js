@@ -60,7 +60,6 @@ router.get('/audit', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// GET /copilot/tools — what this user may ask for (drives the chips)
 // POST /copilot/category { item } — S21: the category for an item the
 // purchase form's own word list doesn't know ("eerulli", "phenyl", ಹಾಲು).
 // Dictionary and this PG's past purchases only — never the model — so it is
@@ -76,6 +75,7 @@ router.post('/category', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: 'Could not work out a category' }); }
 });
 
+// GET /copilot/tools — what this user may ask for (drives the chips)
 router.get('/tools', auth, (req, res) => res.json({ model: copilot.modelAvailable(), tools: tools.catalogue(req.user).map(t => ({ name: t.name, level: t.level })) }));
 
 module.exports = router;

@@ -384,6 +384,59 @@ const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toI
       try { r = await A('POST', '/copilot/category', { item: 'laptop' }); eq(r.data.category, null, 'S21-8 an unknown word stays unknown'); eq(calls, 0, 'S21-8 …the model is never asked (no text leaves the server)'); }
       finally { ai.providers.groqText = keep; ai.providers._stub = keepStub; ai.providers.groqDownUntil = 0; }
     }
+    // ── Review S21 (round 1 BLOCK) ────────────────────────────────────────
+    // B1/S4: Kannada amounts as people say them — never a confident wrong figure.
+    for (const [kn, n] of [['ಐದೂವರೆ ಸಾವಿರ', 5500], ['ಐದು ಸಾವಿರದ ಇನ್ನೂರ ಐವತ್ತು', 5250], ['ಇನ್ನೂರ ಐವತ್ತು', 250], ['ನೂರ ಐವತ್ತು', 150], ['ಐನೂರ ಐವತ್ತು', 550],
+                           ['ಒಂದೂವರೆ ಸಾವಿರ', 1500], ['ಎರಡೂವರೆ ಸಾವಿರ', 2500], ['ನಾಲ್ಕೂವರೆ ಸಾವಿರ', 4500], ['ಆರ್ ಸಾವಿರ', 6000], ['ಐದ್ ಸಾವಿರ', 5000], ['ಮೂರ್ ಸಾವಿರ', 3000],
+                           ['ಇಪ್ಪತ್ತೈದು', 25], ['ಎಪ್ಪತ್ತೈದು', 75], ['ಇಪ್ಪತ್ಮೂರು', 23], ['ನೂರೈವತ್ತು', 150], ['ಐನೂರೈವತ್ತು', 550], ['ಆರನೂರು', 600], ['ಏಳ್ನೂರು', 700], ['ಮುನ್ನೂರ ಎಪ್ಪತ್ತೈದು', 375]]) {
+      const a = SMParse.extractAmount(SMParse.toLatin(kn)); eq(a && a.amount, n, `B1 "${kn}" is ₹${n}`);
+    }
+    i = await quick.intent(`Jhanavi ${alpha} ಐದೂವರೆ ಸಾವಿರ ಯುಪಿಐ`, adminUser, {});
+    ok(i.tool === 'prepare_payment' && i.args.resident_id === jh.id && i.args.amount === 5500 && i.args.mode === 'UPI', `B1 a rent said in Kannada previews the right figure: ₹5,500 (got ${JSON.stringify(i.args)})`);
+    for (const t of ['xyzzy saavira', 'priya saavira', 'aidoovre saavira', SMParse.toLatin('ಐದೂವ್ರೆ ಸಾವಿರ')]) eq(SMParse.extractAmount(t), null, `B1 "${t}": a Kannada multiplier after a word we cannot read gives NO amount (she is asked), never ×1`);
+    for (const [t, n] of [['onion hundred', 100], ['onion hundred rupees', 100], ['haalu nooru', 100], ['aidu nooru', 500], ['aidu noora aivattu', 550], ['eradu saavira aidu nooru', 2500]]) eq(SMParse.extractAmount(t).amount, n, `B1 English "${t}" is still ₹${n}`);
+    for (const [t, n] of [['a thousand', 1000], ['one and a half thousand', 1500], ['six thousand', 6000], ['ondu saavira', 1000]]) eq(SMParse.extractAmount(t).amount, n, `B1 "${t}" still ₹${n}`);
+    // S6: a quantity is not the price.
+    for (const [t, n] of [['5 kg rice 500', 500], ['5kg rice 500', 500], ['ಐದು ಕೆಜಿ ಅಕ್ಕಿ ಐನೂರು', 500], ['1 dozen eggs 80', 80], ['2 litre oil 340', 340], ['milk 2 packets 56', 56]]) {
+      const a = SMParse.extractAmount(SMParse.toLatin(t)); eq(a && a.amount, n, `S6 "${t}" is ₹${n}, not the quantity`);
+    }
+    for (const t of ['two packets of milk', 'ಹಾಲು ಮೂರು ಪ್ಯಾಕೆಟ್']) eq(SMParse.extractAmount(SMParse.toLatin(t)), null, `S6 "${t}" has no price`);
+    // B2: the amount question never takes over a command, a question or a note word.
+    await A('POST', '/purchases', { amount: 40, category: 'Groceries', description: 'weekly stock from market fresh', purchase_date: daysAgo(1), payment_mode: 'Cash' });
+    quick.invalidateHistory();
+    for (const t of ['milk expenses', 'milk bill', 'grocery bill', 'buy milk', 'pay milk', 'groceries', 'cleaning', 'water', 'gas', 'cylinder', 'menu', 'stock', 'market', 'fresh milk', 'weekly stock', 'eerulli haalu akki bele tuppa']) {
+      i = await quick.classify(t, adminUser, {}, { allowModel: false });
+      ok(!i || !/How much was/.test(i.clarify || ''), `B2 "${t}" is not taken over by "How much was…" (got ${JSON.stringify(i && (i.clarify || i.tool))})`);
+    }
+    for (const t of ['onions', 'tondekaayi', 'pudeena soppu']) { i = await quick.classify(t, adminUser, {}, { allowModel: false }); ok(i && /^How much was/.test(i.clarify || '') && i.ask === 'amount', `B2 "${t}" still asks how much`); }
+    i = await quick.intent('tondekaayi 40', adminUser, {}); ok(i.args.category === 'Groceries' && /-kaayi/.test(i.category_basis), 'minor: an unlisted "-kaayi" vegetable is Groceries by the rule');
+    // S1: a spoken item with no amount asks her — the model is not called and cannot invent an amount.
+    {
+      let calls = 0; const keep = ai.providers.groqText, keepStub = ai.providers._stub;
+      ai.providers._stub = true; ai.providers.groqDownUntil = 0; ai.providers.groqText = async () => { calls++; return '{"phrase":"onion 100","confidence":"high"}'; };
+      try {
+        i = await quick.intent('ಈರುಳ್ಳಿ', adminUser, {}, { voice: true, alternatives: ['ಈರುಳ್ಳಿ'] });
+        ok(!i.tool && /^How much was the eerulli/.test(i.clarify), `S1 spoken "ಈರುಳ್ಳಿ" asks how much (got ${JSON.stringify(i.tool || i.clarify)})`);
+        eq(calls, 0, 'S1 …with no AI call (nothing can invent "100")');
+      } finally { ai.providers.groqText = keep; ai.providers._stub = keepStub; ai.providers.groqDownUntil = 0; }
+    }
+    // S2: a Kannada question with the question word last is a question.
+    for (const t of [`Jhanavi ${alpha} rent eshtu`, `Jhanavi ${alpha} ಎಷ್ಟು ಕೊಡಬೇಕು`, 'eshtu haalu', `yaaru jhanavi`, 'ರೆಂಟ್ ಯಾರು ಕೊಟ್ಟಿಲ್ಲ']) {
+      i = await quick.classify(t, adminUser, {}, { allowModel: false }); eq(i, null, `S2 "${t}" is a question, not an entry`);
+    }
+    // S3: a resident whose name is a Kannada question word is still found.
+    const elli = (await A('POST', '/guests', { name: `Elli Q${alpha}`, phone: `97${uniq}03`.slice(0, 10), room_id: room.id, bed_number: '3', monthly_rent: 6000, deposit_amount: 0, join_date: daysAgo(30), id_proof_type: 'Aadhaar' })).data;
+    ok(elli && elli.id, 'S3 (fixture) a resident named Elli');
+    i = await quick.classify('Elli 5000', adminUser, {}, { allowModel: false });
+    ok(i && i.tool === 'prepare_payment' && i.args.resident_id === elli.id && i.args.amount === 5000, `S3 "Elli 5000" is her payment, as before S21 (got ${JSON.stringify(i && i.args)})`);
+    await pool.query(`UPDATE guests SET is_active=false WHERE id=$1`, [elli.id]);
+    // Minor: wordings and leftovers.
+    for (const t of ['ಸೋರ್ತಿದೆ ರೂಮ್ 5', 'ಲೈಟ್ ಹೋಗಿದೆ', 'ಫ್ಯಾನ್ ತಿರುಗ್ತಿಲ್ಲ']) { i = await quick.intent(t, adminUser, {}); eq(i && i.tool, 'prepare_complaint', `minor: "${t}" is a complaint`); }
+    for (const [t, d] of [['ಈರುಳ್ಳಿ 100 ರೂ', 'eerulli'], ['ಪ್ಲಂಬರ್ 500 ಕೊಟ್ಟೆ', 'plumber'], ['eerullige 50', 'eerullige']]) { i = await quick.intent(t, adminUser, {}); eq(i.args.description, d, `minor: "${t}" is filed as "${d}"`); }
+    i = await quick.intent('eerullige 50', adminUser, {}); eq(i.args.category, 'Groceries', 'minor: a Kannada case ending on an item still matches it');
+    for (const t of ['raveena 5000', 'kolin 300']) { i = await quick.intent(t, adminUser, {}); eq(i.args.category, 'Other', `minor: "${t}" is not stretched to a short dictionary word`); }
+    eq(SMParse.toLatin('TEE ಟೀ'), 'TEE tea', 'minor: English typed beside Kannada is left as typed');
+    eq(SMParse.toLatin('ಈರುಳ್ಳಿ'.normalize('NFD')), 'eerulli', 'minor: decomposed Kannada text reads the same');
     console.log('✓ S21 Kannada');
 
     // ── Audit ────────────────────────────────────────────────────────────

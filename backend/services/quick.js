@@ -58,10 +58,14 @@ for (const [cat, words] of Object.entries(DICT)) for (const w of words) if (!DIC
 // S21: and as she says it in Kannada — "nalli soruttide" (tap leaking),
 // "fan kelasa maadtilla" (fan not working), "neeru baruttilla" (no water),
 // "light haalaagide" (light gone bad), "current illa" (no power).
-const FAULT_WORDS = /\b(sorut\w*|kela?sa\s+maa?d\w*illa|\w+\s+aag\w*illa|baruttilla|bartilla|barta\s+illa|baratilla|haala?agide|haalaagide|haalagide|kettide|kettu\s+hogide|muridide|murididhe|block\s+aagide|(?:neeru|niru|current|karent|light|fan|wifi|net|nalli|bisi\s+neeru|geyser)\s+illa|leak\w*|not working|not workin|notworking|broken|broke|damaged|jammed|stuck|no water|no power|no current|no light|no wifi|no internet|blocked|clogged|overflow\w*|smell\w*|noise|noisy|repair needed|complaint|complain|problem|issue|fused|flicker\w*|sparking|dripping)\b/i;
-const QUESTION = /^(who|what|which|how|when|where|why|is|are|do|does|did|can|could|should|show|list|find|tell|give|any|whats|what's|yaaru|yaru|eshtu|estu|yaavaga|yavaga|elli|yaake|yake|enu|yenu|yaava|yava)\b|\?\s*$/i;
+const FAULT_WORDS = /\b(sorut\w*|soru?t+ide|sortide|tirug\w*illa|(?:current|light|power|karent|neeru|wifi|net)\s+hogide|kela?sa\s+maa?d\w*illa|\w+\s+aag\w*illa|baruttilla|bartilla|barta\s+illa|baratilla|haala?agide|haalaagide|haalagide|kettide|kettu\s+hogide|muridide|murididhe|block\s+aagide|(?:neeru|niru|current|karent|light|fan|wifi|net|nalli|bisi\s+neeru|geyser)\s+illa|leak\w*|not working|not workin|notworking|broken|broke|damaged|jammed|stuck|no water|no power|no current|no light|no wifi|no internet|blocked|clogged|overflow\w*|smell\w*|noise|noisy|repair needed|complaint|complain|problem|issue|fused|flicker\w*|sparking|dripping)\b/i;
+const QUESTION = /^(who|what|which|how|when|where|why|is|are|do|does|did|can|could|should|show|list|find|tell|give|any|whats|what's)\b|\?\s*$/i;
+// Review S21 (S2): Kannada puts the question word LAST — "priya rent eshtu",
+// "yaaru kottilla" — so these count anywhere in the sentence. A word that is
+// part of a resident's name ("Elli") is not a question word.
+const KN_QUESTION_WORDS = new Set(['yaaru', 'yaru', 'eshtu', 'estu', 'eshtidhe', 'eshtide', 'yaavaga', 'yavaga', 'elli', 'yaake', 'yake', 'enu', 'yenu', 'yaava', 'yava', 'yaavudu', 'hege', 'heege']);
 const MODE_WORDS = /\b(upi|gpay|google pay|phonepe|phone pe|paytm|cash|nagadu|bank|neft|imps|transfer|card)\b/gi;
-const NOISE = /\b(rs\.?|rupees?|rupaye|rupai|rupaayi|rupayi|roopaayi|inr|kottaru|kottlu|kotlu|kottidaare|kottidaale|tagondu|tagonde|tegedukonde|kharchu|kharch|ge|ige|ke|paid|pay|payment|gave|give|given|got|received|collected|collect|for|of|to|the|a|an|and|today|yesterday|bought|brought|bougt|buy|purchased|purchsed|purchase|spent|expense|expenses|bill|by|via|from|on|in|at|rent|deposit|advance)\b/gi;
+const NOISE = /\b(rs\.?|rupees?|rupaye|rupai|rupaayi|rupayi|roopaayi|inr|kottaru|kottlu|kotlu|kotte|kotta|kottu|kottidaare|kottidaale|kottide|tagondu|tagonde|tegedukonde|kharchu|kharch|ge|ige|ke|paid|pay|payment|gave|give|given|got|received|collected|collect|for|of|to|the|a|an|and|today|yesterday|bought|brought|bougt|buy|purchased|purchsed|purchase|spent|expense|expenses|bill|by|via|from|on|in|at|rent|deposit|advance)\b/gi;
 
 // "100rs", "rs100", "rs.100", "₹100", "100/-", "1k" → a number the parser sees.
 function normaliseAmount(text) {
@@ -104,7 +108,7 @@ async function categorise(item, opts = {}) {
   if (ranked.length && (ranked.length === 1 || ranked[0][1] > ranked[1][1])) return { category: ranked[0][0], basis: `you have filed "${words.find(w => hist.get(w))}" under ${ranked[0][0]} ${ranked[0][1]} time${ranked[0][1] === 1 ? '' : 's'}` };
   // (b) the dictionary — exact, then by sound
   for (const w of words) { const c = DICT_INDEX.get(w); if (c) return { category: c, basis: `"${w}" is usually ${c}` }; }
-  for (const w of words) for (const [dw, c] of DICT_INDEX) if (dw.length >= 4 && w.length >= 4 && (dw.startsWith(w) || w.startsWith(dw))) return { category: c, basis: `"${w}" looks like ${dw} (${c})` };
+  for (const w of words) for (const [dw, c] of DICT_INDEX) if (dw.length >= 4 && w.length >= 4 && (dw.startsWith(w) || (w.startsWith(dw) && ITEM_SUFFIX.test(w.slice(dw.length))))) return { category: c, basis: `"${w}" looks like ${dw} (${c})` };
   // Kannada and Hindi in Latin letters have no fixed spelling: eruli, eerulli,
   // irulli, eeruli are one word. Compare phonetic keys, then near-misses.
   for (const w of words) {
@@ -166,7 +170,7 @@ function weak(i) {
   if (!i) return true;
   if (i.kind === 'expense' && i.tool && (!i.args.category || i.args.category === 'Other')) return true;   // item nobody recognised
   if (i.kind === 'collection' && i.tool && !i.args.resident_id) return true;                                // name not resolved
-  if (!i.tool && i.clarify) return true;                                                                    // e.g. only a number was heard
+  if (!i.tool && i.clarify && i.ask !== 'amount') return true;                                            // e.g. only a number was heard ("How much was the eerulli?" is a real answer — review S21 S1)
   return false;
 }
 
@@ -209,6 +213,8 @@ async function classify(text, user, context, copts = {}) {
 
   // 2. A resident's name wins.
   const { rows: residents } = await pool.query(`SELECT g.id, g.name, r.room_number FROM guests g LEFT JOIN rooms r ON r.id=g.room_id WHERE g.is_active=true`);
+  const nameWords = new Set(residents.flatMap(r => String(r.name || '').toLowerCase().split(/\s+/)));
+  if (tokens(raw).some(w => KN_QUESTION_WORDS.has(w) && !nameWords.has(w))) return null;
   const nameText = norm.replace(MODE_WORDS, ' ');
   const match = SMParse.matchResident(nameText, residents, room);
   const type = /\bdeposit\b/i.test(norm) ? 'deposit' : /\badvance\b/i.test(norm) ? 'advance' : 'rent';
@@ -249,20 +255,34 @@ async function classify(text, user, context, copts = {}) {
     return { tool: 'prepare_expense', args: { amount, category: category || 'Other', description: item, mode: mode || undefined, paid_to: vendor || undefined }, via: 'quick', kind: 'expense', category_basis: basis, category_via: via || (category ? 'local' : 'none') };
   }
   // 5. S21: an item she buys, with no amount — "pudina soppu", "eerulli" —
-  //    asks how much, instead of "I'm not sure". Only when EVERY word is a
-  //    known grocery or cleaning item, so a question or a command that merely
-  //    contains one ("rent due", "milk finished?") still goes to the Copilot.
-  const itemOnly = sansRoom.replace(MODE_WORDS, ' ').replace(NOISE, ' ').replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim();
-  const words = tokens(itemOnly).filter(w => w.length >= 2);
-  if (words.length && words.length <= 4 && !/\d/.test(itemOnly)) {
-    let allKnown = true;
-    for (const w of words) {
-      const c = await categorise(w, { allowModel: false });
-      if (!c.category || !BUYABLE.has(c.category)) { allKnown = false; break; }
-    }
-    if (allKnown) return { tool: null, clarify: `How much was the ${itemOnly}? Add the amount — e.g. "${itemOnly} 100".`, retry_text: itemOnly + ' ', via: 'quick', kind: 'expense' };
+  //    asks how much, instead of "I'm not sure". Review S21 (B2): ONLY when
+  //    every word left (after payment-mode words and rs/rupees/the) is an item
+  //    in the dictionary — so "milk bill", "buy milk", "groceries", "water",
+  //    "menu" and words from old purchase notes still go to the Copilot.
+  const itemOnly = sansRoom.replace(MODE_WORDS, ' ').replace(/\b(rs\.?|rupees?|rupaayi|rupai|inr|the|a|an)\b/gi, ' ').replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim();
+  const words = tokens(itemOnly);
+  if (words.length && words.length <= 4 && !/\d/.test(itemOnly) && words.every(buyableWord)) {
+    return { tool: null, clarify: `How much was the ${itemOnly}? Add the amount — e.g. "${itemOnly} 100".`, retry_text: itemOnly + ' ', via: 'quick', kind: 'expense', ask: 'amount' };
   }
   return null;
+}
+// Words that are in the grocery list but are not an item on their own.
+const NOT_ITEM = new Set(['groceries', 'grocery', 'kirana', 'kirani', 'provisions', 'ration', 'cleaning', 'cleaner', 'water', 'gas', 'cylinder', 'lpg', 'refill', 'can', 'veg', 'nonveg', 'non-veg', 'snacks', 'tiffin', 'thindi', 'tindi', 'oota', 'bhojana', 'naashta', 'nasta', 'sweeping', 'angadi', 'anganadi', 'bakery']);
+// Kannada case endings and English plurals after an item: eerullige, onions.
+const ITEM_SUFFIX = /^(s|es|ge|ige|ke|annu|nnu|na|nu|alli|inda|u|a|i)?$/;
+function buyableWord(w) {
+  if (!w || w.length < 2 || NOT_ITEM.has(w)) return false;
+  const c = DICT_INDEX.get(w);
+  if (c) return BUYABLE.has(c);
+  if (w.length >= 6 && /(kaa?yi|kaai)$/.test(w)) return true;
+  if (w.length < 5) return false;   // "menu" ≠ meenu: short words must match exactly
+  const kw = looseKey(w);
+  for (const [dw, cat] of DICT_KEYS) {
+    if (!BUYABLE.has(cat) || NOT_ITEM.has(dw.word)) continue;
+    if (dw.key.length >= 4 && dw.key === kw) return true;
+    if (dw.word.length >= 5 && similarity(w, dw.word) >= 0.8) return true;
+  }
+  return false;
 }
 const BUYABLE = new Set(['Groceries', 'Cleaning']);
 
