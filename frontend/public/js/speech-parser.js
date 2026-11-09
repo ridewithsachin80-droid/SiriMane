@@ -223,6 +223,9 @@
           // B1: a Kannada ಸಾವಿರ/ನೂರು after a word we could not read ("ಐದೂವ್ರೆ ಸಾವಿರ") is a
           // number we missed — no amount, so she is asked. English "onion hundred" stays ₹100.
           if (KN_MULT.has(w) && prev && !ONE_OK.has(prev) && /[a-z]/.test(prev)) return null;
+          // A multiplier straight after a resident's name (blanked by maskNames) may have
+          // lost its number to that name — "Kavya das hazaar" with a Priya Das here (review N3).
+          if (prev === 'zzname') return null;
           current = 1;
         }
         if (pendingHalf) { current = (current || 0) + 0.5; pendingHalf = false; }

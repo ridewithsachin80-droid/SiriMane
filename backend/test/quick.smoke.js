@@ -502,6 +502,16 @@ const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toI
       const r = SMParse.parseCollection(t, [{ id: 99, name: 'Priya Das' }]); eq(r.amount, null, 'N2 "Priya Das paid" is not ₹10 ("das" is her name)');
     }
     eq(SMParse.extractAmount('aidu noora'), null, 'minor: "aidu noora" is unclear — no amount, she is asked');
+    // Round 5 (N3): a resident's surname that is also a number ("Das" = 10) never shrinks someone else's amount.
+    const pd = (await A('POST', '/guests', { name: `Priya Das`, phone: `97${uniq}07`.slice(0, 10), room_id: room2.id, bed_number: '3', monthly_rent: 6000, deposit_amount: 0, join_date: daysAgo(30), id_proof_type: 'Aadhaar' })).data;
+    const kv = (await A('POST', '/guests', { name: `Kavya R${alpha}`, phone: `97${uniq}08`.slice(0, 10), room_id: room2.id, bed_number: '4', monthly_rent: 6000, deposit_amount: 0, join_date: daysAgo(30), id_proof_type: 'Aadhaar' })).data;
+    ok(pd && pd.id && kv && kv.id, 'N3 (fixture) Priya Das and Kavya live here');
+    i = await quick.classify('Kavya das hazaar', adminUser, {}, { allowModel: false });
+    ok(i && i.tool === 'prepare_payment' && i.args.amount !== 1000, `N3 "Kavya das hazaar" is never ₹1,000 — unclear, so she is asked (got ${JSON.stringify(i && i.args)})`);
+    eq(SMParse.parseCollection('Kavya das hazaar', [{ id: pd.id, name: 'Priya Das' }, { id: kv.id, name: kv.name }]).amount, null, 'N3 the Collect parser agrees: no ₹1,000');
+    i = await quick.classify('Priya Das paid', adminUser, {}, { allowModel: false }); ok(i && i.args.resident_id === pd.id && !i.args.amount, 'N3 "Priya Das paid" is her payment, no amount');
+    i = await quick.classify('Priya Das 6000 upi', adminUser, {}, { allowModel: false }); ok(i && i.args.resident_id === pd.id && i.args.amount === 6000, 'N3 "Priya Das 6000 upi" is ₹6,000');
+    await pool.query(`UPDATE guests SET is_active=false WHERE id = ANY($1)`, [[pd.id, kv.id]]);
     await pool.query(`UPDATE guests SET is_active=false WHERE id = ANY($1)`, [[nk.id, an.id]]);
     console.log('✓ S21 Kannada');
 
