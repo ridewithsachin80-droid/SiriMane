@@ -42,8 +42,13 @@ const DICT = {
 // Kannada (ಕನ್ನಡ) and Hindi words as the warden types them. One or two
 // spellings each is enough: matching below is phonetic, so eruli / eerulli /
 // irulli / eerulli all land on the same entry.
+// S21: Kannada words added in Sprint 21. Short ones (rave, koli, hal) match
+// a longer word only with a Kannada case ending — "raveena" is not ರವೆ — while
+// the older dictionary keeps its prefix match ("milkman" → milk, review R3).
+const S21_WORDS = 'sautekaayi soutekayi hal haal hittu pudi hannu koli meenu maamsa mamsa rave heerekaayi heerekayi kaayi tarakaari maidaa';
+const S21_SHORT = new Set(S21_WORDS.split(/\s+/));
 const DICT_KN_HI = {
-  Groceries: 'sautekaayi soutekayi hal haal hittu pudi hannu koli meenu maamsa mamsa rave heerekaayi heerekayi kaayi tarakaari maidaa eerulli eruli irulli pyaz pyaaz tamate tamatar aloogadde alugadde aalu aloo akki chawal bele togari bele dal daal godhi atta sakkare cheeni uppu namak enne tel haalu halu doodh mosaru dahi tuppa ghee motte anda balehannu bale hannu kela tenginakayi tengina kayi kobbari nariyal menasinakayi menasu mirchi hunase imli bella gud tarkari sabzi sabji soppu saag kottambari dhaniya pudina shunti adrak bellulli lehsun lahsun nimbe nimbu huralikayi hurali badanekayi badane baingan bendekayi bende bhindi kosu gobi patta gajjari gajar kumbalakayi kaddu southekayi sowthe kheera nuggekayi drumstick hagalakayi karela dappa menasinakayi shimla mirch mulangi mooli beetroot avarekayi avare kadalekayi kadale chana bataani matar palak methi menthya chapati roti idli dosa dose upittu uppittu chitranna avalakki poha ragi mudde jola navane sajje rava thindi tiffin oota bhojana naashta nasta kirani kirana anganadi angadi bakery brede biscat biskut'.split(/\s+/),
+  Groceries: (S21_WORDS + ' eerulli eruli irulli pyaz pyaaz tamate tamatar aloogadde alugadde aalu aloo akki chawal bele togari bele dal daal godhi atta sakkare cheeni uppu namak enne tel haalu halu doodh mosaru dahi tuppa ghee motte anda balehannu bale hannu kela tenginakayi tengina kayi kobbari nariyal menasinakayi menasu mirchi hunase imli bella gud tarkari sabzi sabji soppu saag kottambari dhaniya pudina shunti adrak bellulli lehsun lahsun nimbe nimbu huralikayi hurali badanekayi badane baingan bendekayi bende bhindi kosu gobi patta gajjari gajar kumbalakayi kaddu southekayi sowthe kheera nuggekayi drumstick hagalakayi karela dappa menasinakayi shimla mirch mulangi mooli beetroot avarekayi avare kadalekayi kadale chana bataani matar palak methi menthya chapati roti idli dosa dose upittu uppittu chitranna avalakki poha ragi mudde jola navane sajje rava thindi tiffin oota bhojana naashta nasta kirani kirana anganadi angadi bakery brede biscat biskut').split(/\s+/),
   Cleaning: 'sabbu sabun soap fenail phenyl phenoyl pore porake kasabarige jhadu jhaadu balti bakeet bucket mugu mug bleach harpik lizol safai swachhata dustbin kasa kasada dabbi tholeyuva powder washing powder'.split(/\s+/),
   Repairs: 'nalli nal tap nalli repair pipu pipe geyser giser heater fan fanu bulbu bulb tube light tubelight switch swich socket wire wiring current repair karpentar carpenter bagilu darwaza door kitaki khidki window beega lock chavi key kili welding painting bannna paint sement cement marali sand itige eent brick plumber plumbar electrician electrishian mistri mechanic motoru motor pump pumpu'.split(/\s+/),
   Water: 'neeru pani water tanker tankar borewell bore motor water bill'.split(/\s+/),
@@ -108,7 +113,7 @@ async function categorise(item, opts = {}) {
   if (ranked.length && (ranked.length === 1 || ranked[0][1] > ranked[1][1])) return { category: ranked[0][0], basis: `you have filed "${words.find(w => hist.get(w))}" under ${ranked[0][0]} ${ranked[0][1]} time${ranked[0][1] === 1 ? '' : 's'}` };
   // (b) the dictionary — exact, then by sound
   for (const w of words) { const c = DICT_INDEX.get(w); if (c) return { category: c, basis: `"${w}" is usually ${c}` }; }
-  for (const w of words) for (const [dw, c] of DICT_INDEX) if (dw.length >= 4 && w.length >= 4 && (dw.startsWith(w) || (w.startsWith(dw) && ITEM_SUFFIX.test(w.slice(dw.length))))) return { category: c, basis: `"${w}" looks like ${dw} (${c})` };
+  for (const w of words) for (const [dw, c] of DICT_INDEX) if (dw.length >= 4 && w.length >= 4 && (dw.startsWith(w) || (w.startsWith(dw) && (!S21_SHORT.has(dw) || ITEM_SUFFIX.test(w.slice(dw.length)))))) return { category: c, basis: `"${w}" looks like ${dw} (${c})` };
   // Kannada and Hindi in Latin letters have no fixed spelling: eruli, eerulli,
   // irulli, eeruli are one word. Compare phonetic keys, then near-misses.
   for (const w of words) {
@@ -215,7 +220,8 @@ async function classify(text, user, context, copts = {}) {
   const { rows: residents } = await pool.query(`SELECT g.id, g.name, r.room_number FROM guests g LEFT JOIN rooms r ON r.id=g.room_id WHERE g.is_active=true`);
   const nameWords = new Set(residents.flatMap(r => String(r.name || '').toLowerCase().split(/\s+/)));
   if (tokens(raw).some(w => KN_QUESTION_WORDS.has(w) && !nameWords.has(w))) return null;
-  const nameText = norm.replace(MODE_WORDS, ' ');
+  // Review S21: the amount's own words ("nooraivattu", "5000") are never a name.
+  const nameText = (amt && amt.matched ? sansRoom.replace(amt.matched, ' ') : norm).replace(MODE_WORDS, ' ');
   const match = SMParse.matchResident(nameText, residents, room);
   const type = /\bdeposit\b/i.test(norm) ? 'deposit' : /\badvance\b/i.test(norm) ? 'advance' : 'rent';
   if (match) {
@@ -259,7 +265,7 @@ async function classify(text, user, context, copts = {}) {
   //    every word left (after payment-mode words and rs/rupees/the) is an item
   //    in the dictionary — so "milk bill", "buy milk", "groceries", "water",
   //    "menu" and words from old purchase notes still go to the Copilot.
-  const itemOnly = sansRoom.replace(MODE_WORDS, ' ').replace(/\b(rs\.?|rupees?|rupaayi|rupai|inr|the|a|an)\b/gi, ' ').replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim();
+  const itemOnly = SMParse.stripQuantities(sansRoom).replace(MODE_WORDS, ' ').replace(/\b(rs\.?|rupees?|rupaayi|rupai|inr|the|a|an)\b/gi, ' ').replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim();
   const words = tokens(itemOnly);
   if (words.length && words.length <= 4 && !/\d/.test(itemOnly) && words.every(buyableWord)) {
     return { tool: null, clarify: `How much was the ${itemOnly}? Add the amount — e.g. "${itemOnly} 100".`, retry_text: itemOnly + ' ', via: 'quick', kind: 'expense', ask: 'amount' };

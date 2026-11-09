@@ -120,7 +120,7 @@
   const HUNDREDS = { ombainoor: 900, onbainoor: 900, entunoor: 800, elunoor: 700, elnoor: 700, aarunoor: 600, aaranoor: 600, aaraanoor: 600, ainoor: 500, naanoor: 400, munnoor: 300, innoor: 200, noor: 100 };
   const HUNDRED_KEYS = Object.keys(HUNDREDS).sort((a, b) => b.length - a.length);
   // A spoken unit word right after a number makes it a quantity, not rupees.
-  const QTY = /^(kg|kgs|kilo|kilos|kilogram|kilograms|keji|g|gm|gms|gram|grams|graam|l|ltr|ltrs|litre|litres|liter|liters|leetar|ml|packet|packets|pkt|pkts|pyaaket|paaket|pocket|pockets|dozen|dajan|doz|box|boxes|bag|bags|chiil|pcs|pc|piece|pieces|bottle|bottles|tin|tins|bundle|bundles|kattu|meter|metre|meters|metres|mitar)$/;
+  const QTY = /^(kg|kgs|kilo|kilos|kilogram|kilograms|keji|gm|gms|gram|grams|graam|ltr|ltrs|litre|litres|liter|liters|leetar|ml|packet|packets|pkt|pkts|pyaaket|paaket|pocket|pockets|dozen|dajan|doz|box|boxes|bag|bags|chiil|pcs|pc|piece|pieces|bottle|bottles|tin|tins|bundle|bundles|kattu|meter|metre|meters|metres|mitar)$/;
   function tensOnes(w) {
     if (w in UNITS) return UNITS[w];
     for (const t of Object.keys(TENS)) {
@@ -153,6 +153,20 @@
     return null;
   }
   // Short spoken forms — ಆರ್ ಸಾವಿರ (aar saavira) — only count right before a multiplier.
+  // Glued to the number only: "500g", "2l" (a lone "g" is G Pay — review S21 R2).
+  const QTY_GLUED = /^(g|l|kg|kgs|gm|gms|ml|ltr|ltrs|pcs|pc|pkt|pkts)$/;
+  const PAY_NEXT = /^(upi|gpay|g|google|phonepe|phone|paytm|cash|bank|neft|imps|nagadu)$/;
+  // "aidu kg", "3 packets", "ಮೂರು ಪ್ಯಾಕೆಟ್" → removed, so what is left is the item.
+  function stripQuantities(text) {
+    const t = String(text || '').split(/\s+/).filter(Boolean), out = [];
+    for (let k = 0; k < t.length; k++) {
+      const n = t[k].toLowerCase(), u = (t[k + 1] || '').toLowerCase();
+      if (/^\d+(\.\d+)?(g|l|kg|kgs|gm|gms|ml|ltr|ltrs)$/.test(n)) continue;
+      if ((/^\d+(\.\d+)?$/.test(n) || numberWord(n) != null) && QTY.test(u)) { k++; continue; }
+      out.push(t[k]);
+    }
+    return out.join(' ');
+  }
   function shortForm(w) { return w.length >= 3 && (w + 'u') in ONES ? ONES[w + 'u'] : null; }
   // Words that may stand before a bare "thousand" without making it a guess.
   // (ನೂರು alone is a plain 100 — "haalu nooru" — so only ಸಾವಿರ is strict.)
@@ -163,14 +177,16 @@
   // a quantity ("5 kg"), or null. A multiplier after a word we cannot read
   // ("ಐದ್ಓವರೆ ಸಾವಿರ" misheard) gives null — ask her, never guess ₹1,000.
   function extractAmount(text) {
-    const lower = ' ' + text.toLowerCase().replace(/[,]/g, '') + ' ';
+    // Review S21 R1: a full stop that ends a sentence ("5000.", "1.5k.", "ಐದು ಸಾವಿರ.")
+    // is punctuation, not a decimal point.
+    const lower = ' ' + text.toLowerCase().replace(/[,]/g, '').replace(/\.(?!\d)/g, ' ').replace(/[!?]/g, ' ') + ' ';
     // 1) Plain digits, possibly followed by a unit word: "6000", "6 thousand", "2.5 lakh", "1.5k"
     const re = /\s(\d+(?:\.\d+)?)\s*(k\b|thousand|saavira|savira|hazaar|hazar|hajar|lakh|lakhs|laksha|hundred|nooru|sau)?(?=\s|[^a-z0-9.]|$)/g;
     let m;
     while ((m = re.exec(lower))) {
       const after = lower.slice(m.index + m[0].length).trim().split(/\s+/)[0] || '';
       const glued = (lower.slice(m.index + 1).match(/^\d+(?:\.\d+)?([a-z]+)/) || [])[1] || '';
-      if (!m[2] && (QTY.test(after.replace(/[^a-z]/g, '')) || QTY.test(glued))) continue;   // "5 kg", "5kg"
+      if (!m[2] && !PAY_NEXT.test(after.replace(/[^a-z]/g, '')) && (QTY.test(after.replace(/[^a-z]/g, '')) || QTY_GLUED.test(glued))) continue;   // "5 kg", "5kg" — never "6000 g pay"
       let n = parseFloat(m[1]);
       const unit = m[2] ? m[2].trim() : '';
       if (unit === 'k') n *= 1000;
@@ -323,5 +339,5 @@
 
   function escape(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
-  return { parseCollection, parseComplaint, extractAmount, extractMode, extractRoom, matchResident, toLatin, COMPLAINT_CATEGORIES, MODE_SYNONYMS };
+  return { parseCollection, parseComplaint, extractAmount, extractMode, extractRoom, matchResident, toLatin, stripQuantities, COMPLAINT_CATEGORIES, MODE_SYNONYMS };
 }));
