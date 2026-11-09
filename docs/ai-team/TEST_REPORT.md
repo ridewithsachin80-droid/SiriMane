@@ -343,3 +343,15 @@ Backlog (minor): the probe still starts the skip window in a Groq-only setup (pr
 - UI flake: the second mic tap after the Kannada preview missed 2 of 5 runs. The test now waits for network idle before tapping and has a diagnostic catch, and it then passed 3/3 plus both full runs. The cause was not proven (likely a late re-layout of the preview moving the mic).
 - Gates on e19eb58: 12/12 ×2, 3,023 each (Sprint 20 approved at 2,907); quick 280, ui 954.
 - **Not verified:** Chrome's real ಕನ್ನಡ output on an Android phone (numbers as digits or words, loan-word spellings). The owner tries it on Test.
+
+### Sprint 21 — independent review round 1: **BLOCK** (e19eb58) → fixes 9be9c8a
+- B1 (money): common Kannada amounts were read as confident wrong figures ("ಐದೂವರೆ ಸಾವಿರ" → ₹1,000; "ಇನ್ನೂರ ಐವತ್ತು" → ₹50). Now the -ವರೆ halves, joined tens+ones, hundreds compounds and joining forms are read, and the short forms work before ಸಾವಿರ. A ಸಾವಿರ after an unreadable word gives no amount (she is asked). English "onion hundred" stays ₹100. A regression I found while fixing ("aidu nooru" read as 105) is fixed and tested.
+- B2: the "How much was…" question took over typed English ("milk bill", "groceries", "water", "menu", words from old purchase notes). It now uses dictionary items only, with a not-an-item list and no history.
+- S1: a spoken item with no amount called the voice-repair model, which could invent an amount. That question is now final, and a test proves 0 model calls.
+- S2/S3: Kannada question words now count anywhere in the sentence, and resident names are exempt ("Elli 5000" is a payment again).
+- S4: compound Kannada numbers (₹25, ₹75, ₹150, ₹600, ₹700).
+- S5: the mic switch now works when browser storage is blocked and when abort() throws.
+- S6: a quantity ("5 kg", "ಐದು ಕೆಜಿ", "2 packets") is no longer read as the price.
+- Minor: tests now cover -kaayi, the 4-word cap and the CSS. Added more Kannada complaint wordings and leftover words. Short dictionary words no longer stretch ("raveena" → Other). Transliteration goes word by word with NFC. Comment moved.
+- Mutations N1–N9 (every fix above removed in turn) are all caught. Quick 362, UI 958.
+- Test-only: the fake recogniser could fire onerror before its delayed onstart. The test now waits for "Listening in ಕನ್ನಡ" first; this is the likely cause of the earlier intermittent miss.
