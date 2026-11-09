@@ -483,11 +483,25 @@ const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toI
     for (const [t, who, n] of [[`Noora K${alpha} 5000 upi`, nk, 5000], [`Noora K${alpha} aidu saavira`, nk, 5000], ['Ainoor 5000', an, 5000]]) {
       i = await quick.classify(t, adminUser, {}, { allowModel: false }); ok(i && i.args.resident_id === who.id && i.args.amount === n, `N1 "${t}" is still ₹${n}`);
     }
-    for (const [t, n] of [['ಈರುಳ್ಳಿ ನೂರೈವತ್ತು', 150], ['noora aivattu onion', 150]]) { i = await quick.classify(t, adminUser, {}, { allowModel: false }); ok(i && i.tool === 'prepare_expense' && i.args.amount === n, `N1 "${t}" is still ₹${n} with a Noora living here`); }
+    for (const [t, n] of [['ಈರುಳ್ಳಿ ನೂರೈವತ್ತು', 150]]) { i = await quick.classify(t, adminUser, {}, { allowModel: false }); ok(i && i.tool === 'prepare_expense' && i.args.amount === n, `N1 "${t}" (joined ನೂರೈವತ್ತು) is still ₹${n} with a Noora living here`); }
+    // Spaced "noora aivattu" with a resident named Noora: her name wins, as before S21 (₹50, shown for her to check).
+    i = await quick.classify('noora aivattu onion', adminUser, {}, { allowModel: false }); ok(i && i.tool === 'prepare_payment' && i.args.amount === 50, `N2 with a Noora living here, spaced "noora aivattu" is read as her name + ₹50, as before S21 (got ${JSON.stringify(i && [i.tool, i.args])})`);
+    eq(SMParse.extractAmount('noora aivattu onion').amount, 150, 'N2 …and with no Noora it is Kannada ₹150');
     eq(SMParse.extractAmount('noora'), null, 'N1 "noora" alone is a word, not ₹100');
     eq(SMParse.parseCollection(`Noora K${alpha} cash`, [{ id: nk.id, name: nk.name }]).amount, null, 'N1 the on-device Collect parser agrees: no amount from her name');
     eq(SMParse.parseCollection(`Ainoor Z${alpha} cash`, [{ id: an.id, name: an.name }]).amount, null, 'N1 …and "Ainoor" is not ₹500 there either');
     eq(SMParse.parseCollection(`Ainoor Z${alpha} 5000 cash`, [{ id: an.id, name: an.name }]).amount, 5000, 'N1 …while her real amount is kept');
+    // Round 4 (N2): her name before her amount never adds ₹100 to it.
+    for (const [t, n, mode] of [[`Noora K${alpha} five thousand`, 5000], [`Noora K${alpha} aidu saavira`, 5000], [`Noora K${alpha} eradu saavira`, 2000], [`Noora K${alpha} aaru saavira cash`, 6000, 'Cash'],
+                                [`Noora K${alpha} do hazaar`, 2000], [`Noora K${alpha} aivattu`, 50], ['noora aidu saavira upi', 5000, 'UPI'], ['noora ondu saavira', 1000], ['Noora five thousand', 5000]]) {
+      i = await quick.classify(t, adminUser, {}, { allowModel: false });
+      ok(i && i.tool === 'prepare_payment' && i.args.amount === n && (!mode || i.args.mode === mode), `N2 "${t}" is a payment of ₹${n}, not ₹${n + 100} (got ${JSON.stringify(i && [i.tool, i.args || i.clarify])})`);
+    }
+    eq(SMParse.parseCollection(`Noora K${alpha} eradu saavira`, [{ id: nk.id, name: nk.name }]).amount, 2000, 'N2 the Collect parser agrees: ₹2,000');
+    for (const [t, cat] of [[`Priya Das paid`, null]]) {
+      const r = SMParse.parseCollection(t, [{ id: 99, name: 'Priya Das' }]); eq(r.amount, null, 'N2 "Priya Das paid" is not ₹10 ("das" is her name)');
+    }
+    eq(SMParse.extractAmount('aidu noora'), null, 'minor: "aidu noora" is unclear — no amount, she is asked');
     await pool.query(`UPDATE guests SET is_active=false WHERE id = ANY($1)`, [[nk.id, an.id]]);
     console.log('✓ S21 Kannada');
 

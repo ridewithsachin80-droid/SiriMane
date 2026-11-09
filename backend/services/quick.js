@@ -211,19 +211,17 @@ async function classify(text, user, context, copts = {}) {
   const roomHit = SMParse.extractRoom(norm);
   const room = roomHit ? (typeof roomHit === 'string' ? roomHit : roomHit.room) : null;
   const sansRoom = roomHit && roomHit.matched ? norm.replace(roomHit.matched, ' ') : norm;
-  let amt = SMParse.extractAmount(sansRoom);
-  let amount = amt ? amt.amount : null;
+  const { rows: residents } = await pool.query(`SELECT g.id, g.name, r.room_number FROM guests g LEFT JOIN rooms r ON r.id=g.room_id WHERE g.is_active=true`);
+  // Review S21 N1/N2: residents' names are blanked before the amount is read —
+  // "Noora five thousand" is ₹5,000, "Noora paid" has no amount.
+  const amt = SMParse.extractAmount(SMParse.maskNames(sansRoom, residents));
+  const amount = amt ? amt.amount : null;
   const modeHit = SMParse.extractMode(norm);
   const mode = modeHit ? modeHit.mode : null;
 
   // 2. A resident's name wins.
-  const { rows: residents } = await pool.query(`SELECT g.id, g.name, r.room_number FROM guests g LEFT JOIN rooms r ON r.id=g.room_id WHERE g.is_active=true`);
   const nameWords = new Set(residents.flatMap(r => String(r.name || '').toLowerCase().split(/\s+/)));
   if (tokens(raw).some(w => KN_QUESTION_WORDS.has(w) && !nameWords.has(w))) return null;
-  // Review S21 N1: a resident's name is never a number — "Noora paid" is not
-  // ₹100 (ನೂರ), "Ainoor" is not ₹500. If every word of the amount is a word of
-  // a resident's name, there is no amount; she will be asked.
-  if (amt && !/\d/.test(amt.matched) && tokens(amt.matched).every(w => nameWords.has(w))) { amt = null; amount = null; }
   // Review S21: the amount's own words ("nooraivattu", "5000") are never a name.
   const nameText = (amt && amt.matched ? sansRoom.replace(amt.matched, ' ') : norm).replace(MODE_WORDS, ' ');
   const match = SMParse.matchResident(nameText, residents, room);

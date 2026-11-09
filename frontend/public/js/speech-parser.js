@@ -166,6 +166,16 @@
     }
     return out.join(' ');
   }
+  // Review S21 N1/N2: every word of every resident's name is blanked before an
+  // amount is read, so "Noora five thousand" is ₹5,000 (not ₹5,100), "Noora
+  // paid" is no amount (not ₹100), "Priya Das paid" is not ₹10. The blank is a
+  // word, so a ಸಾವಿರ right after a name is still "unclear — ask".
+  function maskNames(text, residents) {
+    const names = new Set();
+    for (const r of residents || []) for (const w of String(r.name || '').toLowerCase().split(/\s+/)) if (w.length >= 2) names.add(w);
+    if (!names.size) return text;
+    return String(text || '').split(/(\s+)/).map(t => names.has(t.toLowerCase().replace(/[.,!?]+$/, '')) ? 'zzname' : t).join('');
+  }
   function shortForm(w) { return w.length >= 3 && (w + 'u') in ONES ? ONES[w + 'u'] : null; }
   // Words that may stand before a bare "thousand" without making it a guess.
   // (ನೂರು alone is a plain 100 — "haalu nooru" — so only ಸಾವಿರ is strict.)
@@ -206,7 +216,7 @@
       if (w === 'and' || w === 'a') { if (seenAny) matchedWords.push(words[i]); continue; }
       // ನೂರ (noora) is a joining form — "noora aivattu" = 150. On its own it is a
       // word (the name Noora), never ₹100 (review S21 N1).
-      if (w === 'noora' && numberWord(nextW) == null) { if (seenAny) break; matchedWords = []; continue; }
+      if (w === 'noora' && numberWord(nextW) == null) { if (seenAny) return null; matchedWords = []; continue; }   // "aidu noora" — unclear: ask
       if (w in MULTIPLIERS) {
         if (!seenAny && !pendingHalf) {
           const prev = (words[i - 1] || '').replace(/[^a-z.]/g, '');
@@ -302,16 +312,11 @@
     const room = extractRoom(raw);
     // Strip the room phrase first so "room 12" can never be read as ₹12.
     const withoutRoom = room ? raw.replace(room.matched, ' ') : raw;
-    const amt = extractAmount(withoutRoom);
+    const amt = extractAmount(maskNames(withoutRoom, residents));   // review S21 N1/N2: a name is never part of the amount
+    const amt0 = amt;
     const mode = extractMode(raw);
     const type = extractType(raw);
     const guest = matchResident(raw, residents, room && room.room);
-    // A resident's name is never the amount ("Noora", "Ainoor") — review S21 N1.
-    let amt0 = amt;
-    if (amt0 && guest && !/\d/.test(amt0.matched)) {
-      const nw = String(guest.name || '').toLowerCase().split(/\s+/);
-      if (amt0.matched.toLowerCase().split(/\s+/).every(w => nw.includes(w))) amt0 = null;
-    }
     let leftover = raw;
     [room && room.matched, amt0 && amt0.matched, mode && mode.matched].forEach(m => { if (m) leftover = leftover.replace(new RegExp(escape(m), 'i'), ' '); });
     if (guest) leftover = leftover.replace(new RegExp(escape(guest.name), 'i'), ' ');
@@ -347,5 +352,5 @@
 
   function escape(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
-  return { parseCollection, parseComplaint, extractAmount, extractMode, extractRoom, matchResident, toLatin, stripQuantities, COMPLAINT_CATEGORIES, MODE_SYNONYMS };
+  return { parseCollection, parseComplaint, extractAmount, extractMode, extractRoom, matchResident, toLatin, stripQuantities, maskNames, COMPLAINT_CATEGORIES, MODE_SYNONYMS };
 }));
