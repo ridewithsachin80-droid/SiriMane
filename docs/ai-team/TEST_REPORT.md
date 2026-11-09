@@ -308,3 +308,18 @@ Owner, 9 Nov 07:55: "Yes for both" (delete the route; ask residents to change th
 - Fixes folded in after the review: duplicate `guests` key in schema-check (the new column was not actually checked), one-statement update, script messages, the forced-change wording reset for a second resident on the same page, checked-out test.
 - Known by design: whoever knows (or cracked) her current password reaches the forced-change screen first; the warden's "Reset app login" is the recovery.
 - 22fc983 (19.2 fixes + Sprint 19 merged in): **APPROVE**. Reviewer: 12/12 ×2 on fresh gate12, 2,876 each; merge verified line-by-line (Sprint 19's 697-line diff intact, 19.2 changes intact); cookie probe 33/33 (refresh login → restricted 1 h cookie, remember carried, full 24 h cookie after the change). Mutants M1–M3 killed. Backlog (minor): test for the wording reset (M5 survives), script wording when there are 0 active residents.
+
+### Sprint 20 — AI that keeps working, Admin on a phone: implementer evidence
+- Root cause (owner's screenshot, 9 Nov): Groq 404 — `llama-3.3-70b-versatile` retired 16 Aug 2026. With GROQ_API_KEY set, Copilot routing, the quick-entry category model and /ai/parse (voice fill for collections/complaints) called Groq only: their AI step had failed silently since August (rules-only results; voice fill showed "please fill the form").
+- `providers.text()`: Groq → Gemini on any failure; Groq skipped 10 min after a failure; ai_actions.interpretation.provider records who answered. Default `GROQ_MODEL=openai/gpt-oss-120b` (with `reasoning_effort: low`) — **not verifiable from the sandbox (no Groq key/network)**; if it is wrong, the fallback keeps everything working and "Test AI connection" shows it.
+- Admin tabs wrap (44 px) — mutant without wrap reproduces the owner's screen exactly ("Settings, Copilot log, AI impact" off-screen at 360). Audit Log: five headings over four columns (stray "PAYS") fixed.
+- Resident portal notices use the shared targeting rule (`services/notices.js`, new); a room notice no longer reaches other rooms.
+- Change-password: only "Wrong current password" keeps the session; an expired/turned-off login logs out.
+- Test harness: quick-entry tests reset the skip window when swapping stubs (a simulated outage correctly started it).
+- Mutations M1–M6 (no fallback, no skip window, tabs not wrapping, stray heading, portal ignoring targeting, expired login kept) all caught.
+- Gates on 9d24462: 12/12 ×2, 2,899 each (api 472, ai 219, copilot 253, quick 195, ui 920, portal 262).
+
+### Sprint 20 — independent review (2 rounds)
+- edba5d9: **APPROVE** with should-fixes: the skip window started on any Groq error (a one-off 400, or a Groq-only setup with nothing to fall back to); an empty/cut-off Groq answer counted as success; worst case ~50 s (Groq 25 s + Gemini 25 s); no test pinned what Gemini receives or that quick entry falls back (mutants survived). Minor: Gemini without JSON mode, max_tokens deprecated, invalid tablist role. → 86440ce.
+- 86440ce: **APPROVE**. 12/12 ×2 on fresh gate14, 2,907 each. Worst case now ~33 s (8 + 25). Mutants mA2 (extra data to Gemini), mB2 (quick Groq-only), mH (pause without Gemini), mI (cut-off accepted) caught.
+Backlog (minor): the probe still starts the skip window in a Groq-only setup (production has both keys) · no test of Gemini's request body (`responseMimeType`) · "+ Add" clipped in Admin → Staff at 360 px (pre-existing) · the Groq model and JSON/reasoning settings are unverified against the live service — "Test AI connection" after release shows it.

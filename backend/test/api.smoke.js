@@ -417,6 +417,19 @@ async function main() {
         ok(JSON.stringify((await S('GET', `/guests/${gh.id}`)).data).includes('5555-6666-7777'), 'S19 staff still see the ID number they need');
         await A('DELETE', `/guests/${gh.id}`);
       }
+      // ── Sprint 20: a notice for one room reaches only that room (the portal used to show it to everyone)
+      {
+        const rooms20 = (await A('GET', '/rooms')).data.filter(x => x.room_number).slice(0, 2);
+        const mk = async (name, room) => { const g = (await A('POST', '/guests', { name, phone: '6' + String(Date.now() + Math.floor(Math.random() * 1e6)).slice(-9), room_id: room.id, join_date: today, monthly_rent: 5000, deposit_amount: 0 })).data; await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [await require('bcrypt').hash('Notice-Pass-20', 6), g.id]); return g; };
+        const inA = await mk('S20 In A', rooms20[0]), inB = await mk('S20 In B', rooms20[1]);
+        const ann = (await pool.query(`INSERT INTO announcements(title, message, priority, is_active, target_type, target_value) VALUES('S20 room only', 'Plumber visits your room at 4', 'normal', true, 'room', $1) RETURNING id`, [rooms20[0].room_number])).rows[0];
+        const tok = async g => (await api('POST', '/guest-login', { mobile: g.phone, password: 'Notice-Pass-20' })).data.token;
+        const seesIt = async g => ((await api('GET', '/guest-portal', null, await tok(g))).data.announcements || []).some(a => a.id === ann.id);
+        eq(await seesIt(inA), true, 'S20-5 the resident in that room sees the notice in her app');
+        eq(await seesIt(inB), false, 'S20-5 PRIVACY: a resident in another room does not');
+        await pool.query('DELETE FROM announcements WHERE id=$1', [ann.id]);
+        await A('DELETE', `/guests/${inA.id}`); await A('DELETE', `/guests/${inB.id}`);
+      }
       // ── Hotfix 19.1/19.2: the old public guest lookup is gone (it leaked password hashes and ID numbers)
       {
         eq((await fetch(BASE + '/api/guest-lookup?phone=9876543210')).status, 404, 'HF19.2 SECURITY: the guest lookup no longer exists (no login)');
