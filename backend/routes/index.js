@@ -1638,9 +1638,11 @@ router.post('/guest-change-password', guestAuth, async (req, res) => {
     if (guestKey.length === 10 && String(newPassword).replace(/\D/g, '').includes(guestKey)) return res.status(400).json({ error: 'Choose a password that is not your phone number.' });
     if (newPassword === currentPassword) return res.status(400).json({ error: 'The new password must be different.' });
     const hash = await bcrypt.hash(newPassword, 10);
-    await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [hash, g.id]);
-    // Hotfix 19.2: she has chosen a new one — stop asking (no-op before the migration)
-    await pool.query('UPDATE guests SET must_change_password=false WHERE id=$1', [g.id]).catch(e => { if (e.code !== '42703') throw e; });
+    // Hotfix 19.2: the new password and "stop asking" in ONE statement (review),
+    // so she can never end up changed-but-still-asked. Before the migration the
+    // column doesn't exist (42703): save the password alone.
+    await pool.query('UPDATE guests SET password_hash=$1, must_change_password=false WHERE id=$2', [hash, g.id])
+      .catch(e => { if (e.code !== '42703') throw e; return pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [hash, g.id]); });
     // A fresh, unrestricted token — the default-password one only allowed this call
     const token = auth.signToken({ guestId: g.id, type: 'guest' }, { expiresIn: '24h' });
     res.json({ message: 'Password changed successfully', token });

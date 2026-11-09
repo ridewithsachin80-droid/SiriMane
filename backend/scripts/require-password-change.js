@@ -22,10 +22,12 @@ async function main() {
   const { residents, already } = rows[0];
   console.log(`\n${APPLY ? 'APPLYING' : 'DRY RUN — nothing is changed'}`);
   console.log(`Active residents: ${residents} · already asked: ${already} · would ask now: ${residents - already}`);
+  if (residents - already === 0) { console.log('Nothing to do — every resident has already been asked.'); return; }
   if (APPLY) {
     const r = await pool.query(`UPDATE guests SET must_change_password = true WHERE is_active = true AND must_change_password = false`);
     console.log(`Asked: ${r.rowCount} resident(s). Each chooses a new password at her next login.`);
-  } else if (residents - already > 0) console.log('Run again with --apply to ask them.');
+    console.log('Note: running --apply again later asks again anyone who has changed her password since.');
+  } else console.log('Run again with --apply to ask them.');
 }
 
 main().then(() => pool.end()).catch(e => {

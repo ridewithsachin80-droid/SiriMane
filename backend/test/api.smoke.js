@@ -372,12 +372,16 @@ async function main() {
         const XF = { 'Content-Type': 'application/json', 'X-Forwarded-For': '198.51.100.192' };
         const gr = (await A('POST', '/guests', { name: 'HF Refresh', phone: '6' + String(Date.now() + 3).slice(-9), join_date: today, monthly_rent: 5000, deposit_amount: 0 })).data;
         await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [await require('bcrypt').hash('Old-Own-Pass', 6), gr.id]);
+        const gone = (await A('POST', '/guests', { name: 'HF Left', phone: '6' + String(Date.now() + 9).slice(-9), join_date: today, monthly_rent: 5000, deposit_amount: 0 })).data;
+        await pool.query('UPDATE guests SET is_active=false WHERE id=$1', [gone.id]);
         // The owner's script: dry run changes nothing, --apply asks every active resident
         const run = args => require('child_process').execFileSync(process.execPath, [require('path').join(__dirname, '../scripts/require-password-change.js'), ...args], { env: process.env, encoding: 'utf8' });
         const dry = run([]);
         ok(/DRY RUN/.test(dry) && (await pool.query('SELECT must_change_password FROM guests WHERE id=$1', [gr.id])).rows[0].must_change_password === false, 'HF19.2 the script\'s dry run changes nothing');
         const applied = run(['--apply']);
         ok(/Asked: \d+/.test(applied) && (await pool.query('SELECT must_change_password FROM guests WHERE id=$1', [gr.id])).rows[0].must_change_password === true, 'HF19.2 --apply asks every active resident');
+        eq((await pool.query('SELECT must_change_password FROM guests WHERE id=$1', [gone.id])).rows[0].must_change_password, false, 'HF19.2 …but never a checked-out resident');
+        ok(/Nothing to do/.test(run(['--apply'])), 'HF19.2 running it again says there is nothing to do');
         // She logs in with her CURRENT password → only "choose a new password"
         let lg = await fetch(BASE + '/api/guest-login', { method: 'POST', headers: XF, body: JSON.stringify({ mobile: gr.phone, password: 'Old-Own-Pass' }) }).then(r => r.json());
         ok(lg.must_change_password === true && lg.password_reason === 'refresh', 'HF19.2 her current password still logs her in, straight to "choose a new password"');
@@ -396,7 +400,7 @@ async function main() {
           ok(lg.token && lg.must_change_password === false, 'HF19.2 OPS: before the migration, login works');
           eq((await api('POST', '/guest-change-password', { currentPassword: 'Fresh-Own-19', newPassword: 'Again-Own-20' }, lg.token)).status, 200, 'HF19.2 OPS: before the migration, changing a password works');
         } finally { await pool.query('ALTER TABLE guests ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT false'); }
-        await A('DELETE', `/guests/${gr.id}`);
+        await A('DELETE', `/guests/${gr.id}`); await pool.query('DELETE FROM guests WHERE id=$1', [gone.id]).catch(() => {});
         await pool.query('UPDATE guests SET must_change_password=false');   // other suites log residents in normally
       }
       // ── Sprint 18: one clock — India's date at every hour (the gate also runs on a faked clock at 01:00 IST on the 1st)

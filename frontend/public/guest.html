@@ -562,7 +562,9 @@ async function guestLogin() {
       // closing the app here means logging in again, never a half-open session.
       forcePw = { current: password, remember: document.getElementById('login-remember')?.checked };
       // Hotfix 19.2: say why — first login, or the PG asked everyone for a new password
-      if (data.password_reason === 'refresh') document.getElementById('fpw-why').textContent = 'For your safety, Siri Mane is asking every resident to choose a new password. Please pick one you have not used here before.';
+      document.getElementById('fpw-why').textContent = data.password_reason === 'refresh'
+        ? 'For your safety, Siri Mane is asking every resident to choose a new password. Please pick one you have not used here before.'
+        : 'You logged in with your phone number. Anyone who knows your number could do the same, so please choose your own password now.';
       document.getElementById('login-section').classList.add('hidden');
       document.getElementById('force-pw-section').classList.remove('hidden');
       document.getElementById('fpw-new').focus();
