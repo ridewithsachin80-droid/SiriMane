@@ -1137,12 +1137,15 @@ router.get('/balance-sheet/export/pdf', auth, requireAdmin, async (req, res) => 
   } catch (err) { if (!res.headersSent) res.status(500).json({ error: err.message }); }
 });
 
-// ── PUBLIC GUEST LOOKUP ──────────────────────────
-router.get('/guest-lookup', async (req, res) => {
+// ── GUEST LOOKUP (admin only) ────────────────────
+// Hotfix 19.1 (SECURITY): this was PUBLIC and returned g.* — her password hash
+// and ID-proof number — to anyone who typed her phone number. No screen calls
+// it. Now admin-only and named columns only; secrets are never selected.
+router.get('/guest-lookup', auth, requireAdmin, async (req, res) => {
   const { phone } = req.query;
   if (!phone) return res.status(400).json({ error: 'Phone required' });
   try {
-    const g = await pool.query(`SELECT g.*,r.room_number FROM guests g LEFT JOIN rooms r ON g.room_id=r.id WHERE g.phone=$1 LIMIT 1`, [phone]);
+    const g = await pool.query(`SELECT g.id, g.name, g.phone, g.room_id, g.bed_number, g.join_date, g.leave_date, g.is_active, g.monthly_rent, g.deposit_amount, r.room_number FROM guests g LEFT JOIN rooms r ON g.room_id=r.id WHERE g.phone=$1 LIMIT 1`, [phone]);
     if (!g.rows[0]) return res.status(404).json({ error: 'Not found' });
     const c = await pool.query('SELECT amount,collection_date,collection_type,payment_mode FROM collections WHERE guest_id=$1 AND is_deleted=false AND status=\'confirmed\' ORDER BY collection_date DESC LIMIT 12', [g.rows[0].id]);
     const a = await pool.query('SELECT title,message,priority,created_at FROM announcements WHERE is_active=true ORDER BY created_at DESC LIMIT 5');
