@@ -299,7 +299,9 @@ const BUYABLE = new Set(['Groceries', 'Cleaning']);
 function dropWords(text, matched) {
   if (!matched) return text;
   // Whole words only — "ten" is never cut out of "Tenzin" or "Tender" (review 21.1 S2).
-  return String(text).replace(new RegExp('(^|\\s)' + matched.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?=\\s|$)', 'i'), '$1 ');
+  // Edges are anything that is not a letter or digit — a space, "." "," "!"
+  // or "₹" — so "500." and "500, cash" are cleared too (review 21.1 H1).
+  return String(text).replace(new RegExp('(^|[^\\p{L}\\p{N}])' + matched.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?=[^\\p{L}\\p{N}]|$)', 'iu'), '$1 ');
 }
 
 // ── Fuzzy resident matching (14.2) ──────────────────────────────────────────

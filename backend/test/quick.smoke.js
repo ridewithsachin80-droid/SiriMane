@@ -537,6 +537,12 @@ const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toI
     ok(tz && tz.id, 'H21.1 S2 (fixture) a resident named Tenzin');
     i = await quick.classify('Tenzin ten', adminUser, {}, { allowModel: false }); ok(i && i.tool === 'prepare_payment' && i.args.resident_id === tz.id, `H21.1 S2 "Tenzin ten" is still her payment (got ${JSON.stringify(i && [i.tool, i.args])})`);
     await pool.query(`UPDATE guests SET is_active=false WHERE id=$1`, [tz.id]);
+    // Review 21.1 H1: punctuation after the amount (phone voice typing adds full stops).
+    for (const t of ['500.', '₹500.', '500, cash', 'Spent 500.', '500!', 'Five hundred.']) {
+      i = await quick.classify(t, adminUser, {}, { allowModel: false });
+      ok(i && !i.tool && /^What was ₹500 for\?/.test(i.clarify), `H21.1 H1 "${t}" asks what ₹500 was for — never a blind expense (got ${JSON.stringify(i && (i.clarify || i.args))})`);
+    }
+    for (const [t, d] of [['onion 100.', 'onion'], ['onion 100, cash', 'onion'], ['Onion 100.', 'Onion'], ['Milk 500;', 'Milk'], ['onion 1.5k.', 'onion']]) { i = await quick.intent(t, adminUser, {}); eq(i.args.description, d, `H21.1 H1 "${t}" is filed as "${d}"`); }
     for (const [t, d] of [['Tender coconut ten', 'Tender coconut'], ['Milk 2500ml 500', 'Milk 2500ml'], ['Kitten food ten', 'Kitten food'], ['Paneer 1500g 500', 'Paneer 1500g']]) { i = await quick.intent(t, adminUser, {}); eq(i.args.description, d, `H21.1 S2 "${t}" is filed as "${d}"`); }
     console.log('✓ S21 Kannada');
 
