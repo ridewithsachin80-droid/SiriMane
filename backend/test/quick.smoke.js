@@ -486,6 +486,8 @@ const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toI
     for (const [t, n] of [['ಈರುಳ್ಳಿ ನೂರೈವತ್ತು', 150], ['noora aivattu onion', 150]]) { i = await quick.classify(t, adminUser, {}, { allowModel: false }); ok(i && i.tool === 'prepare_expense' && i.args.amount === n, `N1 "${t}" is still ₹${n} with a Noora living here`); }
     eq(SMParse.extractAmount('noora'), null, 'N1 "noora" alone is a word, not ₹100');
     eq(SMParse.parseCollection(`Noora K${alpha} cash`, [{ id: nk.id, name: nk.name }]).amount, null, 'N1 the on-device Collect parser agrees: no amount from her name');
+    eq(SMParse.parseCollection(`Ainoor Z${alpha} cash`, [{ id: an.id, name: an.name }]).amount, null, 'N1 …and "Ainoor" is not ₹500 there either');
+    eq(SMParse.parseCollection(`Ainoor Z${alpha} 5000 cash`, [{ id: an.id, name: an.name }]).amount, 5000, 'N1 …while her real amount is kept');
     await pool.query(`UPDATE guests SET is_active=false WHERE id = ANY($1)`, [[nk.id, an.id]]);
     console.log('✓ S21 Kannada');
 
