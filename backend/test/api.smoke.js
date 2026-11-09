@@ -403,6 +403,16 @@ async function main() {
         ok(r.status === 200 && !('token' in (await r.json())), 'S19-1 SECURITY: her login from the app screen never puts the token in the body');
         await A('DELETE', `/guests/${g19.id}`);
       }
+      // ── Hotfix 19.1: the old public guest lookup leaked her password hash and ID number
+      {
+        const gl = await A('POST', '/guests', { name: 'HF Lookup', phone: '6' + String(Date.now()).slice(-9), join_date: today, monthly_rent: 5000, deposit_amount: 0, id_proof_type: 'Aadhaar', id_proof_number: '1234-5678-9012' });
+        await pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', ['$2b$06$secretsecretsecretsecretse', gl.data.id]);
+        eq((await fetch(BASE + '/api/guest-lookup?phone=' + gl.data.phone)).status, 401, 'HF19.1 SECURITY: the guest lookup needs a login');
+        eq((await S('GET', '/guest-lookup?phone=' + gl.data.phone)).status, 403, 'HF19.1 SECURITY: …and an admin');
+        const lk = await A('GET', '/guest-lookup?phone=' + gl.data.phone);
+        ok(lk.status === 200 && lk.data.name === 'HF Lookup' && !('password_hash' in lk.data) && !('id_proof_number' in lk.data) && !JSON.stringify(lk.data).includes('1234-5678-9012'), 'HF19.1 SECURITY: even for the admin it never returns the password hash or the ID number');
+        await A('DELETE', `/guests/${gl.data.id}`);
+      }
       // ── Sprint 18: one clock — India's date at every hour (the gate also runs on a faked clock at 01:00 IST on the 1st)
       {
         const ym = today.slice(0, 7);
