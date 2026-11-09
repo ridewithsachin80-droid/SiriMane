@@ -397,3 +397,14 @@ Backlog (minor): the probe still starts the skip window in a Groq-only setup (pr
 - N3: a surname that is also a number ("Das" = 10) could shrink someone else's amount. With a Priya Das living here, "Kavya das hazaar" was read as ₹1,000.
 - Fix: a multiplier straight after a blanked name gives no amount, so she is asked. Mutation U1 is caught.
 - Gates on d103b88: 12/12 ×2, 3,169 each (quick 422, ui 958).
+
+### Sprint 21 — independent review round 6: **APPROVE** (d103b88)
+- N3 verified fixed in quick.classify and the Collect parser.
+- Across about 230 English, Kanglish and Kannada phrases re-run against b79cae1, nothing gives a wrong rupee figure that base got right. Every remaining difference is one of three kinds:
+  - an intended S21 change;
+  - a base error that is now correct ("Priya Das five thousand" ₹15,000 → ₹5,000, "five thousand." ₹5 → ₹5,000, …);
+  - a guess that now asks instead ("Priya thousand", "Hema saavira" — the B1/N3 rules).
+- Still open (minor):
+  - with a resident named Noora, the spaced "noora aivattu" reads as her name + ₹50, the same as base;
+  - Chrome's real ಕನ್ನಡ output on an Android phone has to be checked by the owner on Test (S21-15).
+- Review: 6 rounds — BLOCK ×5, then APPROVE. Final gates 12/12 ×2, 3,169 each.

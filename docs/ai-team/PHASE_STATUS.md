@@ -259,3 +259,5 @@ Note: the owner said to start building at once, so these criteria were written a
 | S21-10..13 | **Mic language switch.** Every mic (Copilot bar, quick sheet, Collect, Complaints, Purchase) listens in the language chosen on this phone (English by default). While listening, and after each result, the status line offers one 44 px button, "ಕನ್ನಡದಲ್ಲಿ ಹೇಳಿ" or "Speak English", that stops, switches and listens again. A phone without Kannada speech falls back to English and says so | UX |
 | S21-14 | In the Collect and Complaint voice previews, what was heard is shown as plain text, never as markup | SECURITY |
 | S21-15 | Gates 12/12 twice; mutations caught; independent review before merge. **Not verifiable here:** what Chrome on a real Android phone writes in ಕನ್ನಡ mode (digits vs words, loan-word spellings). The owner tries it after release | QA |
+
+**Sprint 21 status:** approved by the independent review in round 6 (d103b88), after BLOCK ×5. Gates 12/12 ×2, 3,169 each. Merged to ai/test. No migration. The owner checks ಕನ್ನಡ voice on a real phone on Test (S21-15).
