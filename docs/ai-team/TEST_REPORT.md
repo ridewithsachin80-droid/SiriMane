@@ -380,3 +380,11 @@ Backlog (minor): the probe still starts the skip window in a Groq-only setup (pr
   - In both quick.classify and the on-device Collect parser, an amount made only of a resident's name words is dropped, so she is asked. This also covers "Ainoor" (500).
 - Mutations Q1–Q3 were all caught. Q3 survived at first, then an Ainoor parser test was added.
 - Gates on 6e743f4: 12/12 ×2, 3,151 each (quick 404, ui 958).
+
+### Sprint 21 — independent review round 4: **BLOCK** (6e743f4) → fix 950f54b
+- N1 was verified fixed ("Noora paid", "Ainoor paid" give no amount; an existing ₹10 for "Priya Das paid" is also gone).
+- N2 (money): her name before her amount still added ₹100 ("Noora five thousand" → ₹5,100, also in plain English).
+- Fix: a general rule replaces the per-case guards. Every word of every active resident's name is blanked (`SMParse.maskNames`) before any amount is read, in Quick Entry and in the on-device Collect parser.
+  - With a resident named Noora, the spaced "noora aivattu" reads as her name + ₹50, which is the pre-S21 result; the joined "ನೂರೈವತ್ತು" stays ₹150.
+  - "aidu noora" now gives no amount, so she is asked.
+- Mutations T1–T3 caught. Gates on 950f54b: 12/12 ×2, 3,164 each (quick 417, ui 958).
