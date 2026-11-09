@@ -285,3 +285,15 @@ Minor, backlog: the 409 text says "record this against today" even when today is
 Found by the Sprint 19 independent review: `GET /api/guest-lookup` needed no login and returned `SELECT g.*` for any phone number — her bcrypt password hash and ID-proof number included. Present since the first upload; no screen calls it. Fix a381906: `auth, requireAdmin`, named columns only (no hash, ID type/number or address). Route not deleted (no-deletions rule) — owner asked.
 Review: **APPROVE**. Express route walk (177 routes): without a login only /auth/login, /guest-login, /guest-message, /health and pages. Live scan, 85 GET routes × (no login, resident A, staff, admin) with B's ids: nothing leaks without a login or across residents. Mutations (public again, g.* back, requireAdmin removed) caught. Gates 12/12 ×2 (implementer) + ×1 (reviewer), 2,805.
 Follow-up for Sprint 19: staff logins receive residents' `password_hash` from /dashboard, /guests, /guests/:id and two `RETURNING *` routes — to be stripped. Backlog: /guest-portal shows every active announcement, ignoring room/floor targeting.
+
+### Sprint 19 — review round 1: **BLOCK** (7ee1c2c) → fixes 203b67a, 895e51e (+ hotfix 19.1 merged in)
+- Blocker (pre-existing): public `/api/guest-lookup` leaked password hash + ID number — shipped separately as hotfix 19.1 (approved, PR #23) and merged into this branch.
+- Token was still in the login / change-password response body → omitted when the request comes from the app's screens (X-Requested-With); API clients still get it.
+- A cookie could outlive the screen (new tab on a shared phone; expired remembered session) → both screens end any cookie session on load when they show nobody logged in; logins wait for it.
+- Logout with a wrong cookie path passed every gate → tests now assert `Path=/api` on the clearing header and that logging out through the screen drops the cookie.
+- The "no reload loop" check could never fail → now counts real main-frame navigations (1–2).
+- Resident password change now refreshes the screen's 24 h expiry. A wrong current password no longer logs the warden out.
+- From the hotfix review: staff routes sent residents' password hashes (guests.* / RETURNING *) → one filter on every /api response drops `password_hash`; ID numbers kept.
+- Mutations N1–N4 (token in screen responses, wrong logout path, resident cookie outliving the screen, wrong password logging out) and the no-filter mutant all caught.
+- Gates on 895e51e: 12/12 ×2, 2,862 each (api 458, ui 908, portal 260).
+Backlog: `/guest-portal` lists every active announcement, ignoring room/floor targeting (`noticeWhere()`), D-19-1 a real 30-day "keep me signed in" needs server-side session revocation first.
