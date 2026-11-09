@@ -501,12 +501,14 @@ async function runAtWidth(browser, BASE, width) {
   await noHScroll('home');
   // Admin sees money on Home; the API must not send it to staff at all
   ok(/This month/.test(homeTxt), `${tag} admin Home shows the month's money`);
-  const staffHome = await page.evaluate(async () => {
-    const r = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'ui_staff', password: 'staff123' }) });
+  // Sprint 19: from the test, not the page — a login inside the page would
+  // (rightly) replace the admin's cookie session in this browser.
+  const staffHome = await (async () => {
+    const r = await fetch(BASE + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': '198.51.100.19' }, body: JSON.stringify({ username: 'ui_staff', password: 'staff123' }) });
     const { token } = await r.json();
-    const h = await (await fetch('/api/home', { headers: { Authorization: 'Bearer ' + token } })).json();
+    const h = await (await fetch(BASE + '/api/home', { headers: { Authorization: 'Bearer ' + token } })).json();
     return { hasFinance: 'finance' in h, hasFlags: 'flags' in h, hasApprovals: h.pending && h.pending.approvals !== undefined, hasRentDue: !!h.today.rentDue };
-  });
+  })();
   eq(staffHome.hasFinance, false, `${tag} ROLE: staff /home carries no finance block`);
   eq(staffHome.hasFlags, false, `${tag} ROLE: staff /home carries no owner flags`);
   eq(staffHome.hasApprovals, false, `${tag} ROLE: staff /home carries no approval queue`);
@@ -1030,7 +1032,7 @@ async function runAtWidth(browser, BASE, width) {
     await page.type('#pw-new', 'Fresh-Pass-9'); await page.type('#pw-new2', 'Fresh-Pass-9');
     await page.click('#pw-save');
     await page.waitForFunction(() => !document.getElementById('pw-save'), { timeout: 8000 });
-    const s163Login = await page.evaluate(w => fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': '192.0.2.200' }, body: JSON.stringify({ username: 'ui163r_' + w, password: 'Fresh-Pass-9' }) }).then(r => r.status), width);
+    const s163Login = await fetch(BASE + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': '192.0.2.200' }, body: JSON.stringify({ username: 'ui163r_' + width, password: 'Fresh-Pass-9' }) }).then(r => r.status);   // Sprint 19: from the test — a login in the page would replace the admin's cookie session
     eq(s163Login, 200, `${tag} S16.3-2 the password set through the screen works`);
     // It now has history (the rename and password change are in the audit log), so removal is refused politely
     const s163Del = await page.evaluate(id => apiFetch(`/users/${id}`, { method: 'DELETE' }).then(() => 'removed', e => e.message), s163u.id);
@@ -1050,7 +1052,7 @@ async function runAtWidth(browser, BASE, width) {
     await page.evaluate(n => { const r = [...document.querySelectorAll('#staff-tb tr')].find(x => x.textContent.includes(n)); [...r.querySelectorAll('button')].find(b => b.textContent.trim() === 'Turn off').click(); }, 'ui163r_' + width);
     await page.waitForFunction(n => { const r = [...document.querySelectorAll('#staff-tb tr')].find(x => x.textContent.includes(n)); return r && /Turned off/.test(r.textContent); }, { timeout: 8000 }, 'ui163r_' + width);
     ok((await s17Row('ui163r_' + width)).btns.includes('Turn on'), `${tag} S17-1 a turned-off account shows "Turned off" and "Turn on"`);
-    const s17Login = await page.evaluate(w => fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': '192.0.2.201' }, body: JSON.stringify({ username: 'ui163r_' + w, password: 'Fresh-Pass-9' }) }).then(r => r.status), width);
+    const s17Login = await fetch(BASE + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': '192.0.2.201' }, body: JSON.stringify({ username: 'ui163r_' + width, password: 'Fresh-Pass-9' }) }).then(r => r.status);   // Sprint 19: from the test — a login in the page would replace the admin's cookie session
     eq(s17Login, 403, `${tag} S17-1 turned off through the screen, it cannot log in`);
     // …and the request sheet's "Assigned to" list no longer offers it (cache refreshed by Turn off)
     {
@@ -1704,6 +1706,41 @@ async function runAtWidth(browser, BASE, width) {
   ok(await page.$eval('#pay-waiting', e => /waiting for confirmation/.test(e.textContent)), `${tag} S15-6 pending money shown separately as "waiting"`);
   eq(Number((await page.$eval('#pay-waiting', e => e.textContent)).split('waiting')[0].replace(/[^0-9]/g, '')), s15Pending, `${tag} S15-6 the waiting line equals the s15Pending s15Rows`);
   await pool.query(`DELETE FROM collections WHERE receipt_number LIKE 'S15-${width}-%'`);
+  // ── Sprint 19: the page can't read the staff login; old phones log in once
+  {
+    ok(await page.evaluate(() => !/sm_staff/.test(document.cookie) && !localStorage.getItem('sm_token') && !Object.keys(sessionStorage).some(k => /token/i.test(k))), `${tag} S19-1 SECURITY: the page can't read the staff login (not in document.cookie, not in storage)`);
+    const sc = (await page.cookies(BASE + '/api/auth/me')).find(c => c.name === 'sm_staff');
+    ok(sc && sc.httpOnly && sc.sameSite === 'Strict' && sc.path === '/api', `${tag} S19-1 the staff login is an HttpOnly, SameSite=Strict cookie for /api`);
+    eq(await page.evaluate(async () => (await fetch('/api/announcements', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: 'forged', message: 'x' }) })).status), 403, `${tag} S19-3 SECURITY: a cookie write without the app header is refused`);
+    // S19-5: a phone that was logged in before the release (token in storage, no cookie)
+    await page.deleteCookie(...(await page.cookies(BASE + '/api/auth/me')));
+    await page.evaluate(() => { localStorage.setItem('sm_token', 'old.token.value'); localStorage.setItem('sm_user', JSON.stringify({ id: 1, username: 'admin', role: 'admin' })); });
+    await page.reload({ waitUntil: 'networkidle0' });
+    await page.waitForFunction(() => { const l = document.getElementById('login-page') || document.getElementById('login-screen'); return document.getElementById('login-username') && document.getElementById('login-username').offsetParent !== null; }, { timeout: 10000 });
+    await new Promise(r => setTimeout(r, 1500));
+    ok(await page.evaluate(() => document.getElementById('login-username').offsetParent !== null && !localStorage.getItem('sm_token') && !localStorage.getItem('sm_user')), `${tag} S19-5 a phone logged in before the release lands once on the login screen, old token deleted`);
+    // review: count real main-frame navigations over a few seconds (reload + at most one redirect)
+    let navs = 0; const onNav = f => { if (f === page.mainFrame()) navs++; };
+    page.on('framenavigated', onNav);
+    await page.evaluate(() => { localStorage.setItem('sm_token', 'old.token.value'); localStorage.setItem('sm_user', JSON.stringify({ id: 1, username: 'admin', role: 'admin' })); });
+    await page.reload({ waitUntil: 'networkidle0' });
+    await new Promise(r => setTimeout(r, 3000));
+    page.off('framenavigated', onNav);
+    ok(navs >= 1 && navs <= 2 && await page.evaluate(() => document.getElementById('login-username').offsetParent !== null), `${tag} S19-5 …with no reload loop (${navs} navigations)`);
+    // Review S19-2: logging out through the screen really drops the cookie
+    await page.type('#login-username', 'admin'); await page.type('#login-password', process.env.ADMIN_PASSWORD || 'SiriMane@2024');
+    await page.click('#login-btn'); await page.waitForSelector('.home-greeting', { timeout: 15000 });
+    ok((await page.cookies(BASE + '/api/auth/me')).some(c => c.name === 'sm_staff'), `${tag} S19 (fixture) logged in again`);
+    // Review S19-7: a wrong current password is an answer, not a lost session
+    const wrongPw = await page.evaluate(() => API.changePassword('not-my-password', 'Brand-New-77').then(() => 'changed', e => e.message));
+    ok(wrongPw !== 'changed' && await page.evaluate(() => !!localStorage.getItem('sm_user')) && (await page.cookies(BASE + '/api/auth/me')).some(c => c.name === 'sm_staff'), `${tag} S19-7 a wrong current password does not log her out (${wrongPw})`);
+    await page.evaluate(() => { window.confirm = () => true; document.getElementById('logout-btn').click(); });
+    await page.waitForFunction(() => document.getElementById('login-username') && document.getElementById('login-username').offsetParent !== null, { timeout: 10000 });
+    await new Promise(r => setTimeout(r, 500));
+    ok(!(await page.cookies(BASE + '/api/auth/me')).some(c => c.name === 'sm_staff'), `${tag} S19-2 logging out through the screen drops the cookie`);
+    await page.type('#login-username', 'admin'); await page.type('#login-password', process.env.ADMIN_PASSWORD || 'SiriMane@2024');
+    await page.click('#login-btn'); await page.waitForSelector('.home-greeting', { timeout: 15000 });
+  }
   eq(jsErrors.length, 0, `${tag} no uncaught JS errors (${jsErrors.join('; ')})`);
   eq(cspViolations.length, 0, `${tag} S17-4 no content-security-policy violation on any screen (${cspViolations.slice(0, 5).join('; ')})`);
   await page.close(); await ctx.close();

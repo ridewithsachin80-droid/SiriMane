@@ -58,7 +58,7 @@ router.post('/bulk/confirm', auth, json, wrap(async (req, res) => {
     // (the only thing that runs it) can insist on it regardless of caller.
     await pool.query(`UPDATE ai_proposals SET args = args || '{"acknowledged": true}'::jsonb WHERE id=$1 AND confirmed_at IS NULL`, [proposal_id]);
   }
-  res.json(await copilot.confirm({ user: req.user, proposal_id, authorization: req.headers.authorization, port: req.socket.localPort }));
+  res.json(await copilot.confirm({ user: req.user, proposal_id, authorization: 'Bearer ' + req.authToken, port: req.socket.localPort }));
 }));
 
 // Staff need a name list to assign requests to; /users is admin-only and

@@ -104,10 +104,24 @@ const makeLoginLimiter = () => rateLimit({
 app.use('/api/auth/login', makeLoginLimiter());
 app.use('/api/guest-login', makeLoginLimiter());
 
+// Sprint 19 (review): a resident's password hash never leaves the server — not
+// even to staff (several staff routes select guests.* / RETURNING *). One
+// filter on every API response, so a future route can't leak it either.
+function stripSecrets(v, depth = 0) {
+  if (depth > 12 || v === null || typeof v !== 'object' || v instanceof Date || Buffer.isBuffer(v)) return v;
+  if (Array.isArray(v)) return v.map(x => stripSecrets(x, depth + 1));
+  const out = {};
+  for (const k of Object.keys(v)) if (k !== 'password_hash') out[k] = stripSecrets(v[k], depth + 1);
+  return out;
+}
+app.use('/api', (req, res, next) => { const j = res.json.bind(res); res.json = body => j(stripSecrets(body)); next(); });
+app.locals.stripSecrets = stripSecrets;
+
 // AI routes parse their own (larger) JSON body — mounted before the global
 // 10 kb parser so a bill photo is accepted there and nowhere else.
 app.use('/api/ai', require('./routes/ai'));
 // Request photos need a larger body than the global 10 kb limit.
+
 app.use('/api', require('./routes/rooms-requests'));
 
 app.use(express.json({ limit: '10kb' }));

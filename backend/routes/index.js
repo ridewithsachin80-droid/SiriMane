@@ -156,7 +156,10 @@ router.post('/auth/login', async (req, res) => {
     if (user.disabled_at) return res.status(403).json({ error: 'This account is turned off — ask the owner.' });
     const token = auth.signToken({ userId: user.id }, { expiresIn: '8h' });
     await pool.query(`INSERT INTO activity_log(user_id,action,ip_address) VALUES($1,'login',$2)`, [user.id, req.ip]);
-    res.json({ token, user: { id: user.id, username: user.username, role: user.role } });
+    // Sprint 19: the browser keeps the login in an HttpOnly cookie (the app no
+    // longer stores the token). It is still in the body for API clients.
+    auth.setAuthCookie(req, res, auth.STAFF_COOKIE, token, 8 * 3600 * 1000);
+    res.json({ ...auth.bodyToken(req, token), user: { id: user.id, username: user.username, role: user.role } });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1556,9 +1559,13 @@ router.post('/guest-login', async (req, res) => {
     // (after the 19.1 leak). She logged in with her current one; same flow.
     const refresh = !onDefault && guest.must_change_password === true;
     if (refresh) onDefault = true;
-    const token = auth.signToken({ guestId: guest.id, type: 'guest', ...(onDefault ? { pwc: 1 } : {}) }, { expiresIn: onDefault ? '1h' : '24h' });
+    const remember = !!(req.body && req.body.remember);
+    const token = auth.signToken({ guestId: guest.id, type: 'guest', ...(onDefault ? { pwc: 1 } : {}), ...(remember ? { rem: 1 } : {}) }, { expiresIn: onDefault ? '1h' : '24h' });
+    // Sprint 19: HttpOnly cookie. "Remember me" keeps it across browser restarts
+    // for the token's life; otherwise it ends when the browser closes.
+    auth.setAuthCookie(req, res, auth.GUEST_COOKIE, token, remember ? (onDefault ? 3600 : 24 * 3600) * 1000 : null);
     res.json({
-      token,
+      ...auth.bodyToken(req, token),
       must_change_password: onDefault,
       password_reason: refresh ? 'refresh' : (onDefault ? 'default' : undefined),
       guest: {
@@ -1569,13 +1576,18 @@ router.post('/guest-login', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// POST /api/auth/logout — Sprint 19: end the browser's staff session
+router.post('/auth/logout', (req, res) => { auth.clearAuthCookie(req, res, auth.STAFF_COOKIE); res.json({ ok: true }); });
+
 // Guest middleware
 const guestAuth = async (req, res, next) => {
   try {
-    const token = req.headers.authorization?.split(' ')[1];
+    const { token, via } = auth.tokenFrom(req, auth.GUEST_COOKIE);   // Sprint 19: cookie or Bearer
     if (!token) return res.status(401).json({ error: 'No token' });
+    if (!auth.csrfOk(req, via)) return res.status(403).json({ error: 'Request refused (missing app header).' });
     const decoded = auth.verifyToken(token);
     if (decoded.type !== 'guest') return res.status(401).json({ error: 'Invalid token type' });
+    req.guestClaims = decoded;
     // S16-2: a default-password login may only set a new password
     if (decoded.pwc && req.path !== '/guest-change-password') return res.status(403).json({ error: 'Please set your own password first.', must_change_password: true });
     const r = await pool.query('SELECT * FROM guests WHERE id=$1', [decoded.guestId]);
@@ -1584,6 +1596,9 @@ const guestAuth = async (req, res, next) => {
     next();
   } catch { res.status(401).json({ error: 'Invalid token' }); }
 };
+
+// POST /api/guest-logout — Sprint 19: end the browser's resident session
+router.post('/guest-logout', (req, res) => { auth.clearAuthCookie(req, res, auth.GUEST_COOKIE); res.json({ ok: true }); });
 
 // GET /api/guest-portal - full guest data
 router.get('/guest-portal', guestAuth, async (req, res) => {
@@ -1644,8 +1659,10 @@ router.post('/guest-change-password', guestAuth, async (req, res) => {
     await pool.query('UPDATE guests SET password_hash=$1, must_change_password=false WHERE id=$2', [hash, g.id])
       .catch(e => { if (e.code !== '42703') throw e; return pool.query('UPDATE guests SET password_hash=$1 WHERE id=$2', [hash, g.id]); });
     // A fresh, unrestricted token — the default-password one only allowed this call
-    const token = auth.signToken({ guestId: g.id, type: 'guest' }, { expiresIn: '24h' });
-    res.json({ message: 'Password changed successfully', token });
+    const rem = !!(req.guestClaims && req.guestClaims.rem);
+    const token = auth.signToken({ guestId: g.id, type: 'guest', ...(rem ? { rem: 1 } : {}) }, { expiresIn: '24h' });
+    auth.setAuthCookie(req, res, auth.GUEST_COOKIE, token, rem ? 24 * 3600 * 1000 : null);   // Sprint 19
+    res.json({ message: 'Password changed successfully', ...auth.bodyToken(req, token) });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

@@ -22,7 +22,7 @@ router.post('/ask', auth, async (req, res) => {
       ? { tool: String(req.body.tool).slice(0, 60), args: req.body.args } : null;
     const voice = req.body.voice === true;
     const alternatives = Array.isArray(req.body.alternatives) ? req.body.alternatives.slice(0, 5).map(a => String(a || '').slice(0, 200)) : [];
-    res.json(await copilot.ask({ user: req.user, text, context: ctx, tap, voice, alternatives, authorization: req.headers.authorization, port: req.socket.localPort }));
+    res.json(await copilot.ask({ user: req.user, text, context: ctx, tap, voice, alternatives, authorization: 'Bearer ' + req.authToken, port: req.socket.localPort }));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -31,7 +31,7 @@ router.post('/confirm', auth, async (req, res) => {
   const id = req.body && req.body.proposal_id;
   if (!id || typeof id !== 'string') return res.status(400).json({ error: 'proposal_id is required' });
   try {
-    res.json(await copilot.confirm({ user: req.user, proposal_id: id, authorization: req.headers.authorization, port: req.socket.localPort }));
+    res.json(await copilot.confirm({ user: req.user, proposal_id: id, authorization: 'Bearer ' + req.authToken, port: req.socket.localPort }));
   } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
 });
 
