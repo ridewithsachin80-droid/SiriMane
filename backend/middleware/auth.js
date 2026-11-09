@@ -76,6 +76,10 @@ function csrfOk(req, via) {
 function setAuthCookie(req, res, name, token, maxAgeMs) {
   res.cookie(name, token, { httpOnly: true, sameSite: 'strict', secure: !!req.secure, path: '/api', ...(maxAgeMs ? { maxAge: maxAgeMs } : {}) });
 }
+/** Review S19-2: the app's own screens (which send X-Requested-With) get the
+ *  cookie only — the token stays out of the body so no page script sees it.
+ *  API clients (the gates, scripts) still receive it. */
+function bodyToken(req, token) { return req.headers['x-requested-with'] === 'sirimane' ? {} : { token }; }
 function clearAuthCookie(req, res, name) {
   res.clearCookie(name, { httpOnly: true, sameSite: 'strict', secure: !!req.secure, path: '/api' });
 }
@@ -115,5 +119,5 @@ auth.verifyToken = verifyToken;
 auth.ENV_ID = ENV_ID;
 auth.ENV_SOURCE = ENV_SOURCE;
 auth.LEGACY_CUTOFF = LEGACY_CUTOFF;
-Object.assign(auth, { STAFF_COOKIE, GUEST_COOKIE, tokenFrom, csrfOk, setAuthCookie, clearAuthCookie });
+Object.assign(auth, { STAFF_COOKIE, GUEST_COOKIE, tokenFrom, csrfOk, setAuthCookie, clearAuthCookie, bodyToken });
 module.exports = auth;

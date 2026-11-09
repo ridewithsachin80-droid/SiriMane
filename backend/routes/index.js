@@ -159,7 +159,7 @@ router.post('/auth/login', async (req, res) => {
     // Sprint 19: the browser keeps the login in an HttpOnly cookie (the app no
     // longer stores the token). It is still in the body for API clients.
     auth.setAuthCookie(req, res, auth.STAFF_COOKIE, token, 8 * 3600 * 1000);
-    res.json({ token, user: { id: user.id, username: user.username, role: user.role } });
+    res.json({ ...auth.bodyToken(req, token), user: { id: user.id, username: user.username, role: user.role } });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1572,7 +1572,7 @@ router.post('/guest-login', async (req, res) => {
     // for the token's life; otherwise it ends when the browser closes.
     auth.setAuthCookie(req, res, auth.GUEST_COOKIE, token, remember ? (onDefault ? 3600 : 24 * 3600) * 1000 : null);
     res.json({
-      token,
+      ...auth.bodyToken(req, token),
       must_change_password: onDefault,
       guest: {
         id: guest.id, name: guest.name, phone: guest.phone,
@@ -1664,7 +1664,7 @@ router.post('/guest-change-password', guestAuth, async (req, res) => {
     const rem = !!(req.guestClaims && req.guestClaims.rem);
     const token = auth.signToken({ guestId: g.id, type: 'guest', ...(rem ? { rem: 1 } : {}) }, { expiresIn: '24h' });
     auth.setAuthCookie(req, res, auth.GUEST_COOKIE, token, rem ? 24 * 3600 * 1000 : null);   // Sprint 19
-    res.json({ message: 'Password changed successfully', token });
+    res.json({ message: 'Password changed successfully', ...auth.bodyToken(req, token) });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

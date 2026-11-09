@@ -225,6 +225,25 @@ async function runAtWidth(browser, BASE, width, fixtures) {
   await sleep(400);
   ok(await page.$eval('#portal-section', e => e.classList.contains('hidden')), `${tag} expired session lands back on login`);
   eq(await page.evaluate(() => localStorage.getItem('guest_data')), null, `${tag} expired session is cleared`);
+  // Review S19-3: what the screen shows and the cookie agree — the screen is logged out, so is the cookie
+  eq(await page.evaluate(async () => (await fetch('/api/guest-portal')).status), 401, `${tag} S19-3 PRIVACY: a logged-out screen leaves no usable cookie behind`);
+
+  // Review S19-3: shared phone — she logs in WITHOUT "keep me signed in", then the
+  // app is opened in a new tab: that tab shows the login screen, so her cookie must end too
+  {
+    const ctx = await browser.createBrowserContext();
+    const a = await ctx.newPage();
+    await a.goto(BASE + '/guest', { waitUntil: 'networkidle0' });
+    const st = await a.evaluate(async (m, p) => (await fetch('/api/guest-login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'sirimane' }, body: JSON.stringify({ mobile: m, password: p }) })).status, PHONE, portalPw === PHONE ? 'Resident@2026' : portalPw);
+    eq(st, 200, `${tag} S19 (fixture) logged in without "keep me signed in"`);
+    eq(await a.evaluate(async () => (await fetch('/api/guest-portal')).status), 200, `${tag} S19 (fixture) her cookie works in that tab`);
+    const b = await ctx.newPage();
+    await b.goto(BASE + '/guest', { waitUntil: 'networkidle0' });
+    await new Promise(r => setTimeout(r, 500));
+    ok(await b.$eval('#portal-section', e => e.classList.contains('hidden')), `${tag} S19-3 the new tab shows the login screen`);
+    eq(await b.evaluate(async () => (await fetch('/api/guest-portal')).status), 401, `${tag} S19-3 PRIVACY: …and her cookie no longer opens her record there`);
+    await ctx.close();
+  }
 
   // ── Sprint 7.1: dark theme in the portal ──────────────────────────────
   const lum = c => { const [r, g, b] = c.match(/\d+/g).map(Number).map(v => { v /= 255; return v <= .03928 ? v / 12.92 : Math.pow((v + .055) / 1.055, 2.4); }); return .2126 * r + .7152 * g + .0722 * b; };

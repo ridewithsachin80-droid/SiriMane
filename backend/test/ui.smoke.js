@@ -1719,8 +1719,27 @@ async function runAtWidth(browser, BASE, width) {
     await page.waitForFunction(() => { const l = document.getElementById('login-page') || document.getElementById('login-screen'); return document.getElementById('login-username') && document.getElementById('login-username').offsetParent !== null; }, { timeout: 10000 });
     await new Promise(r => setTimeout(r, 1500));
     ok(await page.evaluate(() => document.getElementById('login-username').offsetParent !== null && !localStorage.getItem('sm_token') && !localStorage.getItem('sm_user')), `${tag} S19-5 a phone logged in before the release lands once on the login screen, old token deleted`);
-    const loops = await page.evaluate(() => performance.getEntriesByType('navigation').length);
-    ok(loops <= 1, `${tag} S19-5 …with no reload loop`);
+    // review: count real main-frame navigations over a few seconds (reload + at most one redirect)
+    let navs = 0; const onNav = f => { if (f === page.mainFrame()) navs++; };
+    page.on('framenavigated', onNav);
+    await page.evaluate(() => { localStorage.setItem('sm_token', 'old.token.value'); localStorage.setItem('sm_user', JSON.stringify({ id: 1, username: 'admin', role: 'admin' })); });
+    await page.reload({ waitUntil: 'networkidle0' });
+    await new Promise(r => setTimeout(r, 3000));
+    page.off('framenavigated', onNav);
+    ok(navs >= 1 && navs <= 2 && await page.evaluate(() => document.getElementById('login-username').offsetParent !== null), `${tag} S19-5 …with no reload loop (${navs} navigations)`);
+    // Review S19-2: logging out through the screen really drops the cookie
+    await page.type('#login-username', 'admin'); await page.type('#login-password', process.env.ADMIN_PASSWORD || 'SiriMane@2024');
+    await page.click('#login-btn'); await page.waitForSelector('.home-greeting', { timeout: 15000 });
+    ok((await page.cookies(BASE + '/api/auth/me')).some(c => c.name === 'sm_staff'), `${tag} S19 (fixture) logged in again`);
+    // Review S19-7: a wrong current password is an answer, not a lost session
+    const wrongPw = await page.evaluate(() => API.changePassword('not-my-password', 'Brand-New-77').then(() => 'changed', e => e.message));
+    ok(wrongPw !== 'changed' && await page.evaluate(() => !!localStorage.getItem('sm_user')) && (await page.cookies(BASE + '/api/auth/me')).some(c => c.name === 'sm_staff'), `${tag} S19-7 a wrong current password does not log her out (${wrongPw})`);
+    await page.evaluate(() => { window.confirm = () => true; document.getElementById('logout-btn').click(); });
+    await page.waitForFunction(() => document.getElementById('login-username') && document.getElementById('login-username').offsetParent !== null, { timeout: 10000 });
+    await new Promise(r => setTimeout(r, 500));
+    ok(!(await page.cookies(BASE + '/api/auth/me')).some(c => c.name === 'sm_staff'), `${tag} S19-2 logging out through the screen drops the cookie`);
+    await page.type('#login-username', 'admin'); await page.type('#login-password', process.env.ADMIN_PASSWORD || 'SiriMane@2024');
+    await page.click('#login-btn'); await page.waitForSelector('.home-greeting', { timeout: 15000 });
   }
   eq(jsErrors.length, 0, `${tag} no uncaught JS errors (${jsErrors.join('; ')})`);
   eq(cspViolations.length, 0, `${tag} S17-4 no content-security-policy violation on any screen (${cspViolations.slice(0, 5).join('; ')})`);

@@ -7,6 +7,13 @@ const APP_HEADER = { 'X-Requested-With': 'sirimane' };   // writes must carry it
 try { localStorage.removeItem('sm_token'); } catch (_) {}  // tokens stored by the old app
 function getToken() { try { return localStorage.getItem('sm_user') ? 'cookie' : null; } catch (_) { return null; } }
 function setToken() { /* the server set the cookie */ }
+// Review S19-3: a login cookie must never outlive what the screen shows — if
+// this browser shows nobody logged in, end any cookie session first. Logins
+// wait for this so a slow reply can't clear a fresh cookie.
+const staleCookieCleared = (function () {
+  try { if (localStorage.getItem('sm_user')) return Promise.resolve(); } catch (_) {}
+  return fetch('/api/auth/logout', { method: 'POST', headers: APP_HEADER, credentials: 'same-origin' }).then(() => {}, () => {});
+})();
 function clearAuth() {
   try { localStorage.removeItem('sm_token'); localStorage.removeItem('sm_user'); } catch (_) {}
   const go = () => { window.location.href = '/management.html'; };
@@ -35,7 +42,8 @@ async function apiFetch(endpoint, options = {}) {
   catch { const e = new Error('No connection. Check your internet and try again.'); e.status = 0; throw e; }
   const data = await readJson(res);
   if (res.status === 401) {
-    if (endpoint === '/auth/login') {
+    // A wrong password on these two is an answer, not a lost session (review S19-7)
+    if (endpoint === '/auth/login' || endpoint === '/auth/change-password') {
       throw new Error(data.error || 'Invalid credentials');
     }
     clearAuth();
@@ -47,7 +55,7 @@ async function apiFetch(endpoint, options = {}) {
 }
 
 const API = {
-  login: (u,p) => apiFetch('/auth/login', { method:'POST', body:{username:u,password:p} }),
+  login: (u,p) => staleCookieCleared.then(() => apiFetch('/auth/login', { method:'POST', body:{username:u,password:p} })),
   changePassword: (c,n) => apiFetch('/auth/change-password', { method:'POST', body:{currentPassword:c,newPassword:n} }),
   setUserPassword: (id, pw) => apiFetch(`/users/${id}/password`, { method:'POST', body:{ password: pw } }),   // Sprint 16.3
   renameUser: (id, name) => apiFetch(`/users/${id}/username`, { method:'PUT', body:{ username: name } }),

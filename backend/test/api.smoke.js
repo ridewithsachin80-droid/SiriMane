@@ -375,7 +375,11 @@ async function main() {
         ok((await fetch(BASE + '/api/auth/change-password', { method: 'POST', headers: { ...C, 'Content-Type': 'application/json', 'X-Requested-With': 'sirimane' }, body: JSON.stringify({ currentPassword: 'x', newPassword: 'y' }) })).status !== 403, 'S19-3 …with the app header it reaches the route');
         eq((await api('POST', '/auth/change-password', { currentPassword: 'x', newPassword: 'y' })).status !== 403, true, 'S19-4 a Bearer header (API clients, internal calls) needs no app header');
         r = await fetch(BASE + '/api/auth/logout', { method: 'POST', headers: { ...C, 'X-Requested-With': 'sirimane' } });
-        ok(/sm_staff=;/.test(cookieOf(r, 'sm_staff')) && /Expires=Thu, 01 Jan 1970/i.test(cookieOf(r, 'sm_staff')), 'S19-2 logout clears the staff cookie');
+        ok(/sm_staff=;/.test(cookieOf(r, 'sm_staff')) && /Expires=Thu, 01 Jan 1970/i.test(cookieOf(r, 'sm_staff')) && /Path=\/api/i.test(cookieOf(r, 'sm_staff')), 'S19-2 logout clears the staff cookie (same path, so the browser really drops it)');
+        // Review S19-2: the app's own screens never get the token in the body
+        r = await fetch(BASE + '/api/auth/login', { method: 'POST', headers: { ...XF19, 'X-Requested-With': 'sirimane' }, body: JSON.stringify({ username: 'admin', password: process.env.ADMIN_PASSWORD || 'SiriMane@2024' }) });
+        const rb = await r.json();
+        ok(r.status === 200 && !('token' in rb) && rb.user && /HttpOnly/i.test(cookieOf(r, 'sm_staff')), 'S19-1 SECURITY: a login from the app screen gets the cookie, never the token in the body');
         // Other websites still cannot make logged-in requests (CORS gives no credentials)
         r = await fetch(BASE + '/api/auth/me', { method: 'OPTIONS', headers: { Origin: 'https://evil.example', 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'x-requested-with' } });
         ok(!r.headers.get('access-control-allow-credentials') && !/x-requested-with/i.test(r.headers.get('access-control-allow-headers') || ''), 'S19-3 SECURITY: CORS lets no other site send credentials or the app header');
@@ -394,7 +398,9 @@ async function main() {
         eq((await fetch(BASE + '/api/guest-portal', { headers: { Cookie: sc.split(';')[0] } })).status, 401, 'S19-1 SECURITY: the staff cookie is not a resident login');
         eq((await fetch(BASE + '/api/auth/me', { headers: GC })).status, 401, 'S19-1 SECURITY: her cookie is not a staff login');
         r = await fetch(BASE + '/api/guest-logout', { method: 'POST', headers: { ...GC, 'X-Requested-With': 'sirimane' } });
-        ok(/sm_guest=;/.test(cookieOf(r, 'sm_guest')), 'S19-2 logout clears her cookie');
+        ok(/sm_guest=;/.test(cookieOf(r, 'sm_guest')) && /Path=\/api/i.test(cookieOf(r, 'sm_guest')), 'S19-2 logout clears her cookie (same path)');
+        r = await fetch(BASE + '/api/guest-login', { method: 'POST', headers: { ...XF19, 'X-Requested-With': 'sirimane' }, body: JSON.stringify({ mobile: g19.phone, password: 'Her-Own-19' }) });
+        ok(r.status === 200 && !('token' in (await r.json())), 'S19-1 SECURITY: her login from the app screen never puts the token in the body');
         await A('DELETE', `/guests/${g19.id}`);
       }
       // ── Sprint 18: one clock — India's date at every hour (the gate also runs on a faked clock at 01:00 IST on the 1st)

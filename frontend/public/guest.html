@@ -478,6 +478,12 @@ function sessionSave(_token, data, remember) {
   if (remember) store.setItem('guest_expires', String(Date.now() + 24 * 60 * 60 * 1000));   // the cookie's life
 }
 try { localStorage.removeItem('guest_token'); sessionStorage.removeItem('guest_token'); } catch (_) {}   // tokens stored by the old app
+// Review S19-3: on a shared phone, her cookie must not outlive what this screen
+// shows (e.g. a new tab after she logged in without "keep me signed in").
+// Nothing saved here → end any cookie session; logins wait for it.
+const screenLoggedOut = !sessionRead('guest_data') || (sessionRead('guest_expires') && Date.now() > Number(sessionRead('guest_expires')));
+const staleCookieCleared = !screenLoggedOut ? Promise.resolve()
+  : fetch('/api/guest-logout', { method: 'POST', headers: GH, credentials: 'same-origin' }).then(() => {}, () => {});
 
 window.onload = () => {
   const savedData = sessionRead('guest_data');
@@ -549,6 +555,7 @@ async function guestLogin() {
   btn.innerHTML = '<span class="spinner"></span> Logging in...';
 
   try {
+    await staleCookieCleared;
     const res = await fetch('/api/guest-login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...GH },
@@ -1136,7 +1143,8 @@ async function changePassword() {
     });
     const data = await res.json();
     if (!res.ok) { showAl(al, data.error, 'danger'); return; }
-    // Sprint 19: the server replaced the cookie; nothing to store
+    // Sprint 19: the server replaced the cookie (a fresh 24 h) — keep the screen's expiry in step (review S19-6)
+    if (sessionRemembered()) localStorage.setItem('guest_expires', String(Date.now() + 24 * 60 * 60 * 1000));
     document.getElementById('pwd-current').value = '';
     document.getElementById('pwd-new').value = '';
     document.getElementById('pwd-confirm').value = '';
