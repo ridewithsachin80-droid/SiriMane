@@ -323,3 +323,88 @@ Owner, 9 Nov 07:55: "Yes for both" (delete the route; ask residents to change th
 - edba5d9: **APPROVE** with should-fixes: the skip window started on any Groq error (a one-off 400, or a Groq-only setup with nothing to fall back to); an empty/cut-off Groq answer counted as success; worst case ~50 s (Groq 25 s + Gemini 25 s); no test pinned what Gemini receives or that quick entry falls back (mutants survived). Minor: Gemini without JSON mode, max_tokens deprecated, invalid tablist role. → 86440ce.
 - 86440ce: **APPROVE**. 12/12 ×2 on fresh gate14, 2,907 each. Worst case now ~33 s (8 + 25). Mutants mA2 (extra data to Gemini), mB2 (quick Groq-only), mH (pause without Gemini), mI (cut-off accepted) caught.
 Backlog (minor): the probe still starts the skip window in a Groq-only setup (production has both keys) · no test of Gemini's request body (`responseMimeType`) · "+ Add" clipped in Admin → Staff at 360 px (pre-existing) · the Groq model and JSON/reasoning settings are unverified against the live service — "Test AI connection" after release shows it.
+
+### Sprint 21 — she speaks Kannada: implementer evidence
+- Root cause (owner's Copilot log screenshots, 9 Nov): every mic used `rec.lang='en-IN'`, so spoken Kannada ("eerulli") reached the server as English words ("heroine", "Erode"), with nothing left to repair. The typed-Kanglish failures in the same screenshots date from 17 Sept and do not reproduce on today's code (probe re-run: "eruli 500rs", "pudina soppu 500rs" → Groceries).
+- `SMParse.toLatin` (new, in the shared speech-parser.js): Kannada script → WhatsApp-style Latin, Kannada digits, loan words (ಕ್ಯಾಶ್ → cash, ಯುಪಿಐ → upi, ರೂಪಾಯಿ → rupees, ಫಿನಾಯಿಲ್ → phenyl). Input with no Kannada letters is returned unchanged. It is used by quick.classify, parseCollection, parseComplaint, the purchase-form voice and `/copilot/category`.
+- Kannada number words (teens, the one-word hundreds such as ಐನೂರು, ಸಾವಿರದ); Kannada fault phrases; Kannada question words; "-kaayi" → Groceries; more dictionary words (hal, hittu, koli …).
+- An item with no amount asks "How much was the …?". The check is every word ∈ Groceries/Cleaning, and the deterministic dictionary is used, never the model.
+- Mic language: per phone (`sm_voice_lang`, try/catch). Two buttons switch it: one while listening and one after a result. `language-not-supported` → back to English. Both voice engines share it.
+- `POST /copilot/category`: auth, 120-character cap, dictionary and history only (the model is never called; a test proves it).
+- Copilot log outcome is in one block; Collect and Complaint voice previews escape what was heard.
+- Mutations M1–M7 were all caught:
+  - M1 transliteration off;
+  - M2 no amount-question;
+  - M3 mic hard-coded to English;
+  - M4 no purchase-category lookup;
+  - M5 old log layout;
+  - M6 unescaped preview;
+  - M7 category route allowed to call the model.
+- UI flake: the second mic tap after the Kannada preview missed 2 of 5 runs. The test now waits for network idle before tapping and has a diagnostic catch, and it then passed 3/3 plus both full runs. The cause was not proven (likely a late re-layout of the preview moving the mic).
+- Gates on e19eb58: 12/12 ×2, 3,023 each (Sprint 20 approved at 2,907); quick 280, ui 954.
+- **Not verified:** Chrome's real ಕನ್ನಡ output on an Android phone (numbers as digits or words, loan-word spellings). The owner tries it on Test.
+
+### Sprint 21 — independent review round 1: **BLOCK** (e19eb58) → fixes 9be9c8a
+- B1 (money): common Kannada amounts were read as confident wrong figures ("ಐದೂವರೆ ಸಾವಿರ" → ₹1,000; "ಇನ್ನೂರ ಐವತ್ತು" → ₹50). Now the -ವರೆ halves, joined tens+ones, hundreds compounds and joining forms are read, and the short forms work before ಸಾವಿರ. A ಸಾವಿರ after an unreadable word gives no amount (she is asked). English "onion hundred" stays ₹100. A regression I found while fixing ("aidu nooru" read as 105) is fixed and tested.
+- B2: the "How much was…" question took over typed English ("milk bill", "groceries", "water", "menu", words from old purchase notes). It now uses dictionary items only, with a not-an-item list and no history.
+- S1: a spoken item with no amount called the voice-repair model, which could invent an amount. That question is now final, and a test proves 0 model calls.
+- S2/S3: Kannada question words now count anywhere in the sentence, and resident names are exempt ("Elli 5000" is a payment again).
+- S4: compound Kannada numbers (₹25, ₹75, ₹150, ₹600, ₹700).
+- S5: the mic switch now works when browser storage is blocked and when abort() throws.
+- S6: a quantity ("5 kg", "ಐದು ಕೆಜಿ", "2 packets") is no longer read as the price.
+- Minor: tests now cover -kaayi, the 4-word cap and the CSS. Added more Kannada complaint wordings and leftover words. Short dictionary words no longer stretch ("raveena" → Other). Transliteration goes word by word with NFC. Comment moved.
+- Mutations N1–N9 (every fix above removed in turn) are all caught. Quick 362, UI 958.
+- Test-only: the fake recogniser could fire onerror before its delayed onstart. The test now waits for "Listening in ಕನ್ನಡ" first; this is the likely cause of the earlier intermittent miss.
+
+### Sprint 21 — independent review round 2: **BLOCK** (9be9c8a) → fixes 0baa5b8, 9a776d0
+- Every round-1 finding was verified fixed by the reviewer's probes. Three regressions came from my own rewrite:
+  - R1: a full stop after a number ("5000.", "1.5k.") lost the amount or changed it to ₹2;
+  - R2: the bare letters "g" and "l" counted as quantities ("6000 g pay");
+  - R3: the new suffix rule broke English prefixes ("milkman", "toiletries").
+- Fixed:
+  - A full stop that is not a decimal point is treated as punctuation.
+  - The bare g/l were removed; a glued "500g" or "2l" is still a quantity. A pay-word guard I added turned out to be dead code once g/l were gone (its mutation survived), so I removed it.
+  - The suffix rule applies only to the short Kannada words added in S21.
+  - The amount's own words are removed before resident matching (a resident named Noora is no longer taken from "ನೂರೈವತ್ತು").
+  - A quantity with no price asks how much ("ಹಾಲು ಮೂರು ಪ್ಯಾಕೆಟ್" → "How much was the haalu?").
+- A bug I introduced while fixing (operator precedence turned the Kannada grocery list into one word) was caught by the existing tests before commit.
+- Test isolation: one quick run collided with a full gate run on the same database, so both were discarded and re-run sequentially.
+- Mutations P1–P5 (full stop, bare g/l, suffix scope, amount words in names, quantity strip) were all caught.
+- Gates on 9a776d0: 12/12 ×2, 3,133 each (quick 386, ui 958).
+
+### Sprint 21 — independent review round 3: **BLOCK** (9a776d0) → fixes f9cc936, 6e743f4
+- All round-2 findings were verified fixed against b79cae1 (full stops, G Pay, English prefixes, amount words kept out of names, quantities asking the price). Across the reviewer's 140+ typed-English phrases, every difference from base is an intended S21 change.
+- N1 (money, typed English): a resident named **Noora** got a made-up ₹100. "Noora paid" read ನೂರ (noora, the joining form I added in round 2) as ×100. The reviewer says it was already visible at 9be9c8a but missed in their round-2 report.
+- Fixed:
+  - "noora" is a number only when another number word follows it.
+  - In both quick.classify and the on-device Collect parser, an amount made only of a resident's name words is dropped, so she is asked. This also covers "Ainoor" (500).
+- Mutations Q1–Q3 were all caught. Q3 survived at first, then an Ainoor parser test was added.
+- Gates on 6e743f4: 12/12 ×2, 3,151 each (quick 404, ui 958).
+
+### Sprint 21 — independent review round 4: **BLOCK** (6e743f4) → fix 950f54b
+- N1 was verified fixed ("Noora paid", "Ainoor paid" give no amount; an existing ₹10 for "Priya Das paid" is also gone).
+- N2 (money): her name before her amount still added ₹100 ("Noora five thousand" → ₹5,100, also in plain English).
+- Fix: a general rule replaces the per-case guards. Every word of every active resident's name is blanked (`SMParse.maskNames`) before any amount is read, in Quick Entry and in the on-device Collect parser.
+  - With a resident named Noora, the spaced "noora aivattu" reads as her name + ₹50, which is the pre-S21 result; the joined "ನೂರೈವತ್ತು" stays ₹150.
+  - "aidu noora" now gives no amount, so she is asked.
+- Mutations T1–T3 caught. Gates on 950f54b: 12/12 ×2, 3,164 each (quick 417, ui 958).
+
+### Sprint 21 — independent review round 5: **BLOCK**, one narrow item (950f54b) → fix d103b88
+- N2 was verified fixed against base on about 230 phrases. The masking also fixes some errors that predate Sprint 21:
+  - "Priya Das five thousand": ₹15,000 → ₹5,000;
+  - "five thousand.": ₹5 → ₹5,000;
+  - "eradu saavirada ainooru": ₹2 → ₹2,500.
+- N3: a surname that is also a number ("Das" = 10) could shrink someone else's amount. With a Priya Das living here, "Kavya das hazaar" was read as ₹1,000.
+- Fix: a multiplier straight after a blanked name gives no amount, so she is asked. Mutation U1 is caught.
+- Gates on d103b88: 12/12 ×2, 3,169 each (quick 422, ui 958).
+
+### Sprint 21 — independent review round 6: **APPROVE** (d103b88)
+- N3 verified fixed in quick.classify and the Collect parser.
+- Across about 230 English, Kanglish and Kannada phrases re-run against b79cae1, nothing gives a wrong rupee figure that base got right. Every remaining difference is one of three kinds:
+  - an intended S21 change;
+  - a base error that is now correct ("Priya Das five thousand" ₹15,000 → ₹5,000, "five thousand." ₹5 → ₹5,000, …);
+  - a guess that now asks instead ("Priya thousand", "Hema saavira" — the B1/N3 rules).
+- Still open (minor):
+  - with a resident named Noora, the spaced "noora aivattu" reads as her name + ₹50, the same as base;
+  - Chrome's real ಕನ್ನಡ output on an Android phone has to be checked by the owner on Test (S21-15).
+- Review: 6 rounds — BLOCK ×5, then APPROVE. Final gates 12/12 ×2, 3,169 each.

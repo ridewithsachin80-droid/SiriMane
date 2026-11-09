@@ -315,6 +315,206 @@ const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toI
     ok(/filed "zzkumbla" under Groceries/.test(i.category_basis), '…and says it learned it from her');
     console.log('✓ kannada/hindi + learn loop');
 
+    // ── Sprint 21: she speaks Kannada ─────────────────────────────────────
+    // S21-1 Kannada script is spelt out the way WhatsApp Kannada is typed.
+    for (const [kn, lat] of [['ಈರುಳ್ಳಿ', 'eerulli'], ['ಬೆಳ್ಳುಳ್ಳಿ', 'bellulli'], ['ಹಾಲು', 'haalu'], ['ಸಂಬಳ', 'sambala'], ['ತೊಂಬತ್ತು', 'tombattu'], ['ಎಂಟು', 'entu'], ['ಜಾನವಿ', 'jaanavi'],
+                             ['ಕ್ಯಾಶ್', 'cash'], ['ಯುಪಿಐ', 'upi'], ['ಗೂಗಲ್ ಪೇ', 'google pay'], ['ಫೋನ್ ಪೇ', 'phonepe'], ['ರೂಮ್ ನಂಬರ್ ೧೦೬', 'room number 106'], ['ಟೊಮ್ಯಾಟೊ', 'tomato'], ['100 ರೂಪಾಯಿ', '100 rupees']]) {
+      eq(SMParse.toLatin(kn), lat, `S21-1 toLatin "${kn}"`);
+    }
+    for (const typed of ['onion 100rs', 'Jhanavi paid ₹5,000 UPI', 'tap leaking room 106', 'rent', 'bil', 'tee 20']) eq(SMParse.toLatin(typed), typed, `S21-1 typed English is returned untouched: "${typed}"`);
+    // S21-2 Kannada number words — digits, words, and the one-word hundreds
+    for (const [kn, n] of [['ಐದು ಸಾವಿರ', 5000], ['ಎರಡು ಸಾವಿರದ ಐನೂರು', 2500], ['ಐನೂರು', 500], ['ಹತ್ತು ಸಾವಿರ', 10000], ['ನೂರು ಇಪ್ಪತ್ತು', 120], ['ತೊಂಬತ್ತು', 90], ['೫೦', 50], ['ಹದಿನೈದು', 15]]) {
+      const a = SMParse.extractAmount(SMParse.toLatin(kn)); eq(a && a.amount, n, `S21-2 "${kn}" is ₹${n}`);
+    }
+    // S21-3 Kannada script all the way through Quick Entry
+    for (const [kn, cat, amt, mode] of [['ಈರುಳ್ಳಿ 100 ರೂಪಾಯಿ', 'Groceries', 100], ['ಹಾಲು ಅರವತ್ತು', 'Groceries', 60], ['ಸೌತೆಕಾಯಿ 30', 'Groceries', 30], ['ಹೀರೇಕಾಯಿ 40', 'Groceries', 40],
+                                        ['ತರಕಾರಿ 350 ಕ್ಯಾಶ್', 'Groceries', 350, 'Cash'], ['ಫಿನಾಯಿಲ್ 120', 'Cleaning', 120], ['ಪ್ಲಂಬರ್ 500 ಯುಪಿಐ', 'Repairs', 500, 'UPI'], ['ಕರೆಂಟ್ ಬಿಲ್ 4500', 'Electricity', 4500], ['ಸಂಬಳ ಹತ್ತು ಸಾವಿರ', 'Salary', 10000]]) {
+      i = await quick.intent(kn, adminUser, {});
+      ok(i && i.tool === 'prepare_expense' && i.args.category === cat && i.args.amount === amt && (!mode || i.args.mode === mode), `S21-3 "${kn}" → ${cat} ₹${amt}${mode ? ' ' + mode : ''} (got ${JSON.stringify(i && i.args)})`);
+    }
+    i = await quick.intent('ಈರುಳ್ಳಿ 100', adminUser, {});
+    eq(i.args.description, 'eerulli', 'S21-3 the expense is filed as "eerulli" — the same word typed entries learn from');
+    // A resident's name said in Kannada is still a collection, never an expense.
+    r = await ask('ಜಾನವಿ ಐದು ಸಾವಿರ ಯುಪಿಐ');
+    ok(r.data.tool === 'prepare_payment' || /Jhanavi/.test(r.data.answer), `S21-3 "ಜಾನವಿ ಐದು ಸಾವಿರ ಯುಪಿಐ" is a payment by Jhanavi (${r.data.tool} · ${String(r.data.answer).slice(0, 90)})`);
+    ok(!/expense|Groceries|Other/i.test(r.data.answer || ''), 'S21-3 …and not an expense called "jaanavi"');
+    i = await quick.intent('ಜಾನವಿ ಐದು ಸಾವಿರ ಯುಪಿಐ', adminUser, {});
+    ok(i.tool === 'prepare_payment' && i.args.amount === 5000 && i.args.mode === 'UPI', `S21-3 …₹5,000 by UPI (got ${JSON.stringify(i.args)})`);
+    // S21-4 A complaint in Kannada keeps her own words; the room is read.
+    for (const [kn, room] of [['ರೂಮ್ 106 ನಲ್ಲಿ ನಲ್ಲಿ ಸೋರುತ್ತಿದೆ', '106'], ['ಫ್ಯಾನ್ ಕೆಲಸ ಮಾಡ್ತಿಲ್ಲ ರೂಮ್ 12', '12'], ['ನೀರು ಬರುತ್ತಿಲ್ಲ', undefined], ['current illa room 7', '7'], ['nalli soruttide', undefined], ['fan kelsa madtilla room 4', '4']]) {
+      i = await quick.intent(kn, adminUser, {});
+      ok(i && i.tool === 'prepare_complaint' && i.args.description === kn && i.args.room === room, `S21-4 "${kn}" is a complaint${room ? ' for room ' + room : ''}, worded as she said it (got ${JSON.stringify(i && i.args)})`);
+    }
+    // S21-5 An item with no amount asks how much — instead of "I'm not sure".
+    for (const t of ['pudina soppu', 'eerulli', 'ಈರುಳ್ಳಿ', 'phenyl']) {
+      r = await ask(t);
+      ok(/^How much was the /.test(r.data.answer || '') && r.data.clarify, `S21-5 "${t}" asks how much (got "${String(r.data.answer).slice(0, 80)}")`);
+      ok(/ $/.test(r.data.retry_text || '') && !/\d/.test(r.data.retry_text), `S21-5 …and puts "${(r.data.retry_text || '').trim()}" back in the box for her to add the amount`);
+      ok(!r.data.proposal, 'S21-5 …and prepares nothing');
+    }
+    r = await ask('pudina soppu 20'); eq(r.data.proposal && r.data.proposal.preview.amount, 20, 'S21-5 adding the amount then prepares the expense');
+    // …but only for things she buys: commands, questions and unknown words are untouched.
+    for (const t of ['rent', 'rent due', 'milk finished', 'onion price', 'wifi', 'fan', 'laptop', 'Erode']) {
+      i = await quick.classify(t, adminUser, {}, { allowModel: false });
+      ok(!i || !/How much was/.test(i.clarify || ''), `S21-5 "${t}" is not mistaken for an item without an amount`);
+    }
+    // S21-6 A question in Kannada is left for the Copilot.
+    for (const t of ['ಯಾರು ರೆಂಟ್ ಕೊಟ್ಟಿಲ್ಲ', 'eshtu collection aaytu']) { i = await quick.classify(t, adminUser, {}, { allowModel: false }); eq(i, null, `S21-6 "${t}" is a question, not an entry`); }
+    // S21-7 The spoken Kannada path is local: a clear phrase never calls the model.
+    {
+      let calls = 0; const keep = ai.providers.groqText, keepStub = ai.providers._stub;
+      ai.providers._stub = true; ai.providers.groqDownUntil = 0; ai.providers.groqText = async () => { calls++; return '{}'; };
+      try {
+        i = await quick.intent('ಈರುಳ್ಳಿ ನೂರು ರೂಪಾಯಿ', adminUser, {}, { voice: true, alternatives: ['ಈರುಳ್ಳಿ ನೂರು ರೂಪಾಯಿ'] });
+        ok(i.tool === 'prepare_expense' && i.args.amount === 100 && i.args.category === 'Groceries', 'S21-7 spoken "ಈರುಳ್ಳಿ ನೂರು ರೂಪಾಯಿ" → onion ₹100 Groceries');
+        eq(calls, 0, 'S21-7 …with no AI call');
+      } finally { ai.providers.groqText = keep; ai.providers._stub = keepStub; ai.providers.groqDownUntil = 0; }
+    }
+    // S21-8 /copilot/category — the purchase form asks for words its own list lacks.
+    for (const [item, cat] of [['Eerulli', 'Groceries'], ['ಹಾಲು', 'Groceries'], ['phenyl', 'Cleaning'], ['zzkumbla', 'Groceries'], ['laptop', null]]) {
+      r = await A('POST', '/copilot/category', { item });
+      ok(r.status === 200 && r.data.category === cat, `S21-8 category for "${item}" is ${cat} (got ${r.status} ${JSON.stringify(r.data)})`);
+    }
+    r = await S('POST', '/copilot/category', { item: 'eerulli' }); eq(r.status, 200, 'S21-8 staff may use it (the purchase form is theirs too)');
+    r = await api('POST', '/copilot/category', { item: 'eerulli' }); eq(r.status, 401, 'S21-8 not without a login');
+    r = await A('POST', '/copilot/category', {}); eq(r.status, 400, 'S21-8 an empty item is refused');
+    {
+      let calls = 0; const keep = ai.providers.groqText, keepStub = ai.providers._stub;
+      ai.providers._stub = true; ai.providers.groqText = async () => { calls++; return '{"category":"Repairs"}'; };
+      try { r = await A('POST', '/copilot/category', { item: 'laptop' }); eq(r.data.category, null, 'S21-8 an unknown word stays unknown'); eq(calls, 0, 'S21-8 …the model is never asked (no text leaves the server)'); }
+      finally { ai.providers.groqText = keep; ai.providers._stub = keepStub; ai.providers.groqDownUntil = 0; }
+    }
+    // ── Review S21 (round 1 BLOCK) ────────────────────────────────────────
+    // B1/S4: Kannada amounts as people say them — never a confident wrong figure.
+    for (const [kn, n] of [['ಐದೂವರೆ ಸಾವಿರ', 5500], ['ಐದು ಸಾವಿರದ ಇನ್ನೂರ ಐವತ್ತು', 5250], ['ಇನ್ನೂರ ಐವತ್ತು', 250], ['ನೂರ ಐವತ್ತು', 150], ['ಐನೂರ ಐವತ್ತು', 550],
+                           ['ಒಂದೂವರೆ ಸಾವಿರ', 1500], ['ಎರಡೂವರೆ ಸಾವಿರ', 2500], ['ನಾಲ್ಕೂವರೆ ಸಾವಿರ', 4500], ['ಆರ್ ಸಾವಿರ', 6000], ['ಐದ್ ಸಾವಿರ', 5000], ['ಮೂರ್ ಸಾವಿರ', 3000],
+                           ['ಇಪ್ಪತ್ತೈದು', 25], ['ಎಪ್ಪತ್ತೈದು', 75], ['ಇಪ್ಪತ್ಮೂರು', 23], ['ನೂರೈವತ್ತು', 150], ['ಐನೂರೈವತ್ತು', 550], ['ಆರನೂರು', 600], ['ಏಳ್ನೂರು', 700], ['ಮುನ್ನೂರ ಎಪ್ಪತ್ತೈದು', 375]]) {
+      const a = SMParse.extractAmount(SMParse.toLatin(kn)); eq(a && a.amount, n, `B1 "${kn}" is ₹${n}`);
+    }
+    i = await quick.intent(`Jhanavi ${alpha} ಐದೂವರೆ ಸಾವಿರ ಯುಪಿಐ`, adminUser, {});
+    ok(i.tool === 'prepare_payment' && i.args.resident_id === jh.id && i.args.amount === 5500 && i.args.mode === 'UPI', `B1 a rent said in Kannada previews the right figure: ₹5,500 (got ${JSON.stringify(i.args)})`);
+    for (const t of ['xyzzy saavira', 'priya saavira', 'aidoovre saavira', SMParse.toLatin('ಐದೂವ್ರೆ ಸಾವಿರ')]) eq(SMParse.extractAmount(t), null, `B1 "${t}": a Kannada multiplier after a word we cannot read gives NO amount (she is asked), never ×1`);
+    for (const [t, n] of [['onion hundred', 100], ['onion hundred rupees', 100], ['haalu nooru', 100], ['aidu nooru', 500], ['aidu noora aivattu', 550], ['eradu saavira aidu nooru', 2500]]) eq(SMParse.extractAmount(t).amount, n, `B1 English "${t}" is still ₹${n}`);
+    for (const [t, n] of [['a thousand', 1000], ['one and a half thousand', 1500], ['six thousand', 6000], ['ondu saavira', 1000]]) eq(SMParse.extractAmount(t).amount, n, `B1 "${t}" still ₹${n}`);
+    // S6: a quantity is not the price.
+    for (const [t, n] of [['5 kg rice 500', 500], ['5kg rice 500', 500], ['ಐದು ಕೆಜಿ ಅಕ್ಕಿ ಐನೂರು', 500], ['1 dozen eggs 80', 80], ['2 litre oil 340', 340], ['milk 2 packets 56', 56]]) {
+      const a = SMParse.extractAmount(SMParse.toLatin(t)); eq(a && a.amount, n, `S6 "${t}" is ₹${n}, not the quantity`);
+    }
+    for (const t of ['two packets of milk', 'ಹಾಲು ಮೂರು ಪ್ಯಾಕೆಟ್']) eq(SMParse.extractAmount(SMParse.toLatin(t)), null, `S6 "${t}" has no price`);
+    // B2: the amount question never takes over a command, a question or a note word.
+    await A('POST', '/purchases', { amount: 40, category: 'Groceries', description: 'weekly stock from market fresh', purchase_date: daysAgo(1), payment_mode: 'Cash' });
+    quick.invalidateHistory();
+    for (const t of ['milk expenses', 'milk bill', 'grocery bill', 'buy milk', 'pay milk', 'groceries', 'cleaning', 'water', 'gas', 'cylinder', 'menu', 'stock', 'market', 'fresh milk', 'weekly stock', 'eerulli haalu akki bele tuppa']) {
+      i = await quick.classify(t, adminUser, {}, { allowModel: false });
+      ok(!i || !/How much was/.test(i.clarify || ''), `B2 "${t}" is not taken over by "How much was…" (got ${JSON.stringify(i && (i.clarify || i.tool))})`);
+    }
+    for (const t of ['onions', 'tondekaayi', 'pudeena soppu']) { i = await quick.classify(t, adminUser, {}, { allowModel: false }); ok(i && /^How much was/.test(i.clarify || '') && i.ask === 'amount', `B2 "${t}" still asks how much`); }
+    i = await quick.intent('tondekaayi 40', adminUser, {}); ok(i.args.category === 'Groceries' && /-kaayi/.test(i.category_basis), 'minor: an unlisted "-kaayi" vegetable is Groceries by the rule');
+    // S1: a spoken item with no amount asks her — the model is not called and cannot invent an amount.
+    {
+      let calls = 0; const keep = ai.providers.groqText, keepStub = ai.providers._stub;
+      ai.providers._stub = true; ai.providers.groqDownUntil = 0; ai.providers.groqText = async () => { calls++; return '{"phrase":"onion 100","confidence":"high"}'; };
+      try {
+        i = await quick.intent('ಈರುಳ್ಳಿ', adminUser, {}, { voice: true, alternatives: ['ಈರುಳ್ಳಿ'] });
+        ok(!i.tool && /^How much was the eerulli/.test(i.clarify), `S1 spoken "ಈರುಳ್ಳಿ" asks how much (got ${JSON.stringify(i.tool || i.clarify)})`);
+        eq(calls, 0, 'S1 …with no AI call (nothing can invent "100")');
+      } finally { ai.providers.groqText = keep; ai.providers._stub = keepStub; ai.providers.groqDownUntil = 0; }
+    }
+    // S2: a Kannada question with the question word last is a question.
+    for (const t of [`Jhanavi ${alpha} rent eshtu`, `Jhanavi ${alpha} ಎಷ್ಟು ಕೊಡಬೇಕು`, 'eshtu haalu', `yaaru jhanavi`, 'ರೆಂಟ್ ಯಾರು ಕೊಟ್ಟಿಲ್ಲ']) {
+      i = await quick.classify(t, adminUser, {}, { allowModel: false }); eq(i, null, `S2 "${t}" is a question, not an entry`);
+    }
+    // S3: a resident whose name is a Kannada question word is still found.
+    const elli = (await A('POST', '/guests', { name: `Elli Q${alpha}`, phone: `97${uniq}03`.slice(0, 10), room_id: room.id, bed_number: '3', monthly_rent: 6000, deposit_amount: 0, join_date: daysAgo(30), id_proof_type: 'Aadhaar' })).data;
+    ok(elli && elli.id, 'S3 (fixture) a resident named Elli');
+    i = await quick.classify('Elli 5000', adminUser, {}, { allowModel: false });
+    ok(i && i.tool === 'prepare_payment' && i.args.resident_id === elli.id && i.args.amount === 5000, `S3 "Elli 5000" is her payment, as before S21 (got ${JSON.stringify(i && i.args)})`);
+    await pool.query(`UPDATE guests SET is_active=false WHERE id=$1`, [elli.id]);
+    // Minor: wordings and leftovers.
+    for (const t of ['ಸೋರ್ತಿದೆ ರೂಮ್ 5', 'ಲೈಟ್ ಹೋಗಿದೆ', 'ಫ್ಯಾನ್ ತಿರುಗ್ತಿಲ್ಲ']) { i = await quick.intent(t, adminUser, {}); eq(i && i.tool, 'prepare_complaint', `minor: "${t}" is a complaint`); }
+    for (const [t, d] of [['ಈರುಳ್ಳಿ 100 ರೂ', 'eerulli'], ['ಪ್ಲಂಬರ್ 500 ಕೊಟ್ಟೆ', 'plumber'], ['eerullige 50', 'eerullige']]) { i = await quick.intent(t, adminUser, {}); eq(i.args.description, d, `minor: "${t}" is filed as "${d}"`); }
+    i = await quick.intent('eerullige 50', adminUser, {}); eq(i.args.category, 'Groceries', 'minor: a Kannada case ending on an item still matches it');
+    for (const t of ['raveena 5000', 'kolin 300']) { i = await quick.intent(t, adminUser, {}); eq(i.args.category, 'Other', `minor: "${t}" is not stretched to a short dictionary word`); }
+    eq(SMParse.toLatin('TEE ಟೀ'), 'TEE tea', 'minor: English typed beside Kannada is left as typed');
+    eq(SMParse.toLatin('ಈರುಳ್ಳಿ'.normalize('NFD')), 'eerulli', 'minor: decomposed Kannada text reads the same');
+    // ── Review S21 round 2 ───────────────────────────────────────────────
+    // R1: a full stop (phone voice typing adds one) never loses or changes the amount.
+    for (const [t, n] of [[`Jhanavi ${alpha} paid 5000.`, 5000], [`Jhanavi ${alpha} 5,000.`, 5000], [`Jhanavi ${alpha} five thousand.`, 5000], [`Jhanavi ${alpha} ಐದು ಸಾವಿರ.`, 5000]]) {
+      i = await quick.classify(t, adminUser, {}, { allowModel: false }); ok(i && i.tool === 'prepare_payment' && i.args.amount === n, `R1 "${t}" is ₹${n} (got ${JSON.stringify(i && i.args)})`);
+    }
+    for (const [t, n] of [['onion 100.', 100], ['onion 1.5k.', 1500], ['onion 2.5 lakh.', 250000], ['onion 99.50', 100]]) {
+      i = await quick.classify(t, adminUser, {}, { allowModel: false }); ok(i && i.tool === 'prepare_expense' && i.args.amount === n, `R1 "${t}" is ₹${n} (got ${JSON.stringify(i && i.args)})`);
+    }
+    // R2: "g pay" and a lone letter are not grams or litres; glued units still are.
+    for (const t of [`Jhanavi ${alpha} 6000 g pay`, `Jhanavi ${alpha} 6000 G Pay`, `Jhanavi ${alpha} 6000 l`]) {
+      i = await quick.classify(t, adminUser, {}, { allowModel: false }); ok(i && i.args.amount === 6000, `R2 "${t}" keeps ₹6,000 (got ${JSON.stringify(i && i.args)})`);
+    }
+    i = await quick.classify(`Jhanavi ${alpha} 6000 g pay`, adminUser, {}, { allowModel: false }); eq(i.args.mode, 'UPI', 'R2 …and "g pay" is UPI');
+    for (const [t, n] of [['rice 500g 60', 60], ['oil 2l 340', 340]]) { i = await quick.classify(t, adminUser, {}, { allowModel: false }); eq(i.args.amount, n, `R2 "${t}": the glued quantity is skipped, the price is ₹${n}`); }
+    // R3: English words that start with a dictionary item keep their category.
+    for (const [t, cat] of [['milkman 900', 'Groceries'], ['milkman paid 900', 'Groceries'], ['toiletries 300', 'Cleaning'], ['onions 80', 'Groceries']]) {
+      i = await quick.intent(t, adminUser, {}); eq(i.args.category, cat, `R3 "${t}" is ${cat}, as before S21`);
+    }
+    // Should-fix: the amount's own words are never read as a resident's name.
+    const noora = (await A('POST', '/guests', { name: `Noora Q${alpha}`, phone: `97${uniq}04`.slice(0, 10), room_id: room.id, bed_number: '4', monthly_rent: 6000, deposit_amount: 0, join_date: daysAgo(30), id_proof_type: 'Aadhaar' })).data;
+    ok(noora && noora.id, 'round 2 (fixture) a resident named Noora');
+    for (const [t, n] of [['ಈರುಳ್ಳಿ ನೂರೈವತ್ತು', 150], ['ಹಾಲು ನೂರು', 100]]) {
+      i = await quick.classify(t, adminUser, {}, { allowModel: false });
+      ok(i && i.tool === 'prepare_expense' && i.args.amount === n && i.args.category === 'Groceries', `round 2 "${t}" is a ₹${n} grocery, not Noora's payment (got ${JSON.stringify(i && [i.tool, i.args])})`);
+    }
+    i = await quick.classify('Noora 5000', adminUser, {}, { allowModel: false }); ok(i && i.args.resident_id === noora.id, 'round 2 …while "Noora 5000" is still hers');
+    await pool.query(`UPDATE guests SET is_active=false WHERE id=$1`, [noora.id]);
+    // Minor: a quantity with no price asks how much.
+    for (const [t, item] of [['ಹಾಲು ಮೂರು ಪ್ಯಾಕೆಟ್', 'haalu'], ['milk 3 packets', 'milk']]) {
+      i = await quick.classify(t, adminUser, {}, { allowModel: false }); ok(i && i.ask === 'amount' && new RegExp(`^How much was the ${item}\\?`).test(i.clarify), `round 2 "${t}" asks how much the ${item} was (got ${JSON.stringify(i && (i.clarify || i.tool))})`);
+    }
+    // ── Review S21 round 3 (N1): a resident's name is never a number ─────
+    const roomNo2 = '8' + uniq.slice(-2);
+    let room2 = (await A('POST', '/rooms', { room_number: roomNo2, floor: 8, total_beds: 4, monthly_rent: 6000, room_type: 'sharing' })).data;
+    if (!room2 || !room2.id) { const rl = (await A('GET', '/rooms')).data; room2 = (rl.list || rl).find(x => x.room_number === roomNo2); }
+    const nk = (await A('POST', '/guests', { name: `Noora K${alpha}`, phone: `97${uniq}05`.slice(0, 10), room_id: room2.id, bed_number: '1', monthly_rent: 6000, deposit_amount: 0, join_date: daysAgo(30), id_proof_type: 'Aadhaar' })).data;
+    const an = (await A('POST', '/guests', { name: `Ainoor Z${alpha}`, phone: `97${uniq}06`.slice(0, 10), room_id: room2.id, bed_number: '2', monthly_rent: 6000, deposit_amount: 0, join_date: daysAgo(30), id_proof_type: 'Aadhaar' })).data;
+    ok(nk && nk.id && an && an.id, 'N1 (fixture) residents named Noora and Ainoor');
+    for (const [t, who, mode] of [[`Noora K${alpha} cash`, nk, 'Cash'], [`Noora K${alpha}`, nk], [`Noora K${alpha} paid`, nk], ['Noora paid', nk], ['Noora upi', nk, 'UPI'], ['Ainoor paid', an]]) {
+      i = await quick.classify(t, adminUser, {}, { allowModel: false });
+      ok(i && i.tool === 'prepare_payment' && !i.args.amount && (!mode || i.args.mode === mode), `N1 "${t}" is her payment with NO amount — never ₹100/₹500 from her name (got ${JSON.stringify(i && i.args)})`);
+    }
+    for (const t of ['noora', 'noora deposit']) { i = await quick.classify(t, adminUser, {}, { allowModel: false }); ok(i && i.tool === 'prepare_payment' && !i.args.amount, `N1 "${t}" is not ₹100 (got ${JSON.stringify(i && (i.args || i.clarify))})`); }
+    for (const [t, who, n] of [[`Noora K${alpha} 5000 upi`, nk, 5000], [`Noora K${alpha} aidu saavira`, nk, 5000], ['Ainoor 5000', an, 5000]]) {
+      i = await quick.classify(t, adminUser, {}, { allowModel: false }); ok(i && i.args.resident_id === who.id && i.args.amount === n, `N1 "${t}" is still ₹${n}`);
+    }
+    for (const [t, n] of [['ಈರುಳ್ಳಿ ನೂರೈವತ್ತು', 150]]) { i = await quick.classify(t, adminUser, {}, { allowModel: false }); ok(i && i.tool === 'prepare_expense' && i.args.amount === n, `N1 "${t}" (joined ನೂರೈವತ್ತು) is still ₹${n} with a Noora living here`); }
+    // Spaced "noora aivattu" with a resident named Noora: her name wins, as before S21 (₹50, shown for her to check).
+    i = await quick.classify('noora aivattu onion', adminUser, {}, { allowModel: false }); ok(i && i.tool === 'prepare_payment' && i.args.amount === 50, `N2 with a Noora living here, spaced "noora aivattu" is read as her name + ₹50, as before S21 (got ${JSON.stringify(i && [i.tool, i.args])})`);
+    eq(SMParse.extractAmount('noora aivattu onion').amount, 150, 'N2 …and with no Noora it is Kannada ₹150');
+    eq(SMParse.extractAmount('noora'), null, 'N1 "noora" alone is a word, not ₹100');
+    eq(SMParse.parseCollection(`Noora K${alpha} cash`, [{ id: nk.id, name: nk.name }]).amount, null, 'N1 the on-device Collect parser agrees: no amount from her name');
+    eq(SMParse.parseCollection(`Ainoor Z${alpha} cash`, [{ id: an.id, name: an.name }]).amount, null, 'N1 …and "Ainoor" is not ₹500 there either');
+    eq(SMParse.parseCollection(`Ainoor Z${alpha} 5000 cash`, [{ id: an.id, name: an.name }]).amount, 5000, 'N1 …while her real amount is kept');
+    // Round 4 (N2): her name before her amount never adds ₹100 to it.
+    for (const [t, n, mode] of [[`Noora K${alpha} five thousand`, 5000], [`Noora K${alpha} aidu saavira`, 5000], [`Noora K${alpha} eradu saavira`, 2000], [`Noora K${alpha} aaru saavira cash`, 6000, 'Cash'],
+                                [`Noora K${alpha} do hazaar`, 2000], [`Noora K${alpha} aivattu`, 50], ['noora aidu saavira upi', 5000, 'UPI'], ['noora ondu saavira', 1000], ['Noora five thousand', 5000]]) {
+      i = await quick.classify(t, adminUser, {}, { allowModel: false });
+      ok(i && i.tool === 'prepare_payment' && i.args.amount === n && (!mode || i.args.mode === mode), `N2 "${t}" is a payment of ₹${n}, not ₹${n + 100} (got ${JSON.stringify(i && [i.tool, i.args || i.clarify])})`);
+    }
+    eq(SMParse.parseCollection(`Noora K${alpha} eradu saavira`, [{ id: nk.id, name: nk.name }]).amount, 2000, 'N2 the Collect parser agrees: ₹2,000');
+    for (const [t, cat] of [[`Priya Das paid`, null]]) {
+      const r = SMParse.parseCollection(t, [{ id: 99, name: 'Priya Das' }]); eq(r.amount, null, 'N2 "Priya Das paid" is not ₹10 ("das" is her name)');
+    }
+    eq(SMParse.extractAmount('aidu noora'), null, 'minor: "aidu noora" is unclear — no amount, she is asked');
+    // Round 5 (N3): a resident's surname that is also a number ("Das" = 10) never shrinks someone else's amount.
+    const pd = (await A('POST', '/guests', { name: `Priya Das`, phone: `97${uniq}07`.slice(0, 10), room_id: room2.id, bed_number: '3', monthly_rent: 6000, deposit_amount: 0, join_date: daysAgo(30), id_proof_type: 'Aadhaar' })).data;
+    const kv = (await A('POST', '/guests', { name: `Kavya R${alpha}`, phone: `97${uniq}08`.slice(0, 10), room_id: room2.id, bed_number: '4', monthly_rent: 6000, deposit_amount: 0, join_date: daysAgo(30), id_proof_type: 'Aadhaar' })).data;
+    ok(pd && pd.id && kv && kv.id, 'N3 (fixture) Priya Das and Kavya live here');
+    i = await quick.classify('Kavya das hazaar', adminUser, {}, { allowModel: false });
+    ok(i && i.tool === 'prepare_payment' && i.args.amount !== 1000, `N3 "Kavya das hazaar" is never ₹1,000 — unclear, so she is asked (got ${JSON.stringify(i && i.args)})`);
+    eq(SMParse.parseCollection('Kavya das hazaar', [{ id: pd.id, name: 'Priya Das' }, { id: kv.id, name: kv.name }]).amount, null, 'N3 the Collect parser agrees: no ₹1,000');
+    i = await quick.classify('Priya Das paid', adminUser, {}, { allowModel: false }); ok(i && i.args.resident_id === pd.id && !i.args.amount, 'N3 "Priya Das paid" is her payment, no amount');
+    i = await quick.classify('Priya Das 6000 upi', adminUser, {}, { allowModel: false }); ok(i && i.args.resident_id === pd.id && i.args.amount === 6000, 'N3 "Priya Das 6000 upi" is ₹6,000');
+    await pool.query(`UPDATE guests SET is_active=false WHERE id = ANY($1)`, [[pd.id, kv.id]]);
+    await pool.query(`UPDATE guests SET is_active=false WHERE id = ANY($1)`, [[nk.id, an.id]]);
+    console.log('✓ S21 Kannada');
+
     // ── Audit ────────────────────────────────────────────────────────────
     const au = await pool.query(`SELECT COUNT(*)::int AS n FROM ai_actions WHERE interpretation::text LIKE '%"via":"quick"%' OR interpretation::text LIKE '%quick%'`);
     ok(au.rows[0].n >= 2, 'quick entries are in the Copilot log');

@@ -237,3 +237,27 @@ Correction: the earlier plan ("add voice to collections and complaints") was wro
 | S20-4 | Audit Log cards on a phone carry the right labels (no "PAYS") | UX |
 | S20-5 | Backlog: the resident app's notice list respects room/floor targeting (a notice for one room is not shown to everyone); a 401 from change-password caused by an expired or turned-off login logs out instead of showing "Invalid token" | PRIVACY, UX |
 | S20-6 | Gates 12/12 twice; tests prove the fallback (Groq failing → Gemini answers; skip window), the tabs and the labels at 360/390, the notice targeting; independent review before merge | QA |
+
+## Sprint 21 — she speaks Kannada (criteria recorded during build — see note)
+Owner, 9 Nov 11:55: "nothing is live now so start building after that i will make them use" — with six production screenshots of Admin → Copilot log. Evidence from them:
+- Voice: "eerulli" (ಈರುಳ್ಳಿ, onion) arrived as **"heroine"**, **"Erode"**, "heroine urupai"; "aloo get a new Rupee". Every mic listens only in English (`rec.lang='en-IN'` in both voice engines), so Kannada words are lost before any parser sees them.
+- "eruli 500rs" → Other and the Groq 404 → "I'm not sure" entries are from **17 Sept**. Re-run on today's code: typed Kanglish already works ("eruli 500rs", "pudina soppu 500rs" → Groceries) and Sprint 20 fixed the 404. Correction to my first read of the screenshots.
+- Still open on today's code: an item with no amount ("pudina soppu", "eerulli") → "I'm not sure"; "hal 60" (milk) → Other; on a phone the Copilot log squeezes Siri's reply into a narrow column beside the badge.
+Note: the owner said to start building at once, so these criteria were written alongside the build, not before it. The gate and the independent review are unchanged.
+
+| ID | Acceptance criterion | Review |
+|---|---|---|
+| S21-1 | **Kannada script is understood.** A shared, keyless transliteration (`SMParse.toLatin`) spells Kannada script the way WhatsApp Kannada is typed (ಈರುಳ್ಳಿ → eerulli, ಜಾನವಿ → jaanavi, ಕ್ಯಾಶ್ → cash, ರೂಮ್ ನಂಬರ್ ೧೦೬ → room number 106). Text with no Kannada letters is returned untouched | QA |
+| S21-2 | Kannada number words: digits ೦–೯, ಐದು ಸಾವಿರ, ಎರಡು ಸಾವಿರದ ಐನೂರು, ಐನೂರು, ನೂರು ಇಪ್ಪತ್ತು, teens | QA |
+| S21-3 | Quick Entry (Copilot bar, quick sheet) handles Kannada script end to end: expenses with category, amount and mode; a resident's name said in Kannada is a collection, never an expense; "-kaayi" vegetables are Groceries | QA |
+| S21-4 | Complaints in Kannada (ಸೋರುತ್ತಿದೆ, ಕೆಲಸ ಮಾಡ್ತಿಲ್ಲ, ಬರುತ್ತಿಲ್ಲ, "current illa") are complaints, kept in her words, with the room read | QA |
+| S21-5 | An item she buys, said with no amount, asks "How much was the …?" and puts the item back in the box. This happens only when every word is a known grocery or cleaning item, so commands and questions ("rent due", "milk finished") still go to the Copilot | UX |
+| S21-6 | Questions in Kannada (ಯಾರು…, eshtu…) are not entries | QA |
+| S21-7 | A clearly spoken Kannada phrase needs no AI call (on-device recognition + rules) | COST |
+| S21-8 | The purchase form's mic fills a category its own word list lacks (eerulli, phenyl, ಹಾಲು) through `POST /copilot/category`. It uses the dictionary and this PG's history only, **never the model**, and needs a login | PRIVACY, QA |
+| S21-9 | Copilot log on a phone: Siri's reply sits under the outcome badge with room to read | UX |
+| S21-10..13 | **Mic language switch.** Every mic (Copilot bar, quick sheet, Collect, Complaints, Purchase) listens in the language chosen on this phone (English by default). While listening, and after each result, the status line offers one 44 px button, "ಕನ್ನಡದಲ್ಲಿ ಹೇಳಿ" or "Speak English", that stops, switches and listens again. A phone without Kannada speech falls back to English and says so | UX |
+| S21-14 | In the Collect and Complaint voice previews, what was heard is shown as plain text, never as markup | SECURITY |
+| S21-15 | Gates 12/12 twice; mutations caught; independent review before merge. **Not verifiable here:** what Chrome on a real Android phone writes in ಕನ್ನಡ mode (digits vs words, loan-word spellings). The owner tries it after release | QA |
+
+**Sprint 21 status:** approved by the independent review in round 6 (d103b88), after BLOCK ×5. Gates 12/12 ×2, 3,169 each. Merged to ai/test. No migration. The owner checks ಕನ್ನಡ voice on a real phone on Test (S21-15).

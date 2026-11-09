@@ -60,6 +60,21 @@ router.get('/audit', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// POST /copilot/category { item } — S21: the category for an item the
+// purchase form's own word list doesn't know ("eerulli", "phenyl", ಹಾಲು).
+// Dictionary and this PG's past purchases only — never the model — so it is
+// instant, free, and no text leaves the server.
+router.post('/category', auth, async (req, res) => {
+  const item = req.body && typeof req.body.item === 'string' ? req.body.item.slice(0, 120) : '';
+  if (!item.trim()) return res.status(400).json({ error: 'item is required' });
+  try {
+    const quick = require('../services/quick');
+    const SMParse = require('../../frontend/public/js/speech-parser.js');
+    const r = await quick.categorise(SMParse.toLatin(item), { allowModel: false });
+    res.json({ category: r.category || null, basis: r.basis });
+  } catch (e) { res.status(500).json({ error: 'Could not work out a category' }); }
+});
+
 // GET /copilot/tools — what this user may ask for (drives the chips)
 router.get('/tools', auth, (req, res) => res.json({ model: copilot.modelAvailable(), tools: tools.catalogue(req.user).map(t => ({ name: t.name, level: t.level })) }));
 

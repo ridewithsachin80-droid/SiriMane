@@ -1070,3 +1070,9 @@ body.has-bulk-bar .sm-fab, body.has-bulk-bar #sm-fab { display: none; }
    onto a second line instead of running off the screen; 44 px tap targets. */
 .admin-tabs { flex-wrap: wrap; }
 .admin-tabs .btn { min-height: 44px; }
+
+/* ── S21: mic language switch, Copilot log outcome ───────────── */
+.voice-lang { min-height: 44px; padding: 0 14px; margin: 4px 0 0; border-radius: 999px; border: 1px solid var(--primary); background: transparent; color: var(--primary); font-size: 14px; font-weight: 600; cursor: pointer; }
+.voice-lang:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.cl-outcome { text-align: left; min-width: 0; }
+.cl-outcome .cl-reply { font-size: 12px; margin-top: 4px; line-height: 1.4; overflow-wrap: anywhere; }
