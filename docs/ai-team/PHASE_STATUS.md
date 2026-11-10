@@ -283,3 +283,5 @@ Owner, 10 Nov: "keep working, stop whenever my decision is required". No decisio
 | S22-8 | Stopping the mic (or a silent timeout) never leaves "Listening…" on screen | UX |
 | S22-9 | "+ Add Staff" and the search box fit a 360 px screen | UX |
 | S22-10 | Gates 12/12 twice; mutations caught; independent review before merge | QA |
+
+**Sprint 22 status:** approved by the independent review in round 1 (3c2b159). Gates 12/12 (3,490) on e482643. Merged to ai/test. No migration.
