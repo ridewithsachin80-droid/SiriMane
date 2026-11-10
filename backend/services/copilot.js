@@ -114,6 +114,9 @@ async function modelIntent(text, user, context) {
   } catch (e) { return { error: e.message, via: 'model' }; }
 }
 
+// Words of a "record a payment" sentence that are never a resident's name.
+const NOT_A_NAME = /\b(record|recorded|collect|collected|collection|receive|received|paid|pay|payment|got|get|give|gave|given|take|taken|took|rent|deposit|advance|rupees?|rs|inr|from|by|via|through|using|with|upi|cash|gpay|g|google|phonepe|phone|pe|paytm|bank|transfer|neft|imps|online|her|hers|his|him|she|he|they|this|that|these|resident|guest|girl|tenant|here|there|today|yesterday|now|a|an|the|for|of|and|to|in|on|at|as|is|it|was|has|have|had|been|add|added|enter|entered|entry|please|pls|note|make|mark|me|my|i|we|new|month|months|monthly|balance|due|dues|pending|full|part|partial|amount|money|total|only|just|also|ok|okay|done|already|again|thanks|thank|you|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\b/gi;
+
 // prepare_* tools built from a raw sentence use the on-device parser to fill args.
 async function enrichRawArgs(toolName, args, context) {
   if (!args.raw) return args;
@@ -121,7 +124,13 @@ async function enrichRawArgs(toolName, args, context) {
   if (toolName === 'prepare_payment') {
     const roster = (await pool.query(`SELECT g.id, g.name, r.room_number FROM guests g LEFT JOIN rooms r ON r.id=g.room_id WHERE g.is_active=true`)).rows;
     const p = SMParse.parseCollection(raw, roster);
-    return { ...args, resident_id: p.guest ? p.guest.id : context?.resident_id, name: p.guest ? undefined : raw.replace(/[^a-z ]/gi, ' ').replace(/\b(record|collect|received|paid|got|rent|deposit|advance|rupees|from|by|via|upi|cash|gpay|phonepe|bank|transfer)\b/gi, ' ').trim() || undefined, amount: p.amount, mode: p.mode, type: p.type, room: p.room };
+    // Hotfix 21.3 (review 21.2 S-e, second half): the page's resident is used only
+    // when no OTHER name was typed. What is left once the amount, mode, room and
+    // command words are gone is that name — on Jhanavi's page, "Suchin 6000 cash"
+    // and "Ramesh 6000 cash" are not Jhanavi's payment.
+    const left = p.guest ? '' : String(p.leftover || '').replace(/[^a-z ]/gi, ' ').replace(NOT_A_NAME, ' ').replace(/\s+/g, ' ').trim();
+    const named = left.split(' ').some(w => w.length >= 3);
+    return { ...args, resident_id: p.guest ? p.guest.id : (named ? undefined : context?.resident_id), name: named ? left : undefined, amount: p.amount, mode: p.mode, type: p.type, room: p.room };
   }
   if (toolName === 'prepare_expense') {
     const amt = SMParse.extractAmount(raw);
@@ -164,7 +173,10 @@ async function ask({ user, text, context, tap, voice, alternatives, authorizatio
     if (a.template) { audit.interpretation = { tool: 'template:' + a.template, via: 'template' }; return finish({ answer: a.answer, actions: [], evidence: [], confidence: 'medium', via: 'template' }); }
     return finish({ answer: modelAvailable() ? `I'm not sure what to do with that. Try "onion 100", "Priya 6000 upi", "tap leaking room 106", or "who has not paid?"` : `Without AI keys I still understand: "onion 100" · "Priya 6000 upi" · "tap leaking room 106" · who has not paid · vacant rooms · open requests · draft reminders · today's brief.`, actions: [], clarify: intent?.clarify || null, confidence: 'low', via: intent?.via || 'none' });
   }
-  if (!intent.tool && intent.clarify) { audit.interpretation = { tool: null, via: intent.via, clarify: intent.clarify }; return finish({ answer: intent.clarify, clarify: intent.clarify, retry_text: intent.retry_text || null, actions: [], confidence: 'low', via: intent.via }); }
+  if (!intent.tool && intent.clarify) { audit.interpretation = { tool: null, via: intent.via, clarify: intent.clarify }; return finish({ answer: intent.clarify, clarify: intent.clarify, retry_text: intent.retry_text || null,
+      // 21.3: a question with its answers as taps ("₹80,000 — or ₹80 at Savera?"). Preview-only tools, checked again on the tap.
+      actions: (intent.options || []).filter(o => tools.TOOLS[o.tool] && tools.TOOLS[o.tool].level === 'prepare' && tools.allowed(tools.TOOLS[o.tool], user)).map(o => ({ label: o.label, tool: o.tool, args: o.args, level: 'prepare' })),
+      confidence: 'low', via: intent.via }); }
 
   const tool = tools.TOOLS[intent.tool];
   audit.interpretation = { tool: intent.tool, args: intent.args, via: intent.via, ...(intent.provider ? { provider: intent.provider } : {}) };
@@ -185,6 +197,7 @@ async function ask({ user, text, context, tap, voice, alternatives, authorizatio
     result.preview.source = 'quick';
     if (result.execute && result.execute.args) result.execute.args.source = 'quick';
     if (intent.category_basis && result.text) result.text += ` Category: ${intent.category_basis}.`;
+    if (intent.amount_basis && result.text) result.text += ' ' + intent.amount_basis;   // 21.3: "I read "noor" as ₹100." 
     // 14.1: she sees the correction, so a wrong guess is caught at the preview.
     if (intent.heard && result.text) result.text = `Heard “${intent.heard}” — understood as “${intent.understood}”. ` + result.text;
     // 14.4: an expense preview offers the other categories as taps. Fixing it
@@ -209,7 +222,14 @@ async function ask({ user, text, context, tap, voice, alternatives, authorizatio
 
   if (result.category_chips) { result.extra_actions = result.category_chips; }
   if (result.clarify) {
-    return finish({ answer: result.clarify, clarify: result.clarify, candidates: result.candidates || [], actions: (result.candidates || []).map(c => ({ label: `${c.name}${c.room_number ? ' (Room ' + c.room_number + ')' : ''}`, tool: intent.tool, args: { ...v.args, name: undefined, resident_id: c.id }, level: 'prepare' })), confidence: 'low', tool: intent.tool, via: intent.via });
+    const actions = (result.candidates || []).map(c => ({ label: `${c.name}${c.room_number ? ' (Room ' + c.room_number + ')' : ''}`, tool: intent.tool, args: { ...v.args, name: undefined, suggest_id: undefined, resident_id: c.id }, level: 'prepare' }));
+    // Hotfix 21.3: "Did you mean Bindu?" for "bindi 20" had no way out. When the
+    // name was only a near-match, and there is an amount, offer the other
+    // reading as a tap: it was something she bought.
+    if (intent.tool === 'prepare_payment' && (result.candidates || []).some(c => c.why) && v.args.name && Number(v.args.amount) > 0 && tools.allowed(tools.TOOLS.prepare_expense, user)) {
+      actions.push({ label: `Not a resident — expense: ${v.args.name} ₹${Number(v.args.amount).toLocaleString('en-IN')}`, tool: 'prepare_expense', args: { amount: Number(v.args.amount), description: v.args.name, mode: v.args.mode, source: 'quick' }, level: 'prepare', chip: 'expense' });
+    }
+    return finish({ answer: result.clarify, clarify: result.clarify, candidates: result.candidates || [], actions, confidence: 'low', tool: intent.tool, via: intent.via });
   }
 
   const out = { answer: result.text, evidence: result.rows || result.reminders || result.issues || [], data: result.resident || result.report || result.facts || null, actions: [], confidence: intent.via === 'local' ? 'high' : 'medium', tool: intent.tool, level: tool.level, via: intent.via };

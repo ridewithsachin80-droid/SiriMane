@@ -128,6 +128,9 @@
   function heardMultFits(w, count, nextRaw) {
     if (w === 'noor' ? !(count >= 1 && count <= 9) : !(count > 0 && count < 100)) return false;
     const n = String(nextRaw || '').replace(/[^a-z0-9]/g, '');
+    // …or a resident's name (blanked to "zzname") or "for": "five savera Jhanavi",
+    // "Jhanavi 5 Savera for rent" (review 21.2 r3).
+    if (n === 'zzname' || n === 'for') return true;
     return n === '' || MONEY_TAIL.test(n) || PAY_FILL.test(n) || /^\d+$/.test(n) || numberWord(n) != null || n in MULTIPLIERS || n in HEARD_MULT || n in HALF || n === 'and';
   }
   // A lone "noor" after these is a person — "rice from Noor", "salary Noor".
@@ -244,7 +247,10 @@
       if (unit === 'k') n *= 1000;
       else if (unit in HEARD_MULT) {
         // "5 Savera upi" = 5000; "50 Noor stores", "80 Savera hotel", "500 Noor stores" keep the number.
-        if (heardMultFits(unit, n, after)) n *= HEARD_MULT[unit]; else return { amount: Math.round(n), matched: m[1] };
+        // Hotfix 21.3: "80 savera" could be ₹80,000 or ₹80 at a place called
+        // Savera. The plain number is kept as `alt` so the caller can ask.
+        if (heardMultFits(unit, n, after)) return { amount: Math.round(n * HEARD_MULT[unit]), matched: m[0].trim(), alt: Math.round(n), altMatched: m[1], heardWord: unit };
+        return { amount: Math.round(n), matched: m[1] };
       }
       else if (unit) n *= MULTIPLIERS[unit];
       return { amount: Math.round(n), matched: m[0].trim() };
@@ -252,7 +258,8 @@
     // 2) Number words: "six thousand", "aaru saavira", "chhe hazaar", "five hundred", "one and a half thousand"
     const words = lower.trim().split(/\s+/);
     let total = 0, current = 0, matchedWords = [], seenAny = false, pendingHalf = false, guessed = false;
-    const reset = () => { total = 0; current = 0; matchedWords = []; seenAny = false; pendingHalf = false; guessed = false; };
+    let alt = null, lone = null;   // 21.3: the other reading of a heard multiplier; a lone "noor"
+    const reset = () => { total = 0; current = 0; matchedWords = []; seenAny = false; pendingHalf = false; guessed = false; alt = null; lone = null; };
     for (let i = 0; i < words.length; i++) {
       const w = words[i].replace(/[^a-z.]/g, '');
       const nextW = (words[i + 1] || '').replace(/[^a-z.]/g, '');
@@ -272,6 +279,9 @@
         if (seenAny && (current > 0 || pendingHalf)) {
           if (heardMultFits(w, current + (pendingHalf ? 0.5 : 0), words[i + 1])) {
             if (pendingHalf) { current += 0.5; pendingHalf = false; }
+            // A real (not guessed) number with nothing before it: "eradu savera" may
+            // also be ₹2 at Savera. Valid only if no more of the number follows.
+            alt = !guessed && total === 0 && Number.isInteger(current) ? { n: current, m: matchedWords.join(' '), w, at: matchedWords.length + 1 } : null;
             total += current * HEARD_MULT[w]; current = 0; matchedWords.push(words[i]); continue;
           }
           // Not a multiplier here — it is a name. A real number stands as said
@@ -282,7 +292,7 @@
         if (seenAny) break;
         const prevW = (words[i - 1] || '').replace(/[^a-z.]/g, '');
         if (w === 'noor' && words.length > 1 && !NOT_BEFORE_NOOR.test(prevW) && words.slice(i + 1).every(x => MONEY_TAIL.test(x.replace(/[^a-z]/g, '')))) {
-          total += 100; matchedWords = [words[i]]; seenAny = true; break;
+          total += 100; matchedWords = [words[i]]; seenAny = true; lone = w; break;
         }
         matchedWords = []; continue;
       }
@@ -315,7 +325,10 @@
     }
     total += current;
     if (!seenAny || total <= 0) return null;
-    return { amount: Math.round(total), matched: matchedWords.join(' ') };
+    const out = { amount: Math.round(total), matched: matchedWords.join(' ') };
+    if (alt && alt.at === matchedWords.length) { out.alt = alt.n; out.altMatched = alt.m; out.heardWord = alt.w; }
+    if (lone) out.lone = lone;
+    return out;
   }
 
   // ── Payment mode ────────────────────────────────────────────────────────

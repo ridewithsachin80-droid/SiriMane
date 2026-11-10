@@ -214,7 +214,10 @@ function checkRepair(first, second, heard, residents, hist) {
       // …and that at least starts like, or half-resembles, the model's resident
       // ("Satin" → Sachin, "Johnny" → Jhanavi; never "heerly" → Sachin).
       const loose = (said[0] ? said[0].words : []).filter(w => !DICT_INDEX.has(w) && !(hist && hist.has(w) && Object.keys(hist.get(w)).some(c => c !== 'Other')));
-      const word = r ? loose.find(w => parts(r.name).some(p => w[0] === p[0] || similarity(w, p) >= 0.5)) : null;
+      // 21.3: half-alike, or the same first two consonants — "Satin" → Sachin,
+      // "Johnny" → Jhanavi; a shared first letter alone ("samosa") is not enough.
+      const cons = x => phoneticKey(x).replace(/[aeiou]/g, '').slice(0, 2);
+      const word = r ? loose.find(w => parts(r.name).some(p => similarity(w, p) >= 0.5 || (cons(w).length === 2 && cons(w) === cons(p)))) : null;
       return { ok: false, suggest: word ? r : null, said: said[0], word };
     }
     if (r) {
@@ -230,6 +233,7 @@ function checkRepair(first, second, heard, residents, hist) {
     if (said[0] && said[0].type !== 'rent' ? type !== said[0].type : !said.some(x => x.type === type)) return { ok: false };
   }
   if (second.tool === 'prepare_expense' && first && first.ask === 'what') return { ok: false };   // only a number was heard
+  if (second.tool === 'prepare_expense' && first && first.tool === 'prepare_payment') return { ok: false };   // 21.3: the rules read a collection ("Kavia 5000 upi") — the model may not make it a purchase
   if (a.amount != null && !said.some(x => x.amount === Number(a.amount))) return { ok: false };
   // The mode is the one she said (review 21.2 S1) — or none, and she is asked.
   const heardMode = (said.find(x => x.mode) || {}).mode;
@@ -240,7 +244,7 @@ function weak(i) {
   if (!i) return true;
   if (i.kind === 'expense' && i.tool && (!i.args.category || i.args.category === 'Other')) return true;   // item nobody recognised
   if (i.kind === 'collection' && i.tool && !i.args.resident_id) return true;                                // name not resolved
-  if (!i.tool && i.clarify && i.ask !== 'amount') return true;                                            // e.g. only a number was heard ("How much was the eerulli?" is a real answer — review S21 S1)
+  if (!i.tool && i.clarify && i.ask !== 'amount' && i.ask !== 'which_amount') return true;                                            // e.g. only a number was heard ("How much was the eerulli?" is a real answer — review S21 S1)
   return false;
 }
 
@@ -305,7 +309,7 @@ async function classify(text, user, context, copts = {}) {
   const match = SMParse.matchResident(nameText, residents, room);
   const type = /\bdeposit\b/i.test(norm) ? 'deposit' : /\badvance\b/i.test(norm) ? 'advance' : 'rent';
   if (match) {
-    return { tool: 'prepare_payment', args: { resident_id: match.id, amount: amount || undefined, mode: mode || undefined, type }, via: 'quick', kind: 'collection' };
+    return { tool: 'prepare_payment', args: { resident_id: match.id, amount: amount || undefined, mode: mode || undefined, type }, via: 'quick', kind: 'collection', amount_basis: amountBasis(amt) };
   }
   // Two residents called Jhanavi → this is still a collection; it must ask
   // "which one?", never fall through and become an expense named "jhanavi".
@@ -331,14 +335,27 @@ async function classify(text, user, context, copts = {}) {
 
   // 4. Money without a name → an expense.
   if (amount) {
-    const item = dropWords(sansRoom, amt.matched).split(/\s+/).filter(w => !SMParse.RUPEE_WORD.test(w.toLowerCase().replace(/[^a-z]/g, ''))).join(' ').replace(MODE_WORDS, ' ').replace(NOISE, ' ').replace(/\b(room|rum)\s*[a-z]?\d{1,3}[a-z]?\b/gi, ' ').replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim();
+    const item = cleanItem(dropWords(sansRoom, amt.matched));
     if (!item) {
       // Decision 2: never file a blind rupee figure.
       return { tool: null, clarify: `What was ₹${amount.toLocaleString('en-IN')} for? Say the item too — e.g. "onion ${amount}".`, retry_text: raw + ' ', via: 'quick', kind: 'expense', ask: 'what' };
     }
     const vendor = await matchVendor(item);
     const { category, basis, via } = await categorise(vendor ? item.replace(new RegExp(vendor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), ' ') : item, { allowModel: copts.allowModel !== false });
-    return { tool: 'prepare_expense', args: { amount, category: category || 'Other', description: item, mode: mode || undefined, paid_to: vendor || undefined }, via: 'quick', kind: 'expense', category_basis: basis, category_via: via || (category ? 'local' : 'none') };
+    // Hotfix 21.3: "tiffin 80 savera" — ₹80,000, or ₹80 at a place called Savera?
+    // Both are believable for a purchase of ₹10 or more, so she is asked, with
+    // both as taps. (Below ₹10 the plain reading is not: "plumber eradu savera"
+    // is ₹2,000 — and the preview says how it was read.)
+    if (amt.alt != null && amt.alt >= 10) {
+      const word = amt.heardWord.charAt(0).toUpperCase() + amt.heardWord.slice(1);
+      const itemAlt = cleanItem(dropWords(sansRoom, amt.altMatched));
+      const base = { category: category || 'Other', mode: mode || undefined, paid_to: vendor || undefined, source: 'quick' };
+      const big = '₹' + amount.toLocaleString('en-IN'), small = '₹' + amt.alt.toLocaleString('en-IN');
+      return { tool: null, clarify: `Is that ${big} — or ${small} at "${word}"? Tap the right one.`, via: 'quick', kind: 'expense', ask: 'which_amount',
+        options: [{ label: `${big} · ${item}`, tool: 'prepare_expense', args: { ...base, amount, description: item } },
+                  { label: `${small} · ${itemAlt}`, tool: 'prepare_expense', args: { ...base, amount: amt.alt, description: itemAlt } }] };
+    }
+    return { tool: 'prepare_expense', args: { amount, category: category || 'Other', description: item, mode: mode || undefined, paid_to: vendor || undefined }, via: 'quick', kind: 'expense', category_basis: basis, category_via: via || (category ? 'local' : 'none'), amount_basis: amountBasis(amt) };
   }
   // 5. S21: an item she buys, with no amount — "pudina soppu", "eerulli" —
   //    asks how much, instead of "I'm not sure". Review S21 (B2): ONLY when
@@ -371,6 +388,18 @@ function buyableWord(w) {
   return false;
 }
 const BUYABLE = new Set(['Groceries', 'Cleaning']);
+// The item words of an expense: no rupee, mode, filler or room words.
+function cleanItem(text) {
+  return String(text).split(/\s+/).filter(w => !SMParse.RUPEE_WORD.test(w.toLowerCase().replace(/[^a-z]/g, ''))).join(' ').replace(MODE_WORDS, ' ').replace(NOISE, ' ').replace(/\b(room|rum)\s*[a-z]?\d{1,3}[a-z]?\b/gi, ' ').replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim();
+}
+// Hotfix 21.3: when the amount came from a word that is also a name ("noor",
+// "savera"), the preview says how it was read, so a wrong guess is seen.
+function amountBasis(amt) {
+  if (!amt) return undefined;
+  if (amt.lone) return `I read "${amt.lone}" as ₹${amt.amount.toLocaleString('en-IN')}.`;
+  if (amt.alt != null) return `I read "${amt.matched}" as ₹${amt.amount.toLocaleString('en-IN')}.`;
+  return undefined;
+}
 // Hotfix 21.1: take the amount's words out of the text whatever their case.
 // The amount is read in lower case, but Chrome capitalises the first word it
 // hears — "Nooru rupaye" left "Nooru" behind as the item.

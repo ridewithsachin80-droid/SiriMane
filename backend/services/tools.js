@@ -168,7 +168,8 @@ const TOOLS = {
     args: { name: 'string?', resident_id: 'number?', suggest_id: 'number?', room: 'string?', amount: 'number?', mode: 'string?', type: 'string?', date: 'string?', source: 'string?' }, role: 'staff', level: 'prepare',
     async run(a, ctx) {
       // Review 21.2 r2 S-e: the page's resident is used only when no name was
-      // said. On Jhanavi's page, "Suchin 6000 cash" is not Jhanavi's payment.
+      // passed. (The Copilot's own sentence parser decides that for typed
+      // "record …" phrases — see enrichRawArgs.)
       let { match, candidates } = await resolveResident({ id: a.resident_id || (!a.name && !a.suggest_id ? ctx.context?.resident_id : undefined), name: a.name, room: a.room });
       // Hotfix 21.2: a resident the voice repair could not prove was named is
       // offered as a question with a tap — never used as the answer.
