@@ -193,7 +193,7 @@ function readHeard(h, residents) {
   const modeHit = SMParse.extractMode(norm);
   const nameText = (amt && amt.matched ? dropWords(sansRoom, amt.matched) : sansRoom).replace(MODE_WORDS, ' ').replace(NOISE, ' ');
   return { amount: amt ? amt.amount : null, mode: modeHit ? modeHit.mode : null, type: /\bdeposit\b/i.test(norm) ? 'deposit' : /\badvance\b/i.test(norm) ? 'advance' : 'rent',
-    words: tokens(nameText).filter(w => w.length >= 3 && !SMParse.extractAmount(w)) };
+    words: tokens(nameText).filter(w => w.length >= 3 && !SMParse.RUPEE_WORD.test(w) && !SMParse.extractAmount(w)) };
 }
 function soundsLike(w, p) {
   if (w === p || similarity(w, p) >= 0.7) return true;
@@ -218,13 +218,16 @@ function checkRepair(first, second, heard, residents, hist) {
       return { ok: false, suggest: word ? r : null, said: said[0], word };
     }
     if (r) {
+      // "Priya" does not pick between two Priyas, nor "Somya" between Sowmya and
+      // Soumya: some heard word must sound like HER name and like nobody else's.
       const others = residents.filter(x => x.id !== r.id && heardName(x.name));
-      if (others.length) {
-        const mine = parts(r.name).filter(p => !others.some(o => parts(o.name).includes(p)));
-        if (!mine.some(p => words.some(w => soundsLike(w, p)))) return { ok: false };   // "Priya" alone does not pick between two Priyas
-      }
+      const like = (w, who) => parts(who.name).some(p => soundsLike(w, p));
+      if (others.length && !words.some(w => like(w, r) && !others.some(o => like(w, o)))) return { ok: false };
     }
-    if (!said.some(x => x.type === (a.type || 'rent'))) return { ok: false };
+    // The type is the one in what she said first; an alternative transcript may
+    // not drop a "deposit" (review 21.2 r2 S-d).
+    const type = a.type || 'rent';
+    if (said[0] && said[0].type !== 'rent' ? type !== said[0].type : !said.some(x => x.type === type)) return { ok: false };
   }
   if (second.tool === 'prepare_expense' && first && first.ask === 'what') return { ok: false };   // only a number was heard
   if (a.amount != null && !said.some(x => x.amount === Number(a.amount))) return { ok: false };
@@ -259,6 +262,7 @@ async function intent(text, user, context, opts = {}) {
     if (second && second.tool === 'prepare_payment') {
       // Review 21.2 S3: never slide from a payment the model could not prove into
       // an expense preview of the same money. Ask who it was — with what was HEARD.
+      if (first && first.tool === 'prepare_payment') return first;   // the rules already read a collection (and ask who, or how much)
       if (verdict.suggest) {
         const h = verdict.said;
         return { tool: 'prepare_payment', args: { name: verdict.word, suggest_id: verdict.suggest.id, amount: h.amount || undefined, mode: h.mode || undefined, type: h.type }, via: 'quick', kind: 'collection',
@@ -327,7 +331,7 @@ async function classify(text, user, context, copts = {}) {
 
   // 4. Money without a name → an expense.
   if (amount) {
-    const item = dropWords(sansRoom, amt.matched).replace(MODE_WORDS, ' ').replace(NOISE, ' ').replace(/\b(room|rum)\s*[a-z]?\d{1,3}[a-z]?\b/gi, ' ').replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim();
+    const item = dropWords(sansRoom, amt.matched).split(/\s+/).filter(w => !SMParse.RUPEE_WORD.test(w.toLowerCase().replace(/[^a-z]/g, ''))).join(' ').replace(MODE_WORDS, ' ').replace(NOISE, ' ').replace(/\b(room|rum)\s*[a-z]?\d{1,3}[a-z]?\b/gi, ' ').replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim();
     if (!item) {
       // Decision 2: never file a blind rupee figure.
       return { tool: null, clarify: `What was ₹${amount.toLocaleString('en-IN')} for? Say the item too — e.g. "onion ${amount}".`, retry_text: raw + ' ', via: 'quick', kind: 'expense', ask: 'what' };

@@ -670,6 +670,59 @@ const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toI
         i = await say('heerly nooru rupaye', `Sachin G${alpha} 100 cash`); ok(i && i.tool === 'prepare_expense' && !i.args.suggest_id, `H21.2 r2 S3 "heerly" is not offered as Sachin (got ${JSON.stringify(i && [i.tool, i.args])})`);
       } finally { ai.providers.groqText = keep; ai.providers._stub = keepStub; ai.providers.groqDownUntil = 0; }
     }
+    // ── Hotfix 21.2, review round 2 (BLOCK) ───────────────────────────────
+    // N1: a shop's name after a small number is not a multiplier.
+    for (const [t, n] of [['rice 50 Noor stores', 50], ['haalu aivattu Noor angadi', 50], ['milk fifty Noor stores', 50], ['bread 40 Noor bakery', 40], ['eggs 60 noor stores cash', 60], ['tiffin 80 Savera hotel', 80], ['curd thirty Savera hotel', 30],
+                          ['40 noor', 40], ['5 noor', 500], ['aidu noor upay', 500], ['eradu savera kottlu', 2000], ['ippattu savera', 20000], ['eradu savera aidu nooru', 2500], ['I do Savera upi', 5000]]) {
+      eq(amtOf(t), n, `H21.2 r3 N1 "${t}" is ₹${n}`);
+    }
+    for (const t of ['I noor stores', 'I do savera hotel', 'rice from Noor', 'salary Noor', 'sambala noor']) eq(amtOf(t), null, `H21.2 r3 N1/S-c "${t}" has no amount`);
+    await pool.query(`UPDATE guests SET is_active=false WHERE id=$1`, [nj.id]);   // no Noor lives here now: "Noor stores" is a shop
+    for (const [t, n, cat] of [['rice 50 Noor stores', 50, 'Groceries'], ['eggs 60 noor stores cash', 60, 'Groceries'], ['tiffin 80 Savera hotel', 80]]) {
+      i = await quick.classify(t, adminUser, {}, { allowModel: false }); ok(i && i.tool === 'prepare_expense' && i.args.amount === n && (!cat || i.args.category === cat), `H21.2 r3 N1 "${t}" previews ₹${n}, never ₹${n * (/savera/i.test(t) ? 1000 : 100)} (got ${JSON.stringify(i && i.args)})`);
+    }
+    i = await quick.classify('rice from Noor', adminUser, {}, { allowModel: false }); ok(!i || !(i.args && i.args.amount), 'H21.2 r3 S-c "rice from Noor" is not a ₹100 entry');
+    // S-b: more spellings of "rupees" — never Rupa, never the item.
+    for (const t of ['aidu nooru rupay', 'Nooru RuPay', 'aidu nooru rupya', 'aidu nooru rupe']) {
+      i = await quick.classify(t, adminUser, {}, { allowModel: false }); ok(i && !i.tool && /^What was ₹[15]00 for\?/.test(i.clarify), `H21.2 r3 S-b "${t}" asks what it was for (got ${JSON.stringify(i && (i.args || i.clarify))})`);
+    }
+    // S-e: on a resident's page, a different name that was said is not given to the page's resident.
+    r = await api('POST', '/copilot/ask', { text: 'Suchin aaru saavira cash', context: { page: 'resident', resident_id: jh.id } }, adminTok);
+    ok(!r.data.proposal && /Did you mean Sachin G/.test(r.data.answer || ''), `H21.2 r3 S-e on Jhanavi's page, "Suchin aaru saavira cash" asks about Sachin — it is not Jhanavi's payment (got ${String(r.data.answer).slice(0, 90)} · ${JSON.stringify(r.data.proposal && r.data.proposal.preview)})`);
+    r = await api('POST', '/copilot/ask', { text: 'record payment', tool: 'prepare_payment', args: { amount: 6000, mode: 'Cash' }, context: { page: 'resident', resident_id: jh.id } }, adminTok);
+    ok(r.data.proposal && r.data.proposal.preview.guest_id === jh.id, `H21.2 r3 S-e …while with no name said, the page's resident is still used (got ${JSON.stringify(r.data.proposal && r.data.proposal.preview)} · ${String(r.data.answer).slice(0, 60)})`);
+    {
+      const roomNo4 = '6' + uniq.slice(-2);
+      let room4 = (await A('POST', '/rooms', { room_number: roomNo4, floor: 6, total_beds: 10, monthly_rent: 6000, room_type: 'sharing' })).data;
+      if (!room4 || !room4.id) { const rl = (await A('GET', '/rooms')).data; room4 = (rl.list || rl).find(x => x.room_number === roomNo4); }
+      const mk4 = async (name, n) => (await A('POST', '/guests', { name, phone: `97${uniq}${n}`.slice(0, 10), room_id: room4.id, bed_number: String(n - 20), monthly_rent: 6000, deposit_amount: 0, join_date: daysAgo(30), id_proof_type: 'Aadhaar' })).data;
+      const so1 = await mk4('Sowmya Rao', 21), so2 = await mk4('Soumya Kiran', 22), kt = await mk4('Kavitha Thomas', 23), ky = await mk4('Kavya Reddy', 24);
+      ok([so1, so2, kt, ky].every(g => g && g.id), 'H21.2 r3 (fixtures) Sowmya + Soumya, Kavitha + Kavya');
+      const keep = ai.providers.groqText, keepStub = ai.providers._stub; let reply = '{}';
+      ai.providers._stub = true; ai.providers.groqDownUntil = 0; ai.providers.groqText = async () => reply;
+      const say = async (t, phrase, alts) => { reply = JSON.stringify({ phrase, confidence: 'high' }); return quick.intent(t, adminUser, {}, { voice: true, alternatives: alts || [t] }); };
+      try {
+        // S-a: names that sound alike — the model may not pick.
+        for (const [t, phrase, who] of [['Somya 5000 upi', 'Sowmya Rao 5000 upi', so1], ['Somya 5000 upi', 'Soumya Kiran 5000 upi', so2], ['Swati aidu saavira upi', 'Savitha Mohan 5000 upi', sv], ['Kavia 7000 cash', 'Kavitha Thomas 7000 cash', kt]]) {
+          i = await say(t, phrase);
+          ok(i && i.tool === 'prepare_payment' && !i.args.resident_id && !i.args.suggest_id, `H21.2 r3 S-a "${t}" ⇐ "${phrase.split(' ').slice(0, 2).join(' ')}": she is asked who — the model does not choose between similar names (got ${JSON.stringify(i && [i.tool, i.args])})`);
+        }
+        i = await say('Kavitha Thomas 7000 cash', 'Kavitha Thomas 7000 cash'); ok(i && i.args.resident_id === kt.id && i.args.amount === 7000, 'H21.2 r3 S-a …and a name said in full is hers without any model');
+        // The rules already read "Swati" as a collection (Swathi lives here): a model
+        // that names someone else does not replace that with its own suggestion.
+        i = await say('Swati 5000 upi', `Sachin G${alpha} 5000 upi`);
+        ok(i && i.tool === 'prepare_payment' && !i.args.suggest_id && !i.args.resident_id && (i.fuzzy || []).some(f => f.id === sw.id), `H21.2 r3 "Swati 5000 upi" still offers Swathi, not the model's Sachin (got ${JSON.stringify(i && [i.args, i.fuzzy])})`);
+        // S-b through the repair: a rupee word is not evidence of Rupa (one Rupa here now).
+        await pool.query(`UPDATE guests SET is_active=false WHERE id=$1`, [rl2.id]);
+        for (const t of ['aidu nooru rupay', 'Nooru RuPay', 'aidu nooru rupya']) { i = await say(t, 'Rupa Menon 500'); ok(i && i.tool !== 'prepare_payment', `H21.2 r3 S-b "${t}" is never a payment from Rupa (got ${JSON.stringify(i && (i.args || i.clarify))})`); }
+        // S-d: "deposit" in what she said first is not dropped because an alternative lacks it.
+        i = await say('Suchin 5000 deposit', `Sachin G${alpha} 5000`, ['Suchin 5000 deposit', 'Suchin 5000']);
+        ok(i && i.tool === 'prepare_payment' && i.args.type === 'deposit' && i.args.amount === 5000, `H21.2 r3 S-d a heard "deposit" stays a deposit (got ${JSON.stringify(i && i.args)})`);
+        i = await say('Suchin 5000 deposit', `Sachin G${alpha} 5000 deposit`, ['Suchin 5000 deposit', 'Suchin 5000']);
+        ok(i && i.args.resident_id === sg.id && i.args.type === 'deposit', 'H21.2 r3 S-d …and a faithful repair of it is still used');
+      } finally { ai.providers.groqText = keep; ai.providers._stub = keepStub; ai.providers.groqDownUntil = 0; }
+      await pool.query(`UPDATE guests SET is_active=false WHERE id = ANY($1)`, [[so1.id, so2.id, kt.id, ky.id]]);
+    }
     await pool.query(`UPDATE guests SET is_active=false WHERE id = ANY($1)`, [[sg.id, nj.id, sv.id, ind.id, lk.id, ru.id, p1.id, p2.id, sw.id, rl2.id]]);
     console.log('✓ S21 Kannada');
 

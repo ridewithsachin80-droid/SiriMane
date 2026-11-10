@@ -118,7 +118,20 @@
   // lone "noor" is ₹100 only when it ends the phrase ("eerulli noor", "Noor
   // upay"). "Noor salary aidu saavira" is ₹5,000, never ₹100 (review 21.2 B1).
   const HEARD_MULT = { savera: 1000, sawera: 1000, saavera: 1000, saveraa: 1000, noor: 100 };
-  const MONEY_TAIL = /^(rs|rupee|rupees|rupaye|rupai|rupaayi|rupayi|inr|upi|upay|upai|cash|gpay|g|pay|google|phonepe|phone|pe|paytm|bank|transfer|neft|imps|nagadu|online)?$/;
+  const MONEY_TAIL = /^(rs|rupee|rupees|rupay|rupaye|rupai|rupaayi|rupayi|rupaya|rupiya|rupya|rupe|inr|upi|upay|upai|cash|gpay|g|pay|google|phonepe|phone|pe|paytm|bank|transfer|neft|imps|nagadu|online)?$/;
+  // Review 21.2 r2 N1: "rice 50 Noor stores" is ₹50 and "tiffin 80 Savera hotel"
+  // is ₹80 — the shop's name is not a multiplier. A heard multiplier counts only
+  // when the count fits (ನೂರು takes 1–9: there is no "40 nooru") AND what
+  // follows is the end, a rupee/mode word, more of the number, or a payment
+  // word ("kottlu", "paid", "rent", "deposit").
+  const PAY_FILL = /^(kottlu|kotlu|kottaru|kotte|kotta|kottu|kottidaare|kottidaale|kottide|paid|pay|payment|gave|given|rent|deposit|advance|baadige)$/;
+  function heardMultFits(w, count, nextRaw) {
+    if (w === 'noor' ? !(count >= 1 && count <= 9) : !(count > 0 && count < 100)) return false;
+    const n = String(nextRaw || '').replace(/[^a-z0-9]/g, '');
+    return n === '' || MONEY_TAIL.test(n) || PAY_FILL.test(n) || /^\d+$/.test(n) || numberWord(n) != null || n in MULTIPLIERS || n in HEARD_MULT || n in HALF || n === 'and';
+  }
+  // A lone "noor" after these is a person — "rice from Noor", "salary Noor".
+  const NOT_BEFORE_NOOR = /^(from|to|by|for|of|with|ge|ige|ke|ko|inda|salary|sambala|wages|zzname)$/;
 
   // ── Review S21 (B1, S4, S6): Kannada numbers as people say them ─────────
   // ಐದೂವರೆ (aidoovare) = 5½ · ಇಪ್ಪತ್ತೈದು (ippattaidu) = 25 · ನೂರೈವತ್ತು
@@ -230,16 +243,16 @@
       const unit = m[2] ? m[2].trim() : '';
       if (unit === 'k') n *= 1000;
       else if (unit in HEARD_MULT) {
-        // "5 Savera" = 5000, but "500 Noor stores" stays ₹500: a name-like unit only after a small count.
-        if (n < 100) n *= HEARD_MULT[unit]; else return { amount: Math.round(n), matched: m[1] };
+        // "5 Savera upi" = 5000; "50 Noor stores", "80 Savera hotel", "500 Noor stores" keep the number.
+        if (heardMultFits(unit, n, after)) n *= HEARD_MULT[unit]; else return { amount: Math.round(n), matched: m[1] };
       }
       else if (unit) n *= MULTIPLIERS[unit];
       return { amount: Math.round(n), matched: m[0].trim() };
     }
     // 2) Number words: "six thousand", "aaru saavira", "chhe hazaar", "five hundred", "one and a half thousand"
     const words = lower.trim().split(/\s+/);
-    let total = 0, current = 0, matchedWords = [], seenAny = false, pendingHalf = false;
-    const reset = () => { total = 0; current = 0; matchedWords = []; seenAny = false; pendingHalf = false; };
+    let total = 0, current = 0, matchedWords = [], seenAny = false, pendingHalf = false, guessed = false;
+    const reset = () => { total = 0; current = 0; matchedWords = []; seenAny = false; pendingHalf = false; guessed = false; };
     for (let i = 0; i < words.length; i++) {
       const w = words[i].replace(/[^a-z.]/g, '');
       const nextW = (words[i + 1] || '').replace(/[^a-z.]/g, '');
@@ -249,20 +262,26 @@
       // "eye do" — right before ಸಾವಿರ/ನೂರು. Read the pair as 5, so "do" is not Hindi 2.
       const after2 = (words[i + 2] || '').replace(/[^a-z.]/g, '');
       if (!seenAny && /^(i|eye|ai)$/.test(w) && /^(do|du|doo|jo|joe|dhu)$/.test(nextW)) {
-        if (knMult(after2)) { current += 5; matchedWords.push(words[i], words[i + 1]); seenAny = true; i++; continue; }
+        if (knMult(after2)) { current += 5; matchedWords.push(words[i], words[i + 1]); seenAny = true; guessed = true; i++; continue; }
         // "I do sabira" (a spelling we do not know), "I do not know": that "do" is
         // not Hindi 2 — no ₹2. Skip the pair; she is asked (review 21.2 S4).
         matchedWords = []; i++; continue;
       }
-      if (!seenAny && shortForm(w, nextW) != null && (nextW in MULTIPLIERS || nextW in HEARD_MULT)) { current += shortForm(w, nextW); matchedWords.push(words[i]); seenAny = true; continue; }
+      if (!seenAny && shortForm(w, nextW) != null && (nextW in MULTIPLIERS || nextW in HEARD_MULT)) { current += shortForm(w, nextW); matchedWords.push(words[i]); seenAny = true; guessed = guessed || (w in EN_HEARD); continue; }
       if (w in HEARD_MULT) {
         if (seenAny && (current > 0 || pendingHalf)) {
-          if (pendingHalf) { current += 0.5; pendingHalf = false; }
-          total += current * HEARD_MULT[w]; current = 0; matchedWords.push(words[i]); continue;
+          if (heardMultFits(w, current + (pendingHalf ? 0.5 : 0), words[i + 1])) {
+            if (pendingHalf) { current += 0.5; pendingHalf = false; }
+            total += current * HEARD_MULT[w]; current = 0; matchedWords.push(words[i]); continue;
+          }
+          // Not a multiplier here — it is a name. A real number stands as said
+          // ("aivattu Noor angadi" = 50); a guessed one ("I Noor stores") is nothing.
+          if (guessed) return null;
+          break;
         }
         if (seenAny) break;
         const prevW = (words[i - 1] || '').replace(/[^a-z.]/g, '');
-        if (w === 'noor' && words.length > 1 && prevW !== 'zzname' && words.slice(i + 1).every(x => MONEY_TAIL.test(x.replace(/[^a-z]/g, '')))) {
+        if (w === 'noor' && words.length > 1 && !NOT_BEFORE_NOOR.test(prevW) && words.slice(i + 1).every(x => MONEY_TAIL.test(x.replace(/[^a-z]/g, '')))) {
           total += 100; matchedWords = [words[i]]; seenAny = true; break;
         }
         matchedWords = []; continue;
@@ -332,7 +351,7 @@
   // ── Resident matching ───────────────────────────────────────────────────
   // residents: [{ id, name, room_number }]. Prefers the room if one was said,
   // then a full-name token match, then a leading-token (first name) match.
-  const RUPEE_WORD = /^(rs|rupee|rupees|rupaye|rupai|rupaayi|rupayi|roopaayi|rupaya|rupay|rupiya|inr)$/;
+  const RUPEE_WORD = /^(rs|inr|rupee|rupees|rupay|rupaye|rupai|rupaayi|rupaay|rupayi|rupaya|rupiya|rupya|rupye|rupe|rupes|rupey|rupie|rupies|rupiah|rupaiya|rupaiye|roopaayi|roopayi|roopai|roopay|roopaye)$/;
   function matchResident(text, residents, room) {
     if (!residents || !residents.length) return null;
     // Hotfix 21.2: the word for rupees is never a name — "aidu nooru rupai" is
