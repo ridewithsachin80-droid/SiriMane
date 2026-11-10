@@ -109,6 +109,8 @@
     saavirada: 1000, saviradha: 1000, savirada: 1000,
     // Hotfix 21.1: how Chrome in ENGLISH mode writes ಸಾವಿರ — "I sawida upi".
     sawida: 1000, sawira: 1000, savida: 1000, saavida: 1000, sawir: 1000, saweera: 1000, saveera: 1000, sawirada: 1000,
+    // Hotfix 21.2: more English-mode spellings — "I do Savera", "Noor upay".
+    savera: 1000, sawera: 1000, saavera: 1000, saveraa: 1000, noor: 100,
     lakh: 100000, lakhs: 100000, laksha: 100000
   };
   const HALF = { half: 0.5, ardha: 0.5, aadha: 0.5 };
@@ -190,7 +192,7 @@
   const EN_HEARD = { i: 5, ai: 5, eye: 5, idu: 5, id: 5, aru: 6, yelu: 7, yeradu: 2, erdu: 2, yentu: 8, ombathu: 9, hathu: 10, ondh: 1, moor: 3, nalk: 4 };
   // Words that may stand before a bare "thousand" without making it a guess.
   // (ನೂರು alone is a plain 100 — "haalu nooru" — so only ಸಾವಿರ is strict.)
-  const KN_MULT = new Set(['saavira', 'savira', 'sasira', 'saavirada', 'savirada', 'saviradha', 'sawida', 'sawira', 'savida', 'saavida', 'sawir', 'saweera', 'saveera', 'sawirada']);
+  const KN_MULT = new Set(['saavira', 'savira', 'sasira', 'saavirada', 'savirada', 'saviradha', 'sawida', 'sawira', 'savida', 'saavida', 'sawir', 'saweera', 'saveera', 'sawirada', 'savera', 'sawera', 'saavera', 'saveraa', 'noor']);
   const ONE_OK = new Set(['a', 'an', 'and', 'one', 'ek', 'ondu', 'rs', 'rs.', 'rupees', 'rupee', 'inr']);
 
   // Returns { amount, matched } for the first amount in the text that is not
@@ -222,6 +224,12 @@
       const nextW = (words[i + 1] || '').replace(/[^a-z.]/g, '');
       const nv = numberWord(w);
       if (nv != null) { current += nv; matchedWords.push(words[i]); seenAny = true; continue; }
+      // Hotfix 21.2: English-mode Chrome splits ಐದು into two words — "I do", "I jo",
+      // "eye do" — right before ಸಾವಿರ/ನೂರು. Read the pair as 5, so "do" is not Hindi 2.
+      const after2 = (words[i + 2] || '').replace(/[^a-z.]/g, '');
+      if (!seenAny && /^(i|eye|ai)$/.test(w) && /^(do|du|doo|jo|joe|dhu)$/.test(nextW) && (KN_MULT.has(after2) || after2 === 'nooru' || after2 === 'noora')) {
+        current += 5; matchedWords.push(words[i], words[i + 1]); seenAny = true; i++; continue;
+      }
       if (!seenAny && shortForm(w, nextW) != null && nextW in MULTIPLIERS) { current += shortForm(w, nextW); matchedWords.push(words[i]); seenAny = true; continue; }
       if (w in HALF) { pendingHalf = true; matchedWords.push(words[i]); continue; }
       if (w === 'and' || w === 'a') { if (seenAny) matchedWords.push(words[i]); continue; }
@@ -257,7 +265,7 @@
 
   // ── Payment mode ────────────────────────────────────────────────────────
   const MODE_SYNONYMS = {
-    'UPI': ['upi', 'gpay', 'g pay', 'google pay', 'phonepe', 'phone pe', 'paytm', 'online', 'scan'],
+    'UPI': ['upi', 'upay', 'upai', 'gpay', 'g pay', 'google pay', 'phonepe', 'phone pe', 'paytm', 'online', 'scan'],
     'Bank Transfer': ['bank transfer', 'bank', 'neft', 'imps', 'rtgs', 'transfer', 'net banking', 'account'],
     'Cash': ['cash', 'hand', 'nagadu', 'nagad', 'note']
   };

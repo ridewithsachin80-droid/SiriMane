@@ -69,7 +69,7 @@ const QUESTION = /^(who|what|which|how|when|where|why|is|are|do|does|did|can|cou
 // "yaaru kottilla" — so these count anywhere in the sentence. A word that is
 // part of a resident's name ("Elli") is not a question word.
 const KN_QUESTION_WORDS = new Set(['yaaru', 'yaru', 'eshtu', 'estu', 'eshtidhe', 'eshtide', 'yaavaga', 'yavaga', 'elli', 'yaake', 'yake', 'enu', 'yenu', 'yaava', 'yava', 'yaavudu', 'hege', 'heege']);
-const MODE_WORDS = /\b(upi|gpay|google pay|phonepe|phone pe|paytm|cash|nagadu|bank|neft|imps|transfer|card)\b/gi;
+const MODE_WORDS = /\b(upi|upay|upai|gpay|google pay|phonepe|phone pe|paytm|cash|nagadu|bank|neft|imps|transfer|card)\b/gi;
 const NOISE = /\b(rs\.?|rupees?|rupaye|rupai|rupaayi|rupayi|roopaayi|inr|kottaru|kottlu|kotlu|kotte|kotta|kottu|kottidaare|kottidaale|kottide|tagondu|tagonde|tegedukonde|kharchu|kharch|ge|ige|ke|paid|pay|payment|gave|give|given|got|received|collected|collect|for|of|to|the|a|an|and|today|yesterday|bought|brought|bougt|buy|purchased|purchsed|purchase|spent|expense|expenses|bill|by|via|from|on|in|at|rent|deposit|advance)\b/gi;
 
 // "100rs", "rs100", "rs.100", "₹100", "100/-", "1k" → a number the parser sees.
@@ -171,6 +171,34 @@ Reply ONLY with JSON {"phrase": "<the phrase>", "confidence": "high"|"low"}. Nev
     return phrase && phrase.toLowerCase() !== raw.toLowerCase() ? { phrase, confidence: parsed.confidence === 'high' ? 'high' : 'low' } : null;
   } catch (e) { return null; }
 }
+// Hotfix 21.2: the model may fix how a word was HEARD, never add a fact. It
+// once turned "Nooru rupee" into "Sachin Gs 100 cash deposit". A repaired
+// reading is used only if every resident, amount and deposit/advance in it was
+// actually heard, and an item is not conjured from a bare number. A payment
+// mode nobody said is dropped (she is asked for it).
+const TYPE_WORDS = /\b(deposit|advance|thevani|mungada|security)\b/i;
+function repairIsHonest(first, second, phrase, heard, residents) {
+  const said = heard.map(h => normaliseAmount(SMParse.toLatin(String(h || ''))).toLowerCase()).filter(Boolean);
+  const words = said.flatMap(h => tokens(h));
+  const a = second.args || {};
+  if (second.tool === 'prepare_payment') {
+    const r = residents.find(x => x.id === a.resident_id);
+    const nameHeard = (who) => String(who || '').toLowerCase().split(/\s+/).filter(p => p.length >= 3).some(p => words.some(w => {
+      if (w === p || similarity(w, p) >= 0.7) return true;
+      const kw = phoneticKey(w), kp = phoneticKey(p);
+      return (kw === kp && kp.length >= 3) || (kp.replace(/[aeiou]/g, '').length >= 3 && kp.replace(/[aeiou]/g, '') === kw.replace(/[aeiou]/g, '') && w.length >= 4);
+    }));
+    if (!nameHeard(r ? r.name : a.name)) return false;
+    if (TYPE_WORDS.test(phrase) && !said.some(h => TYPE_WORDS.test(h))) return false;
+  }
+  if (second.tool === 'prepare_expense' && first && first.ask === 'what') return false;   // only a number was heard
+  if (a.amount != null) {
+    const amounts = said.map(h => SMParse.extractAmount(SMParse.maskNames(h, residents))).filter(Boolean).map(x => x.amount);
+    if (!amounts.includes(Number(a.amount))) return false;
+  }
+  if (a.mode && !said.some(h => SMParse.extractMode(h))) delete a.mode;
+  return true;
+}
 function weak(i) {
   if (!i) return true;
   if (i.kind === 'expense' && i.tool && (!i.args.category || i.args.category === 'Other')) return true;   // item nobody recognised
@@ -191,7 +219,8 @@ async function intent(text, user, context, opts = {}) {
   const fix = await repairVoice(String(text || '').trim(), opts.alternatives, residents);
   if (fix) {
     const second = await classify(fix.phrase, user, context, { allowModel: true });
-    if (second) return { ...second, heard: String(text || '').trim(), understood: fix.phrase, repair_confidence: fix.confidence };
+    const heard = [String(text || '').trim(), ...(opts.alternatives || [])];
+    if (second && repairIsHonest(first, second, fix.phrase, heard, residents)) return { ...second, heard: String(text || '').trim(), understood: fix.phrase, repair_confidence: fix.confidence };
   }
   // No repair possible: give the item one chance at a model category, as typed text gets.
   return classify(text, user, context, { allowModel: true });
@@ -256,7 +285,7 @@ async function classify(text, user, context, copts = {}) {
     const item = dropWords(sansRoom, amt.matched).replace(MODE_WORDS, ' ').replace(NOISE, ' ').replace(/\b(room|rum)\s*[a-z]?\d{1,3}[a-z]?\b/gi, ' ').replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim();
     if (!item) {
       // Decision 2: never file a blind rupee figure.
-      return { tool: null, clarify: `What was ₹${amount.toLocaleString('en-IN')} for? Say the item too — e.g. "onion ${amount}".`, retry_text: raw + ' ', via: 'quick', kind: 'expense' };
+      return { tool: null, clarify: `What was ₹${amount.toLocaleString('en-IN')} for? Say the item too — e.g. "onion ${amount}".`, retry_text: raw + ' ', via: 'quick', kind: 'expense', ask: 'what' };
     }
     const vendor = await matchVendor(item);
     const { category, basis, via } = await categorise(vendor ? item.replace(new RegExp(vendor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), ' ') : item, { allowModel: copts.allowModel !== false });
@@ -341,8 +370,19 @@ for (const [word, cat] of DICT_INDEX) { const key = looseKey(word); DICT_KEYS.pu
 
 // Residents whose name is CLOSE to something in the text, best first.
 // Returns [] when nothing is close enough — never a wild guess.
+function clearlyAName(w, residents) {
+  const kw = phoneticKey(w), skw = kw.replace(/[aeiou]/g, '');
+  return residents.some(r => String(r.name || '').toLowerCase().split(/\s+/).some(p => {
+    if (p.length < 3) return false;
+    const kp = phoneticKey(p), sk = kp.replace(/[aeiou]/g, '');
+    return p === w || (kp === kw && kp.length >= 3) || (sk.length >= 3 && sk === skw && w.length >= 4);
+  }));
+}
 function fuzzyResidents(text, residents, hist) {
-  const words = tokens(text).filter(w => w.length >= 3 && !NOISE.test(' ' + w + ' ') && !DICT_INDEX.has(w) && !(hist && hist.has(w)));
+  // Hotfix 21.2: a word once saved in an expense note ("Janvi I Savera") used to
+  // be barred as a name for ever — then "Janvi 5000 upi" became an expense. A
+  // history word still counts when it clearly IS a resident's name.
+  const words = tokens(text).filter(w => w.length >= 3 && !NOISE.test(' ' + w + ' ') && !DICT_INDEX.has(w) && !(hist && hist.has(w) && !clearlyAName(w, residents)));
   const out = [];
   for (const r of residents) {
     const parts = String(r.name || '').toLowerCase().split(/\s+/).filter(p => p.length >= 3);
@@ -383,4 +423,4 @@ async function matchVendor(item) {
   return null;
 }
 
-module.exports = { intent, classify, repairVoice, fuzzyResidents, phoneticKey, looseKey, similarity, categorise, normaliseAmount, historyIndex, invalidateHistory, CATEGORIES, DICT, FAULT_WORDS, QUESTION };
+module.exports = { intent, classify, repairVoice, repairIsHonest, fuzzyResidents, phoneticKey, looseKey, similarity, categorise, normaliseAmount, historyIndex, invalidateHistory, CATEGORIES, DICT, FAULT_WORDS, QUESTION };

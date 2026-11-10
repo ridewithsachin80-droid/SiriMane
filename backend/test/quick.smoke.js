@@ -544,6 +544,49 @@ const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toI
     }
     for (const [t, d] of [['onion 100.', 'onion'], ['onion 100, cash', 'onion'], ['Onion 100.', 'Onion'], ['Milk 500;', 'Milk'], ['onion 1.5k.', 'onion']]) { i = await quick.intent(t, adminUser, {}); eq(i.args.description, d, `H21.1 H1 "${t}" is filed as "${d}"`); }
     for (const [t, d] of [['Tender coconut ten', 'Tender coconut'], ['Milk 2500ml 500', 'Milk 2500ml'], ['Kitten food ten', 'Kitten food'], ['Paneer 1500g 500', 'Paneer 1500g']]) { i = await quick.intent(t, adminUser, {}); eq(i.args.description, d, `H21.1 S2 "${t}" is filed as "${d}"`); }
+    // ── Hotfix 21.2 (owner's phone, 10 Nov) ──────────────────────────────
+    // English-mode hearings: "I do/I jo Savera" = ಐದು ಸಾವಿರ, "Noor" = ನೂರು, "upay" = UPI.
+    for (const [t, n] of [['I do Savera', 5000], ['I jo savera', 5000], ['eye do sawera', 5000], ['onion I do nooru', 500], ['Noor upay', 100], ['eradu savera', 2000]]) eq(SMParse.extractAmount(t).amount, n, `H21.2 "${t}" is ₹${n}`);
+    eq(SMParse.extractAmount('I do this 2').amount, 2, 'H21.2 "I do" is only 5 right before ಸಾವಿರ/ನೂರು');
+    eq(SMParse.extractMode('noor upay').mode, 'UPI', 'H21.2 "upay" is UPI');
+    for (const t of [`Jhanavi ${alpha} I do Savera upi`, `Jhanavi ${alpha} I Jo Savera upi`]) {
+      i = await quick.classify(t, adminUser, {}, { allowModel: false }); ok(i && i.tool === 'prepare_payment' && i.args.amount === 5000 && i.args.mode === 'UPI', `H21.2 "${t}" is ₹5,000 UPI (got ${JSON.stringify(i && i.args)})`);
+    }
+    i = await quick.intent('onion I do nooru', adminUser, {}); eq(i.args.description, 'onion', 'H21.2 "onion I do nooru" is filed as "onion"');
+    // A word once saved in an expense note is still a resident's name when it clearly is one.
+    await A('POST', '/purchases', { amount: 2, category: 'Other', description: 'Janvi I Savera', purchase_date: daysAgo(1), payment_mode: 'UPI' });
+    quick.invalidateHistory();
+    for (const t of ['Janvi 5000 upi', 'Janvi I do Savera upi']) {
+      i = await quick.classify(t, adminUser, {}, { allowModel: false });
+      ok(i && i.tool === 'prepare_payment' && i.args.amount === 5000, `H21.2 "${t}" stays Jhanavi's payment even after an expense note said "Janvi" (got ${JSON.stringify(i && [i.tool, i.args])})`);
+    }
+    // The model may fix how a word was heard — never add a resident, a deposit, an amount or an item.
+    const sg = (await A('POST', '/guests', { name: `Sachin G${alpha}`, phone: `97${uniq}10`.slice(0, 10), room_id: room2.id, bed_number: '2', monthly_rent: 6000, deposit_amount: 0, join_date: daysAgo(30), id_proof_type: 'Aadhaar' })).data;
+    ok(sg && sg.id, 'H21.2 (fixture) a resident named Sachin');
+    {
+      const keep = ai.providers.groqText, keepStub = ai.providers._stub; let reply = '{}';
+      ai.providers._stub = true; ai.providers.groqDownUntil = 0; ai.providers.groqText = async () => reply;
+      const say = async (t, phrase) => { reply = JSON.stringify({ phrase, confidence: 'high' }); return quick.intent(t, adminUser, {}, { voice: true, alternatives: [t] }); };
+      try {
+        i = await say('Nooru rupee', `Sachin G${alpha} 100 cash deposit`);
+        ok(i && i.tool !== 'prepare_payment' && /^What was ₹100 for\?/.test(i.clarify || ''), `H21.2 "Nooru rupee" is never turned into a deposit from a resident nobody named (got ${JSON.stringify(i && (i.args || i.clarify))})`);
+        i = await say('noorulu upay', 'groceries 100 upi');
+        ok(!i || i.tool !== 'prepare_expense', `H21.2 "noorulu upay": an amount nobody said is never filled in (got ${JSON.stringify(i && (i.args || i.clarify))})`);
+        i = await say('Nooru rupee', 'groceries 100');
+        ok(!i || i.tool !== 'prepare_expense', 'H21.2 an item is never conjured from a bare number');
+        i = await say('Jaanvi 5000', `Jhanavi ${alpha} 5000 deposit`);
+        ok(!(i && i.tool === 'prepare_payment' && i.args.type === 'deposit'), `H21.2 a "deposit" nobody said is never added (got ${JSON.stringify(i && i.args)})`);
+        i = await say('Jaanvi upi', `Jhanavi ${alpha} 5000 upi`);
+        ok(!(i && i.args && i.args.amount === 5000), 'H21.2 the model never adds the amount for a resident');
+        // …but it may still fix what was heard:
+        i = await say('heerly Nooru rupaye', 'onion 100 cash');
+        ok(i && i.tool === 'prepare_expense' && i.args.description === 'onion' && i.args.amount === 100 && i.understood === 'onion 100 cash', `H21.2 "heerly Nooru rupaye" → onion ₹100 is still repaired (got ${JSON.stringify(i && i.args)})`);
+        ok(!i.args.mode, 'H21.2 …without the "cash" nobody said (the form default applies)');
+        i = await say('Jaanvee five thousand upi', `Jhanavi ${alpha} 5000 upi`);
+        ok(i && i.tool === 'prepare_payment' && i.args.resident_id === jh.id && i.args.amount === 5000, `H21.2 a heard name the model spells properly is still repaired (got ${JSON.stringify(i && i.args)})`);
+      } finally { ai.providers.groqText = keep; ai.providers._stub = keepStub; ai.providers.groqDownUntil = 0; }
+    }
+    await pool.query(`UPDATE guests SET is_active=false WHERE id=$1`, [sg.id]);
     console.log('✓ S21 Kannada');
 
     // ── Audit ────────────────────────────────────────────────────────────
