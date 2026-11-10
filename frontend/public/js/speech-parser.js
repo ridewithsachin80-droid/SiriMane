@@ -109,11 +109,16 @@
     saavirada: 1000, saviradha: 1000, savirada: 1000,
     // Hotfix 21.1: how Chrome in ENGLISH mode writes ಸಾವಿರ — "I sawida upi".
     sawida: 1000, sawira: 1000, savida: 1000, saavida: 1000, sawir: 1000, saweera: 1000, saveera: 1000, sawirada: 1000,
-    // Hotfix 21.2: more English-mode spellings — "I do Savera", "Noor upay".
-    savera: 1000, sawera: 1000, saavera: 1000, saveraa: 1000, noor: 100,
     lakh: 100000, lakhs: 100000, laksha: 100000
   };
   const HALF = { half: 0.5, ardha: 0.5, aadha: 0.5 };
+  // Hotfix 21.2: English-mode spellings of ಸಾವಿರ / ನೂರು that are ALSO ordinary
+  // words and names (Savera hotel, Noor stores, Noorjahan). They multiply only
+  // straight after a number — "I do Savera" = 5000, "aidu noor" = 500 — and a
+  // lone "noor" is ₹100 only when it ends the phrase ("eerulli noor", "Noor
+  // upay"). "Noor salary aidu saavira" is ₹5,000, never ₹100 (review 21.2 B1).
+  const HEARD_MULT = { savera: 1000, sawera: 1000, saavera: 1000, saveraa: 1000, noor: 100 };
+  const MONEY_TAIL = /^(rs|rupee|rupees|rupaye|rupai|rupaayi|rupayi|inr|upi|upay|upai|cash|gpay|g|pay|google|phonepe|phone|pe|paytm|bank|transfer|neft|imps|nagadu|online)?$/;
 
   // ── Review S21 (B1, S4, S6): Kannada numbers as people say them ─────────
   // ಐದೂವರೆ (aidoovare) = 5½ · ಇಪ್ಪತ್ತೈದು (ippattaidu) = 25 · ನೂರೈವತ್ತು
@@ -174,16 +179,27 @@
   // amount is read, so "Noora five thousand" is ₹5,000 (not ₹5,100), "Noora
   // paid" is no amount (not ₹100), "Priya Das paid" is not ₹10. The blank is a
   // word, so a ಸಾವಿರ right after a name is still "unclear — ask".
+  // Review 21.2 B1: a word that matchResident would take as PART of a name
+  // (4+ letters, one a prefix of the other — "noor" for Noorjahan) is blanked
+  // too, unless it is a real number word ("aaru" stays 6 beside an Aarushi).
   function maskNames(text, residents) {
     const names = new Set();
     for (const r of residents || []) for (const w of String(r.name || '').toLowerCase().split(/\s+/)) if (w.length >= 2) names.add(w);
     if (!names.size) return text;
-    return String(text || '').split(/(\s+)/).map(t => names.has(t.toLowerCase().replace(/[.,!?]+$/, '')) ? 'zzname' : t).join('');
+    const long = [...names].filter(n => n.length >= 4);
+    const isNumber = w => numberWord(w) != null || w in MULTIPLIERS || w in HALF;
+    return String(text || '').split(/(\s+)/).map(t => {
+      const w = t.toLowerCase().replace(/[.,!?]+$/, '');
+      if (names.has(w)) return 'zzname';
+      if (w.length >= 4 && /^[a-z]+$/.test(w) && !isNumber(w) && long.some(n => n.startsWith(w) || w.startsWith(n))) return 'zzname';
+      return t;
+    }).join('');
   }
+  const knMult = w => KN_MULT.has(w) || w in HEARD_MULT || w === 'nooru' || w === 'noora';
   function shortForm(w, nextW) {
     if (w.length >= 3 && (w + 'u') in ONES) return ONES[w + 'u'];
     // English-mode hearings only before a KANNADA multiplier — "I thousand" stays ₹1,000 (review 21.1 S1).
-    if (w in EN_HEARD && (KN_MULT.has(nextW) || nextW === 'nooru' || nextW === 'noora')) return EN_HEARD[w];
+    if (w in EN_HEARD && knMult(nextW)) return EN_HEARD[w];
     return null;
   }
   // Hotfix 21.1: Kannada numbers as Chrome in ENGLISH mode writes them —
@@ -192,7 +208,8 @@
   const EN_HEARD = { i: 5, ai: 5, eye: 5, idu: 5, id: 5, aru: 6, yelu: 7, yeradu: 2, erdu: 2, yentu: 8, ombathu: 9, hathu: 10, ondh: 1, moor: 3, nalk: 4 };
   // Words that may stand before a bare "thousand" without making it a guess.
   // (ನೂರು alone is a plain 100 — "haalu nooru" — so only ಸಾವಿರ is strict.)
-  const KN_MULT = new Set(['saavira', 'savira', 'sasira', 'saavirada', 'savirada', 'saviradha', 'sawida', 'sawira', 'savida', 'saavida', 'sawir', 'saweera', 'saveera', 'sawirada', 'savera', 'sawera', 'saavera', 'saveraa', 'noor']);
+  const KN_MULT = new Set(['saavira', 'savira', 'sasira', 'saavirada', 'savirada', 'saviradha', 'sawida', 'sawira', 'savida', 'saavida', 'sawir', 'saweera', 'saveera', 'sawirada']);
+  const DIGIT_UNITS = Object.keys(MULTIPLIERS).filter(k => k !== 'noora').concat(Object.keys(HEARD_MULT)).sort((a, b) => b.length - a.length).join('|');
   const ONE_OK = new Set(['a', 'an', 'and', 'one', 'ek', 'ondu', 'rs', 'rs.', 'rupees', 'rupee', 'inr']);
 
   // Returns { amount, matched } for the first amount in the text that is not
@@ -203,7 +220,7 @@
     // is punctuation, not a decimal point.
     const lower = ' ' + text.toLowerCase().replace(/[,]/g, '').replace(/\.(?!\d)/g, ' ').replace(/[!?]/g, ' ') + ' ';
     // 1) Plain digits, possibly followed by a unit word: "6000", "6 thousand", "2.5 lakh", "1.5k"
-    const re = /\s(\d+(?:\.\d+)?)\s*(k\b|thousand|saavira|savira|hazaar|hazar|hajar|lakh|lakhs|laksha|hundred|nooru|sau)?(?=\s|[^a-z0-9.]|$)/g;
+    const re = new RegExp('\\s(\\d+(?:\\.\\d+)?)\\s*(k\\b|' + DIGIT_UNITS + ')?(?=\\s|[^a-z0-9.]|$)', 'g');
     let m;
     while ((m = re.exec(lower))) {
       const after = lower.slice(m.index + m[0].length).trim().split(/\s+/)[0] || '';
@@ -212,6 +229,10 @@
       let n = parseFloat(m[1]);
       const unit = m[2] ? m[2].trim() : '';
       if (unit === 'k') n *= 1000;
+      else if (unit in HEARD_MULT) {
+        // "5 Savera" = 5000, but "500 Noor stores" stays ₹500: a name-like unit only after a small count.
+        if (n < 100) n *= HEARD_MULT[unit]; else return { amount: Math.round(n), matched: m[1] };
+      }
       else if (unit) n *= MULTIPLIERS[unit];
       return { amount: Math.round(n), matched: m[0].trim() };
     }
@@ -227,10 +248,25 @@
       // Hotfix 21.2: English-mode Chrome splits ಐದು into two words — "I do", "I jo",
       // "eye do" — right before ಸಾವಿರ/ನೂರು. Read the pair as 5, so "do" is not Hindi 2.
       const after2 = (words[i + 2] || '').replace(/[^a-z.]/g, '');
-      if (!seenAny && /^(i|eye|ai)$/.test(w) && /^(do|du|doo|jo|joe|dhu)$/.test(nextW) && (KN_MULT.has(after2) || after2 === 'nooru' || after2 === 'noora')) {
-        current += 5; matchedWords.push(words[i], words[i + 1]); seenAny = true; i++; continue;
+      if (!seenAny && /^(i|eye|ai)$/.test(w) && /^(do|du|doo|jo|joe|dhu)$/.test(nextW)) {
+        if (knMult(after2)) { current += 5; matchedWords.push(words[i], words[i + 1]); seenAny = true; i++; continue; }
+        // "I do sabira" (a spelling we do not know), "I do not know": that "do" is
+        // not Hindi 2 — no ₹2. Skip the pair; she is asked (review 21.2 S4).
+        matchedWords = []; i++; continue;
       }
-      if (!seenAny && shortForm(w, nextW) != null && nextW in MULTIPLIERS) { current += shortForm(w, nextW); matchedWords.push(words[i]); seenAny = true; continue; }
+      if (!seenAny && shortForm(w, nextW) != null && (nextW in MULTIPLIERS || nextW in HEARD_MULT)) { current += shortForm(w, nextW); matchedWords.push(words[i]); seenAny = true; continue; }
+      if (w in HEARD_MULT) {
+        if (seenAny && (current > 0 || pendingHalf)) {
+          if (pendingHalf) { current += 0.5; pendingHalf = false; }
+          total += current * HEARD_MULT[w]; current = 0; matchedWords.push(words[i]); continue;
+        }
+        if (seenAny) break;
+        const prevW = (words[i - 1] || '').replace(/[^a-z.]/g, '');
+        if (w === 'noor' && words.length > 1 && prevW !== 'zzname' && words.slice(i + 1).every(x => MONEY_TAIL.test(x.replace(/[^a-z]/g, '')))) {
+          total += 100; matchedWords = [words[i]]; seenAny = true; break;
+        }
+        matchedWords = []; continue;
+      }
       if (w in HALF) { pendingHalf = true; matchedWords.push(words[i]); continue; }
       if (w === 'and' || w === 'a') { if (seenAny) matchedWords.push(words[i]); continue; }
       // ನೂರ (noora) is a joining form — "noora aivattu" = 150. On its own it is a
@@ -296,9 +332,12 @@
   // ── Resident matching ───────────────────────────────────────────────────
   // residents: [{ id, name, room_number }]. Prefers the room if one was said,
   // then a full-name token match, then a leading-token (first name) match.
+  const RUPEE_WORD = /^(rs|rupee|rupees|rupaye|rupai|rupaayi|rupayi|roopaayi|rupaya|rupay|rupiya|inr)$/;
   function matchResident(text, residents, room) {
     if (!residents || !residents.length) return null;
-    const tokens = text.toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(Boolean);
+    // Hotfix 21.2: the word for rupees is never a name — "aidu nooru rupai" is
+    // not a payment from Rupa.
+    const tokens = text.toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(t => t && !RUPEE_WORD.test(t));
     const inRoom = room ? residents.filter(r => String(r.room_number || '').toUpperCase() === room.toUpperCase()) : [];
     if (inRoom.length === 1) return inRoom[0];
     const pool = inRoom.length > 1 ? inRoom : residents;
@@ -374,5 +413,5 @@
 
   function escape(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
-  return { parseCollection, parseComplaint, extractAmount, extractMode, extractRoom, matchResident, toLatin, stripQuantities, maskNames, COMPLAINT_CATEGORIES, MODE_SYNONYMS };
+  return { RUPEE_WORD, parseCollection, parseComplaint, extractAmount, extractMode, extractRoom, matchResident, toLatin, stripQuantities, maskNames, COMPLAINT_CATEGORIES, MODE_SYNONYMS };
 }));

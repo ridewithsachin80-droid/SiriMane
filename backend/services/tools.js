@@ -165,9 +165,15 @@ const TOOLS = {
   // ═══════════════════ PREPARE ═══════════════════
   prepare_payment: {
     description: 'Draft a rent/deposit payment record from a sentence like "record 8000 rent from Ananya by UPI". Returns a preview; the user confirms before anything is saved.',
-    args: { name: 'string?', resident_id: 'number?', room: 'string?', amount: 'number?', mode: 'string?', type: 'string?', date: 'string?', source: 'string?' }, role: 'staff', level: 'prepare',
+    args: { name: 'string?', resident_id: 'number?', suggest_id: 'number?', room: 'string?', amount: 'number?', mode: 'string?', type: 'string?', date: 'string?', source: 'string?' }, role: 'staff', level: 'prepare',
     async run(a, ctx) {
-      const { match, candidates } = await resolveResident({ id: a.resident_id || ctx.context?.resident_id, name: a.name, room: a.room });
+      let { match, candidates } = await resolveResident({ id: a.resident_id || ctx.context?.resident_id, name: a.name, room: a.room });
+      // Hotfix 21.2: a resident the voice repair could not prove was named is
+      // offered as a question with a tap — never used as the answer.
+      if (!match && !candidates.length && a.suggest_id) {
+        const s = await resolveResident({ id: a.suggest_id });
+        if (s.match) candidates = [{ ...s.match, why: 'suggested from what was heard' }];
+      }
       if (!match) return { clarify: candidates.length ? (candidates.some(c => c.why) ? `Did you mean ${candidates.length === 1 ? candidates[0].name : 'one of these'}?` : 'Which resident do you mean?') : 'I could not find that resident — check the name or room.', candidates };
       const amount = Number(a.amount);
       if (!amount || amount <= 0) return { clarify: `How much did ${match.name} pay?`, resident: match };

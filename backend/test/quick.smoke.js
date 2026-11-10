@@ -234,7 +234,9 @@ const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toI
     ok(!/aadhaar|id_proof|address/i.test(vseen[0]), 'PRIVACY: nor an ID or address');
     // A mis-heard name resolves to the resident.
     i = await quick.intent('janvi five thousand upi', adminUser, {}, { voice: true, alternatives: ['janvi five thousand upi', 'janavi 5000 upi'] });
-    eq(i.tool, 'prepare_payment', 'VOICE: "janvi five thousand upi" → a collection'); eq(i.args.resident_id, jh.id, '…for Jhanavi'); eq(i.args.amount, 5000, '…₹5,000'); eq(i.args.mode, 'UPI', '…UPI');
+    // Hotfix 21.2 (review B3b): two Jhanavis live here, and "janvi" does not say
+    // which. Until 21.2 the model chose one; now she is asked, with both as taps.
+    eq(i.tool, 'prepare_payment', 'VOICE: "janvi five thousand upi" → a collection'); eq(i.args.resident_id, undefined, '…the model does not choose between two Jhanavis'); ok(i.fuzzy && i.fuzzy.length === 2, '…both are offered'); eq(i.args.amount, 5000, '…₹5,000'); eq(i.args.mode, 'UPI', '…UPI');
     i = await quick.intent('tab leaking room ' + roomNo, adminUser, {}, { voice: true, alternatives: [] });
     eq(i.tool, 'prepare_complaint', 'VOICE: "tab leaking" → a request'); eq(i.args.room, roomNo, '…for the room');
     // Spoken clearly → the deterministic pass is confident; the model is not called at all.
@@ -584,11 +586,89 @@ const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toI
         i = await say('heerly Nooru rupaye', 'onion 100 cash');
         ok(i && i.tool === 'prepare_expense' && i.args.description === 'onion' && i.args.amount === 100 && i.understood === 'onion 100 cash', `H21.2 "heerly Nooru rupaye" → onion ₹100 is still repaired (got ${JSON.stringify(i && i.args)})`);
         ok(!i.args.mode, 'H21.2 …without the "cash" nobody said (the form default applies)');
+        i = await say('Suchin five thousand upi', `Sachin G${alpha} 5000 upi`);
+        ok(i && i.tool === 'prepare_payment' && i.args.resident_id === sg.id && i.args.amount === 5000 && i.args.mode === 'UPI', `H21.2 a heard name the model spells properly is still repaired (got ${JSON.stringify(i && i.args)})`);
+        // Two Jhanavis live here: "Jaanvee" does not say which, and the model may not pick one.
         i = await say('Jaanvee five thousand upi', `Jhanavi ${alpha} 5000 upi`);
-        ok(i && i.tool === 'prepare_payment' && i.args.resident_id === jh.id && i.args.amount === 5000, `H21.2 a heard name the model spells properly is still repaired (got ${JSON.stringify(i && i.args)})`);
+        ok(i && i.tool === 'prepare_payment' && !i.args.resident_id && i.args.amount === 5000, `H21.2 r2 B3b a shared first name is never settled by the model — she is asked which (got ${JSON.stringify(i && i.args)})`);
       } finally { ai.providers.groqText = keep; ai.providers._stub = keepStub; ai.providers.groqDownUntil = 0; }
     }
-    await pool.query(`UPDATE guests SET is_active=false WHERE id=$1`, [sg.id]);
+    // ── Hotfix 21.2, review round 1 (BLOCK) ───────────────────────────────
+    // B1: "Noor"/"Savera" are words and names too — a multiplier only after a number.
+    const amtOf = (t, roster) => { const a = SMParse.extractAmount(SMParse.maskNames(SMParse.toLatin(t), roster || [])); return a ? a.amount : null; };
+    const NJ = [{ id: 901, name: 'Noorjahan Begum' }];
+    for (const [t, n, roster] of [['Noor salary aidu saavira', 5000], ['Noor stores rice five hundred', 500], ['Noor, five thousand upi', 5000, NJ], ['Noor paid five thousand upi', 5000, NJ], ['ನೂರ್ ಜಹಾನ್ ಐದು ಸಾವಿರ', 5000, NJ],
+                                 ['savera hotel tiffin two hundred', 200], ['Savera five thousand', 5000], ['paid 500 Noor stores', 500], ['noor mahal 200', 200],
+                                 ['eerulli noor', 100], ['yeruli noor upay', 100], ['tomato noor rupees', 100], ['Noor upay', 100], ['aidu noor', 500], ['I noor', 500], ['Jhanavi 5 Savera upi', 5000], ['eradu savera', 2000],
+                                 ['aaru saavira', 6000, [{ id: 902, name: 'Aarushi M' }]], ['I do five hundred', 500]]) {
+      eq(amtOf(t, roster), n, `H21.2 r2 B1 "${t}"${roster ? ' (with ' + roster[0].name + ')' : ''} is ₹${n}`);
+    }
+    for (const [t, roster] of [['Noor upay', NJ], ['Noor rupees', NJ], ['Noor'], ['Noor paid'], ['Savera'], ['Priya noor', [{ id: 903, name: 'Priya K' }]], ['Priya savera', [{ id: 903, name: 'Priya K' }]], ['I do sabira upi'], ['I do not know'], ['I do']]) {
+      eq(amtOf(t, roster), null, `H21.2 r2 B1/S4 "${t}" has no amount — she is asked`);
+    }
+    i = await quick.classify('Noor salary aidu saavira', adminUser, {}, { allowModel: false }); ok(i && i.tool === 'prepare_expense' && i.args.amount === 5000 && i.args.category === 'Salary', `H21.2 r2 B1 "Noor salary aidu saavira" is a ₹5,000 salary (got ${JSON.stringify(i && i.args)})`);
+    i = await quick.classify('eerulli noor', adminUser, {}, { allowModel: false }); ok(i && i.tool === 'prepare_expense' && i.args.amount === 100 && i.args.category === 'Groceries' && i.args.description === 'eerulli', `H21.2 r2 B1 "eerulli noor" is onion ₹100 with no AI (got ${JSON.stringify(i && i.args)})`);
+    i = await quick.classify('Janvi I do sabira upi', adminUser, {}, { allowModel: false }); ok(i && i.tool === 'prepare_payment' && !i.args.amount, `H21.2 r2 S4 "Janvi I do sabira upi" asks the amount — never ₹2 (got ${JSON.stringify(i && i.args)})`);
+    // Fixtures with names that collide with number, rupee and item words.
+    const roomNo3 = '7' + uniq.slice(-2);
+    let room3 = (await A('POST', '/rooms', { room_number: roomNo3, floor: 7, total_beds: 10, monthly_rent: 6000, room_type: 'sharing' })).data;
+    if (!room3 || !room3.id) { const rl = (await A('GET', '/rooms')).data; room3 = (rl.list || rl).find(x => x.room_number === roomNo3); }
+    const mk = async (name, n) => (await A('POST', '/guests', { name, phone: `97${uniq}${n}`.slice(0, 10), room_id: room3.id, bed_number: String(n - 10), monthly_rent: 6000, deposit_amount: 0, join_date: daysAgo(30), id_proof_type: 'Aadhaar' })).data;
+    const nj = await mk('Noorjahan Begum', 11), sv = await mk('Savitha Mohan', 12), ind = await mk('Indu Rao', 13), lk = await mk('Lakshmi Narayan', 14), ru = await mk('Rupa Menon', 15), p1 = await mk('Priya Dasgupta', 16), p2 = await mk('Priya Sharma', 17), sw = await mk('Swathi Prabhu', 18), rl2 = await mk('Rupali Shetty', 19);
+    ok([nj, sv, ind, lk, ru, p1, p2, sw, rl2].every(g => g && g.id), 'H21.2 r2 (fixtures) Noorjahan, Savitha, Indu, Lakshmi, Rupa, two Priyas, Swathi');
+    for (const t of ['Noor, five thousand upi', 'Noor paid five thousand upi', 'ನೂರ್ ಜಹಾನ್ ಐದು ಸಾವಿರ ಯುಪಿಐ']) {
+      i = await quick.classify(t, adminUser, {}, { allowModel: false }); ok(i && i.tool === 'prepare_payment' && i.args.resident_id === nj.id && i.args.amount === 5000 && i.args.mode === 'UPI', `H21.2 r2 B1 "${t}" is Noorjahan's ₹5,000 by UPI — not ₹5,100, not a ₹100 expense (got ${JSON.stringify(i && [i.tool, i.args])})`);
+    }
+    i = await quick.classify('Noor upay', adminUser, {}, { allowModel: false }); ok(i && i.tool === 'prepare_payment' && i.args.resident_id === nj.id && !i.args.amount, `H21.2 r2 B1 with a Noorjahan here, "Noor upay" is her payment with NO amount — her name is not ₹100 (got ${JSON.stringify(i && [i.tool, i.args])})`);
+    // The word for rupees is not Rupa (nor a choice between Rupa and Rupali).
+    for (const t of ['aidu nooru rupai', 'Nooru rupaye', 'eerulli nooru rupai']) { i = await quick.classify(t, adminUser, {}, { allowModel: false }); ok(i && i.tool !== 'prepare_payment', `H21.2 r2 "${t}" is not a payment from Rupa (got ${JSON.stringify(i && [i.tool, i.args || i.clarify])})`); }
+    i = await quick.classify('Rupa 5000 upi', adminUser, {}, { allowModel: false }); ok(i && i.args.resident_id === ru.id && i.args.amount === 5000, 'H21.2 r2 …while "Rupa 5000 upi" is hers');
+    eq(SMParse.parseCollection('aidu nooru rupai', [{ id: ru.id, name: ru.name }]).guest, null, 'H21.2 r2 …and the Collect parser agrees');
+    // B2: an item she has filed under a real category stays an item beside a similar name.
+    await A('POST', '/purchases', { amount: 50, category: 'Groceries', description: 'sweet', purchase_date: daysAgo(1), payment_mode: 'Cash' });
+    await A('POST', '/purchases', { amount: 60, category: 'Groceries', description: 'sweet', purchase_date: daysAgo(2), payment_mode: 'Cash' });
+    quick.invalidateHistory();
+    i = await quick.classify('sweet 200', adminUser, {}, { allowModel: false });
+    ok(i && i.tool === 'prepare_expense' && i.args.category === 'Groceries' && i.args.amount === 200, `H21.2 r2 B2 "sweet 200" stays a Groceries expense beside Swathi and Savitha (got ${JSON.stringify(i && [i.tool, i.args])})`);
+    i = await quick.classify('Janvi 5000 upi', adminUser, {}, { allowModel: false }); ok(i && i.tool === 'prepare_payment', 'H21.2 r2 B2 …while "Janvi" (only ever filed under Other) is still a resident');
+    {
+      const keep = ai.providers.groqText, keepStub = ai.providers._stub; let reply = '{}';
+      ai.providers._stub = true; ai.providers.groqDownUntil = 0; ai.providers.groqText = async () => reply;
+      const say = async (t, phrase) => { reply = JSON.stringify({ phrase, confidence: 'high' }); return quick.intent(t, adminUser, {}, { voice: true, alternatives: [t] }); };
+      try {
+        // B3a: amount, rupee and mode words are not evidence of a name.
+        for (const [t, phrase, n] of [['aaru savira upi', 'Savitha Mohan 6000 upi', '6,000'], ['ondu saavira upi', 'Indu Rao 1000 upi', '1,000'], ['ondu laksha upi', 'Lakshmi Narayan 100000 upi', '1,00,000'], ['Nooru rupee', 'Noorjahan Begum 100 cash', '100'], ['aidu nooru rupai', 'Rupa Menon 500', '500']]) {
+          i = await say(t, phrase);
+          ok(i && !i.tool && i.clarify === `What was ₹${n} for? Say the item too — e.g. "onion ${n.replace(/,/g, '')}".`, `H21.2 r2 B3a "${t}" is never a payment from ${phrase.split(' ')[0]} (got ${JSON.stringify(i && (i.args || i.clarify))})`);
+        }
+        // B3b: two Priyas — the model may not choose.
+        i = await say('Priya aidu saavira upi', 'Priya Sharma 5000 upi'); ok(i && i.tool === 'prepare_payment' && !i.args.resident_id, `H21.2 r2 B3b "Priya aidu saavira upi" asks which Priya (got ${JSON.stringify(i && i.args)})`);
+        i = await quick.intent('Priya Sharma aidu saavira upi', adminUser, {}, { voice: true }); eq(i.args.resident_id, p2.id, 'H21.2 r2 B3b …and "Priya Sharma" said in full is hers');
+        // S1: the mode is the one she said.
+        i = await say('Suchin aidu saavira cash', `Sachin G${alpha} 5000 upi`); ok(i && i.args.resident_id === sg.id && i.args.mode === 'Cash', `H21.2 r2 S1 heard "cash", the model said "upi" → Cash (got ${JSON.stringify(i && i.args)})`);
+        // S2: the type is the one she said — swapped, dropped, or slipped in in Kannada script.
+        for (const [t, phrase, type] of [['Suchin aidu saavira advance', `Sachin G${alpha} 5000 deposit`, 'advance'], ['Suchin aidu saavira deposit', `Sachin G${alpha} 5000`, 'deposit'], ['Suchin aidu saavira', `Sachin G${alpha} 5000 ಡೆಪಾಸಿಟ್`, 'rent'], ['Suchin aidu saavira', `Sachin G${alpha} 5000 ಅಡ್ವಾನ್ಸ್`, 'rent']]) {
+          i = await say(t, phrase); ok(i && i.tool === 'prepare_payment' && i.args.type === type && i.args.amount === 5000, `H21.2 r2 S2 "${t}" ⇐ "${phrase.split(' ').slice(-1)}" stays ${type} (got ${JSON.stringify(i && i.args)})`);
+        }
+        // S5: a re-worded question adds nothing she said.
+        i = await say('hello hello', '5000 cash'); eq(i, null, 'H21.2 r2 S5 "hello hello" is not turned into "What was ₹5,000 for?"');
+        i = await say('Nooru rupee', '100 cash'); eq(i.retry_text, 'Nooru rupee ', 'H21.2 r2 S5 "Nooru rupee" keeps her own words in the box, without a "cash" nobody said');
+        // S6: a room number is not an amount that was heard.
+        i = await say('Suchin room 104 aidu saavira upi', `Sachin G${alpha} 5000 upi`); ok(i && i.args.resident_id === sg.id && i.args.amount === 5000, `H21.2 r2 S6 a room number does not block the real amount (got ${JSON.stringify(i && i.args)})`);
+        i = await say('Suchin room 104', `Sachin G${alpha} 104 cash`); ok(i && i.tool === 'prepare_payment' && !i.args.amount, `H21.2 r2 S6 …and is never used as one (got ${JSON.stringify(i && i.args)})`);
+        // S3: a name the model recognised but nobody can prove → a question with a tap, never an expense preview.
+        i = await say('Satin aaru saavira cash', `Sachin G${alpha} 6000 cash`);
+        ok(i && i.tool === 'prepare_payment' && !i.args.resident_id && i.args.suggest_id === sg.id && i.args.amount === 6000 && i.args.mode === 'Cash', `H21.2 r2 S3 "Satin aaru saavira cash" asks about Sachin with what was heard (got ${JSON.stringify(i && [i.tool, i.args])})`);
+        reply = JSON.stringify({ phrase: `Sachin G${alpha} 6000 cash`, confidence: 'high' });
+        r = await api('POST', '/copilot/ask', { text: 'Satin aaru saavira cash', voice: true, alternatives: ['Satin aaru saavira cash'], context: { page: 'finance-overview' } }, adminTok);
+        ok(/^Did you mean Sachin G/.test(r.data.answer || '') && !r.data.proposal && r.data.actions.length === 1 && r.data.actions[0].args.resident_id === sg.id, `H21.2 r2 S3 she sees "Did you mean Sachin…?" with one tap, nothing prepared (got ${String(r.data.answer).slice(0, 80)} · ${JSON.stringify(r.data.actions)})`);
+        r = await api('POST', '/copilot/ask', { text: 'Satin aaru saavira cash', tool: 'prepare_payment', args: r.data.actions[0].args, context: { page: 'finance-overview' } }, adminTok);
+        ok(r.data.proposal && r.data.proposal.preview.guest_id === sg.id && Number(r.data.proposal.preview.amount) === 6000 && r.data.proposal.preview.payment_mode === 'Cash', `H21.2 r2 S3 the tap prepares Sachin ₹6,000 Cash for her to confirm (got ${JSON.stringify(r.data.proposal && r.data.proposal.preview)})`);
+        // …but a word that sounds nothing like the model's resident is no reason to ask about him.
+        i = await say('heerly nooru rupaye', `Sachin G${alpha} 100 cash`); ok(i && i.tool === 'prepare_expense' && !i.args.suggest_id, `H21.2 r2 S3 "heerly" is not offered as Sachin (got ${JSON.stringify(i && [i.tool, i.args])})`);
+      } finally { ai.providers.groqText = keep; ai.providers._stub = keepStub; ai.providers.groqDownUntil = 0; }
+    }
+    await pool.query(`UPDATE guests SET is_active=false WHERE id = ANY($1)`, [[sg.id, nj.id, sv.id, ind.id, lk.id, ru.id, p1.id, p2.id, sw.id, rl2.id]]);
     console.log('✓ S21 Kannada');
 
     // ── Audit ────────────────────────────────────────────────────────────
