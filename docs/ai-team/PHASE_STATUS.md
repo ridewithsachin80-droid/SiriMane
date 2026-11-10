@@ -298,3 +298,5 @@ The public page already had a title, description, Open Graph/Twitter tags, geo t
 | S23-5 | robots.txt points at the sitemap; the sitemap lists the home page with a current lastmod | SEO |
 | S23-6 | On a 360/390 px phone: DOM ready under 3 s, the H1 readable and on screen, no sideways scroll, six FAQ rows at 44 px that open to a full answer | UX |
 | S23-7 | Gates 12/12 twice; mutations caught; independent review; a step-by-step list for the owner's side (Google Business Profile, Search Console, directories, reviews, photos) | QA |
+
+**Sprint 23 status:** approved by the independent review in round 1 (c067245), should-fixes taken (d578ea3). Gates 12/12 ×2, 3,520. Owner confirmed address, hours and phone on 10 Nov. Merged to ai/test. No migration. Owner-side steps: docs/ai-team/SEO_OWNER_CHECKLIST.md.
