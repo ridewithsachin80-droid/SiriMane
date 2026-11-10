@@ -586,6 +586,32 @@ async function runAtWidth(browser, BASE, width) {
   await page.keyboard.press('Escape');
   ok(await page.$('#copilot-q'), `${tag} Copilot bar still reachable on the page`);
 
+  // ── Hotfix 21.3: a question whose answers are taps — "₹80,000, or ₹80 at Savera?" ──
+  const purchases213 = (await pool.query(`SELECT COUNT(*)::int AS n FROM purchases`)).rows[0].n;
+  await page.evaluate(() => { copilotAsk('tiffin 80 savera'); });
+  await page.waitForFunction(() => document.querySelectorAll('#copilot-out .copilot-actions button').length === 2, { timeout: 10000 });
+  const qText = await page.$eval('#copilot-out .copilot-text', e => e.textContent.replace(/\s+/g, ' ').trim());
+  ok(/Is that ₹80,000 — or ₹80 at "Savera"\? Tap the right one\./.test(qText), `${tag} H21.3 "tiffin 80 savera" asks which amount (${qText.slice(0, 80)})`);
+  ok(!(await page.$('#copilot-out .copilot-preview')), `${tag} H21.3 …and prepares nothing yet`);
+  const taps213 = await page.$$eval('#copilot-out .copilot-actions button', bs => bs.map(b => { const r = b.getBoundingClientRect(); return { t: b.textContent.trim(), h: r.height, left: r.left, right: r.right }; }));
+  ok(taps213[0].t === '₹80,000 · tiffin' && taps213[1].t === '₹80 · tiffin savera', `${tag} H21.3 both readings are taps (${JSON.stringify(taps213.map(b => b.t))})`);
+  ok(taps213.every(b => b.h >= 44 && b.left >= 0 && b.right <= width + 0.5), `${tag} H21.3 …44 px high and on screen (${JSON.stringify(taps213.map(b => [Math.round(b.h), Math.round(b.right)]))})`);
+  await noHScroll('H21.3 which amount');
+  await page.evaluate(() => document.getElementById('copilot-bar').scrollIntoView({ block: 'center' }));
+  await page.screenshot({ path: path.join(SHOTS, `h213-which-amount-${width}.png`) });
+  await page.evaluate(() => document.querySelectorAll('#copilot-out .copilot-actions button')[1].click());
+  await page.waitForSelector('#copilot-out .copilot-preview', { timeout: 10000 });
+  const prev213 = await page.$eval('#copilot-out', e => e.textContent.replace(/\s+/g, ' '));
+  ok(/₹80 · Groceries/.test(prev213) && /tiffin savera/.test(prev213) && !/80,000/.test(prev213), `${tag} H21.3 tapping "₹80" previews ₹80 "tiffin savera" to confirm (${prev213.slice(0, 120)})`);
+  eq((await pool.query(`SELECT COUNT(*)::int AS n FROM purchases`)).rows[0].n, purchases213, `${tag} H21.3 …nothing saved until she confirms`);
+  // A long "Not a resident — expense: …" tap wraps instead of pushing the screen sideways.
+  await page.evaluate(() => renderCopilotResult({ answer: 'Did you mean Sachin Gowda?', clarify: 'Did you mean Sachin Gowda?', confidence: 'low', actions: [{ label: 'Sachin Gowda (Room 107)', tool: 'prepare_payment', args: { resident_id: 1, amount: 6000 }, level: 'prepare' }, { label: 'Not a resident — expense: suchindranath ₹6,00,000', tool: 'prepare_expense', args: { amount: 600000, description: 'suchindranath' }, level: 'prepare', chip: 'expense' }] }));
+  const long213 = await page.$$eval('#copilot-out .copilot-actions button', bs => bs.map(b => { const r = b.getBoundingClientRect(); return { h: r.height, left: r.left, right: r.right }; }));
+  ok(long213.length === 2 && long213.every(b => b.h >= 44 && b.left >= 0 && b.right <= width + 0.5), `${tag} H21.3 the "Not a resident — expense" tap fits a ${width}px screen (${JSON.stringify(long213.map(b => [Math.round(b.h), Math.round(b.right)]))})`);
+  await noHScroll('H21.3 did-you-mean with expense tap');
+  await page.screenshot({ path: path.join(SHOTS, `h213-did-you-mean-${width}.png`) });
+  await page.evaluate(() => { copilotDismiss(); document.getElementById('copilot-q').value = ''; });
+
   // ── Sprint 7: one product — Home in one call, groups, search, quick add ──
   // Let any in-flight navigation settle, then count the requests one fresh
   // Home render makes.

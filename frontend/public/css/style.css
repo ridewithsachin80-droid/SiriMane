@@ -1076,3 +1076,7 @@ body.has-bulk-bar .sm-fab, body.has-bulk-bar #sm-fab { display: none; }
 .voice-lang:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .cl-outcome { text-align: left; min-width: 0; }
 .cl-outcome .cl-reply { font-size: 12px; margin-top: 4px; line-height: 1.4; overflow-wrap: anywhere; }
+
+/* ── Hotfix 21.3: Copilot answer taps are full tap targets and wrap on a phone ── */
+.copilot-actions .btn { max-width: 100%; white-space: normal; text-align: left; }
+@media (max-width: 640px) { .copilot-actions .btn-outline { min-height: 44px; } }

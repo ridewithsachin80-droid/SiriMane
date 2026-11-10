@@ -265,3 +265,5 @@ Note: the owner said to start building at once, so these criteria were written a
 **Hotfix 21.1 status:** approved (d47f73b), merged to ai/test (PR #30).
 
 **Hotfix 21.2 status:** approved by the independent review in round 3 (f7979a4), after BLOCK ×2. Gates 12/12 ×2, 3,338 each. Merged to ai/test. No migration. Follow-ups are listed under Hotfix 21.2 in TEST_REPORT.md; the first is the other half of S-e (copilot.js page-resident fallback). Still unverified on a real phone: ಕನ್ನಡ mode (every owner screenshot so far is English mode), and the real repair model on the four owner phrases.
+
+**Hotfix 21.3 status:** approved by the independent review in round 2 (bb31178), after BLOCK ×1. Gates 12/12 ×2, 3,454 each. Merged to ai/test. No migration. Follow-ups are listed under Hotfix 21.3 in TEST_REPORT.md.
