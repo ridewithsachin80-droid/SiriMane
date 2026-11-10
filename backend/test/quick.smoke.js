@@ -570,6 +570,8 @@ const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toI
       try {
         i = await say('Nooru rupee', `Sachin G${alpha} 100 cash deposit`);
         ok(i && i.tool !== 'prepare_payment' && /^What was ₹100 for\?/.test(i.clarify || ''), `H21.2 "Nooru rupee" is never turned into a deposit from a resident nobody named (got ${JSON.stringify(i && (i.args || i.clarify))})`);
+        i = await say('Nooru rupee', `Sachin G${alpha} 100 cash`);
+        ok(i && i.tool !== 'prepare_payment' && /^What was ₹100 for\?/.test(i.clarify || ''), `H21.2 …nor into a plain payment from him: a resident is only used if his name was heard (got ${JSON.stringify(i && (i.args || i.clarify))})`);
         i = await say('noorulu upay', 'groceries 100 upi');
         ok(!i || i.tool !== 'prepare_expense', `H21.2 "noorulu upay": an amount nobody said is never filled in (got ${JSON.stringify(i && (i.args || i.clarify))})`);
         i = await say('Nooru rupee', 'groceries 100');
