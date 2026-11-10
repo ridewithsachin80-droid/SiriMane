@@ -459,3 +459,28 @@ Backlog (minor): the probe still starts the skip window in a Groq-only setup (pr
   - A resident's name or "for" right after a heard multiplier stops it multiplying ("five savera Jhanavi" → ₹5, as at base).
   - A vendor called Savera or Noor as the LAST word: "tiffin 80 savera" → ₹80,000, "rice 5 noor" → ₹500 (base ₹80, ₹5). Comes with reading "5 Savera" as 5,000.
   - Items filed only under Other still flip to a resident question (bindi → Bindu); the "Did you mean" suggestion matches on first letter alone; an invented expense item passes when the amount was heard; Hindi fraction words.
+
+### Hotfix 21.3 — follow-ups from the 21.2 review (owner, 10 Nov 17:10: "start … keep working, stop whenever my decision is required")
+- Scope: a vendor called Savera/Noor as the last word ("tiffin 80 savera" → ₹80,000); the second half of the resident-page fix; smaller leftovers from the 21.2 review.
+- First cut (d80ab49):
+  - `extractAmount` keeps the other reading of a name-like multiplier (`alt`) and marks a lone "noor" (`lone`).
+  - An expense with a count of 10+ asks "Is that ₹80,000 — or ₹80 at "Savera"?" with both as taps; below 10 (and a lone "noor") the multiplied reading is prepared and the preview says "I read "5 noor" as ₹500."
+  - "Did you mean …?" gains "Not a resident — expense: …" for near-matches with an amount.
+  - The model may not turn a collection into a purchase; the resident suggestion needs half-resemblance or the same first two consonants.
+  - Copilot answer taps are 44 px on phones and wrap.
+- Review round 1: **BLOCK** (d80ab49). B1: my stop-list for the page-resident rule was too aggressive — 58 of 111 ordinary phrasings on a resident's page ("6000 cash kottlu", "6000 cash last month rent") answered "I could not find that resident". Should-fix: the bought/purchase path skipped the new question; "and" after the multiplier hid it; the way-out named one word; no note after a near-match tap.
+- Fixes (bb31178):
+  - The list no longer decides. Filler and mode words are stripped; a leftover word that resembles nobody is asked about — "Is this ₹6,000 from Jhanavi — the resident on this page?" — with her tap and the expense way-out; one that resembles others offers them, then her.
+  - bought/purchase phrases with a name-like multiplier are re-read by Quick Entry; trailing "and" is not part of an amount; the way-out uses the whole item; the note is attached after the tool runs (recomputed for taps).
+  - A matched resident with a count of 10+ ("Jhanavi 80 savera upi") is asked ₹80,000 or ₹80.
+  - "6 savera 5 noor" / "6 thousand 5 hundred" = 6,500; a heard multiplier after a 1–9 count is not masked as a name; "for" is a follower only before a payment word or a name.
+- Review round 2: **APPROVE** (bb31178). 111 no-name phrasings on a resident's page: 84 prepare her payment directly, 27 ask with her tap, none dead-end. No phrase where 21.3 prepares an entry for a resident that 21.2 did not. The reviewer did not run the UI suite and stubbed the repair model.
+- Mutations: M1–M17 (+M4b, M7b) on the first cut and N1–N15 on the fixes, 33 in all, every one caught (N13 needed a "bindi box 20" test first).
+- Gates on bb31178: 12/12 ×2, 3,454 each (quick 685, ui 980 at 360/390 px). No migration, no new dependency.
+- Open, from the review (none blocking):
+  - On a resident's page, an ordinary leftover word that sits inside another resident's name lists that resident before the page's resident ("6000 cash all dues" → Pallavi first). A question, her tap is labelled; 21.2 prepared her directly.
+  - More filler words still cost a tap (avalu, maadidlu, old, remaining, morning, hostel, mess, token, booking, qr, code …).
+  - "Jhanavi hattu savera deposit" asks ₹10,000 or ₹10 — the small reading is not believable for a payment.
+  - Hundreds of a weight are added to a price ("rice 2 thousand 5 hundred grams" → ₹2,500).
+  - Prefix name-matching (present before 21.x): "6000 upi rose" → Rosemary.
+  - Unchanged: "6 thousand 500" = ₹6,000; glued "80savera"; Hindi fraction words.
