@@ -614,15 +614,16 @@ const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toI
     let room3 = (await A('POST', '/rooms', { room_number: roomNo3, floor: 7, total_beds: 10, monthly_rent: 6000, room_type: 'sharing' })).data;
     if (!room3 || !room3.id) { const rl = (await A('GET', '/rooms')).data; room3 = (rl.list || rl).find(x => x.room_number === roomNo3); }
     const mk = async (name, n) => (await A('POST', '/guests', { name, phone: `97${uniq}${n}`.slice(0, 10), room_id: room3.id, bed_number: String(n - 10), monthly_rent: 6000, deposit_amount: 0, join_date: daysAgo(30), id_proof_type: 'Aadhaar' })).data;
-    const nj = await mk('Noorjahan Begum', 11), sv = await mk('Savitha Mohan', 12), ind = await mk('Indu Rao', 13), lk = await mk('Lakshmi Narayan', 14), ru = await mk('Rupa Menon', 15), p1 = await mk('Priya Dasgupta', 16), p2 = await mk('Priya Sharma', 17), sw = await mk('Swathi Prabhu', 18), rl2 = await mk('Rupali Shetty', 19);
+    const nj = await mk('Noorjahan Begum', 11), sv = await mk('Savitha Mohan', 12), ind = await mk('Indu Rao', 13), lk = await mk('Lakshmi Narayan', 14), ru = await mk('Rupa Menon', 15), p1 = await mk('Priya Dasgupta', 16), p2 = await mk('Priya Sharma', 17), sw = await mk('Swathi Prabhu', 18), rl2 = await mk('Rupa Shetty', 19);
     ok([nj, sv, ind, lk, ru, p1, p2, sw, rl2].every(g => g && g.id), 'H21.2 r2 (fixtures) Noorjahan, Savitha, Indu, Lakshmi, Rupa, two Priyas, Swathi');
     for (const t of ['Noor, five thousand upi', 'Noor paid five thousand upi', 'ನೂರ್ ಜಹಾನ್ ಐದು ಸಾವಿರ ಯುಪಿಐ']) {
       i = await quick.classify(t, adminUser, {}, { allowModel: false }); ok(i && i.tool === 'prepare_payment' && i.args.resident_id === nj.id && i.args.amount === 5000 && i.args.mode === 'UPI', `H21.2 r2 B1 "${t}" is Noorjahan's ₹5,000 by UPI — not ₹5,100, not a ₹100 expense (got ${JSON.stringify(i && [i.tool, i.args])})`);
     }
     i = await quick.classify('Noor upay', adminUser, {}, { allowModel: false }); ok(i && i.tool === 'prepare_payment' && i.args.resident_id === nj.id && !i.args.amount, `H21.2 r2 B1 with a Noorjahan here, "Noor upay" is her payment with NO amount — her name is not ₹100 (got ${JSON.stringify(i && [i.tool, i.args])})`);
-    // The word for rupees is not Rupa (nor a choice between Rupa and Rupali).
+    // The word for rupees is not Rupa — nor, with two Rupas here, a "which Rupa?" question.
     for (const t of ['aidu nooru rupai', 'Nooru rupaye', 'eerulli nooru rupai']) { i = await quick.classify(t, adminUser, {}, { allowModel: false }); ok(i && i.tool !== 'prepare_payment', `H21.2 r2 "${t}" is not a payment from Rupa (got ${JSON.stringify(i && [i.tool, i.args || i.clarify])})`); }
-    i = await quick.classify('Rupa 5000 upi', adminUser, {}, { allowModel: false }); ok(i && i.args.resident_id === ru.id && i.args.amount === 5000, 'H21.2 r2 …while "Rupa 5000 upi" is hers');
+    i = await quick.classify('Rupa Menon 5000 upi', adminUser, {}, { allowModel: false }); ok(i && i.args.resident_id === ru.id && i.args.amount === 5000, 'H21.2 r2 …while "Rupa Menon 5000 upi" is hers');
+    i = await quick.classify('Rupa 5000 upi', adminUser, {}, { allowModel: false }); ok(i && i.tool === 'prepare_payment' && !i.args.resident_id && i.args.amount === 5000, 'H21.2 r2 …and "Rupa 5000 upi" still asks which Rupa');
     eq(SMParse.parseCollection('aidu nooru rupai', [{ id: ru.id, name: ru.name }]).guest, null, 'H21.2 r2 …and the Collect parser agrees');
     // B2: an item she has filed under a real category stays an item beside a similar name.
     await A('POST', '/purchases', { amount: 50, category: 'Groceries', description: 'sweet', purchase_date: daysAgo(1), payment_mode: 'Cash' });
@@ -638,6 +639,7 @@ const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toI
       try {
         // B3a: amount, rupee and mode words are not evidence of a name.
         for (const [t, phrase, n] of [['aaru savira upi', 'Savitha Mohan 6000 upi', '6,000'], ['ondu saavira upi', 'Indu Rao 1000 upi', '1,000'], ['ondu laksha upi', 'Lakshmi Narayan 100000 upi', '1,00,000'], ['Nooru rupee', 'Noorjahan Begum 100 cash', '100'], ['aidu nooru rupai', 'Rupa Menon 500', '500']]) {
+          // (two Rupas live here: the rules already ask nothing about them)
           i = await say(t, phrase);
           ok(i && !i.tool && i.clarify === `What was ₹${n} for? Say the item too — e.g. "onion ${n.replace(/,/g, '')}".`, `H21.2 r2 B3a "${t}" is never a payment from ${phrase.split(' ')[0]} (got ${JSON.stringify(i && (i.args || i.clarify))})`);
         }
