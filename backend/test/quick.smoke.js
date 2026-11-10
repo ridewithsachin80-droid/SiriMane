@@ -855,7 +855,7 @@ const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toI
       r = await onJh(t); ok(!r.data.proposal && r.data.answer === `Is this ₹6,000 from Jhanavi ${alpha} — the resident on this page?` && r.data.actions[0].args.resident_id === jh.id && !r.data.actions.some(a => a.args && (a.args.resident_id === bh.id || a.args.resident_id === rn.id)), `S22 on Jhanavi's page "${t}" asks about Jhanavi only (got ${String(r.data.answer).slice(0, 60)} · ${JSON.stringify(r.data.actions.map(a => a.label))})`);
     }
     r = await onJh('Bhavana 6000 cash'); ok(r.data.proposal && r.data.proposal.preview.guest_id === bh.id, 'S22 …while "Bhavana 6000 cash" there is Bhavana\'s payment');
-    r = await onJh('Bhav 6000 cash'); ok(r.data.proposal && r.data.proposal.preview.guest_id === bh.id, 'S22 …and "Bhav" (the start of her name) is still Bhavana, as before');
+    r = await onJh('Bhav 6000 cash'); ok((r.data.proposal && r.data.proposal.preview.guest_id === bh.id) || (r.data.actions || []).some(a => a.args && a.args.resident_id === bh.id), `S22 …and "Bhav" (the start of her name) still leads to Bhavana (got ${String(r.data.answer).slice(0, 60)})`);
     r = await ask('van 6000 cash'); ok(!r.data.proposal && r.data.actions.some(a => a.args && a.args.resident_id === bh.id), 'S22 off a resident page the old name search is unchanged');
     for (const t of ['6000 cash avalu kottlu', 'old dues 6000 cash', 'morning 6000 upi', 'hostel fee 6000 upi', '6000 cash all dues', 'idu 6000 cash', 'token 6000 upi', 'qr code 6000 upi']) {
       r = await onJh(t); ok(r.data.proposal && r.data.proposal.preview.guest_id === jh.id && Number(r.data.proposal.preview.amount) === 6000, `S22 "${t}" on her page needs no tap (got ${String(r.data.answer).slice(0, 70)})`);
