@@ -494,6 +494,26 @@ async function runAtWidth(browser, BASE, width) {
   await noHScroll('S21 Copilot log');
   await page.screenshot({ path: path.join(SHOTS, `s21-copilot-log-${width}.png`) });
 
+  // ── Sprint 23 (SEO): the public page on a phone — H1 readable, FAQ taps 44 px, no sideways scroll, fast ──
+  {
+    const pub = await browser.newPage(); await pub.setViewport({ width, height: 780, isMobile: true, hasTouch: true });
+    const t0 = Date.now(); await pub.goto(BASE + '/', { waitUntil: 'domcontentloaded' }); const dcl = Date.now() - t0;
+    ok(dcl < 3000, `${tag} S23-6 the public page's DOM is ready in ${dcl} ms`);
+    const h1 = await pub.$eval('h1', e => { const r = e.getBoundingClientRect(); return { t: e.textContent.trim(), fs: parseFloat(getComputedStyle(e).fontSize), w: r.width, right: r.right }; });
+    ok(/Safe Ladies PG in Tumakuru/.test(h1.t) && h1.fs >= 15 && h1.right <= width + 0.5, `${tag} S23-6 the H1 is on screen and readable (${h1.fs}px)`);
+    ok(await pub.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), `${tag} S23-6 no sideways scroll on the public page`);
+    await pub.evaluate(() => document.querySelector('#faq').scrollIntoView());
+    const sums = await pub.$$eval('.faq-item summary', ss => ss.map(s => s.getBoundingClientRect().height));
+    ok(sums.length === 6 && sums.every(h => h >= 44), `${tag} S23-6 six FAQ rows, each a 44 px tap target (${sums.map(Math.round).join(',')})`);
+    // (Headless Chromium with headless:'new' does not toggle <details> on a synthetic
+    // click or tap — verified by hand that a default launch does. So: the tap
+    // lands on the summary, and an opened row shows its answer in full.)
+    const faqState = await pub.evaluate(() => { const d = document.querySelector('.faq-item'); const r = d.querySelector('summary').getBoundingClientRect(); const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); d.open = true; const pr = d.querySelector('p').getBoundingClientRect(); return { at: at && at.tagName, ph: pr.height, pRight: pr.right, text: d.querySelector('p').textContent.length }; });
+    ok(faqState.at === 'SUMMARY' && faqState.ph > 40 && faqState.pRight <= width + 0.5 && faqState.text > 80, `${tag} S23-6 the tap lands on the question, and the opened answer is shown in full (${JSON.stringify(faqState)})`);
+    await pub.screenshot({ path: path.join(SHOTS, `s23-home-faq-${width}.png`) });
+    await pub.close();
+  }
+
   // ── Sprint 21: the mic listens in Kannada ─────────────────────────────
   // Headless Chrome has no speech engine: a stand-in records the language it
   // was started in and plays back what "she said".

@@ -285,3 +285,18 @@ Owner, 10 Nov: "keep working, stop whenever my decision is required". No decisio
 | S22-10 | Gates 12/12 twice; mutations caught; independent review before merge | QA |
 
 **Sprint 22 status:** approved by the independent review in round 1 (3c2b159). Gates 12/12 (3,490) on e482643. Merged to ai/test. No migration.
+
+## Sprint 23 — local SEO for sirimane.in (owner, 10 Nov 17:56: "do which all can be done from your side")
+The public page already had a title, description, Open Graph/Twitter tags, geo tags, LodgingBusiness structured data, robots.txt and a sitemap. This sprint fixes what was weak or missing. Address, phone and pincode come from the existing structured data and footer (5th Cross, Gangotri Road, S.I.T. Extension, Tumakuru 572103 · 9880217627). Enquiry hours 9 am – 8 pm are an assumption the owner must confirm.
+
+| ID | Acceptance criterion | Review |
+|---|---|---|
+| S23-1 | Structured data is valid JSON-LD: LodgingBusiness (phone, address, pincode, hours, area served), FAQPage whose questions are word-for-word the ones shown on the page, WebSite | SEO |
+| S23-2 | Exactly one H1, carrying the search phrase ("Safe Ladies PG in Tumakuru, near S.I.T. Extension"); a local title; a canonical link to https://sirimane.in/ | SEO |
+| S23-3 | GET on www.sirimane.in → 301 to sirimane.in with path and query kept; API calls are never redirected; other hosts (Test site) untouched | SEC |
+| S23-4 | /guest.html, /management.html and /api/* send X-Robots-Tag noindex; the home page, robots.txt and sitemap.xml do not | SEO |
+| S23-5 | robots.txt points at the sitemap; the sitemap lists the home page with a current lastmod | SEO |
+| S23-6 | On a 360/390 px phone: DOM ready under 3 s, the H1 readable and on screen, no sideways scroll, six FAQ rows at 44 px that open to a full answer | UX |
+| S23-7 | Gates 12/12 twice; mutations caught; independent review; a step-by-step list for the owner's side (Google Business Profile, Search Console, directories, reviews, photos) | QA |
+
+**Sprint 23 status:** approved by the independent review in round 1 (c067245), should-fixes taken (d578ea3). Gates 12/12 ×2, 3,520. Owner confirmed address, hours and phone on 10 Nov. Merged to ai/test. No migration. Owner-side steps: docs/ai-team/SEO_OWNER_CHECKLIST.md.

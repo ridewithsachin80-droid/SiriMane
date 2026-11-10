@@ -62,6 +62,18 @@ const CSP_HOME = cspHeader(
 // staff or resident page with the looser one. (Review S17-4.)
 app.use((req, res, next) => { res.setHeader('Content-Security-Policy', CSP_APP); next(); });
 const sendHome = (req, res) => { res.setHeader('Content-Security-Policy', CSP_HOME); res.sendFile(path.join(PUBLIC, 'home.html')); };
+// Sprint 23 (SEO): one address for the home page. www.sirimane.in → sirimane.in,
+// so Google counts links to both as one site. Only the public site; the app
+// screens and the API are untouched (cookies are host-bound).
+app.use((req, res, next) => {
+  if (req.hostname === 'www.sirimane.in' && (req.method === 'GET' || req.method === 'HEAD')) return res.redirect(301, 'https://sirimane.in' + req.originalUrl);
+  next();
+});
+// The app screens are for residents and staff — never a search result.
+app.use((req, res, next) => {
+  if (/^\/(guest|management)\.html$/i.test(req.path) || req.path.startsWith('/api')) res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+  next();
+});
 app.locals.CSP_APP = CSP_APP; app.locals.CSP_HOME = CSP_HOME;   // for the gates
 app.use(cors({
   origin: process.env.FRONTEND_URL || '*',

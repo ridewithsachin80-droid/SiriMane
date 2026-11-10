@@ -496,3 +496,12 @@ Backlog (minor): the probe still starts the skip window in a Groq-only setup (pr
   - 3-letter name prefixes ("Anu" for Anusha) on a resident's page now ask about the page resident instead of offering the other resident.
   - Off a resident's page, a phrase made only of stop words ("6000 cash all dues") says "I could not find that resident" where a "from whom?" question would be better.
   - A quantity unit after "N thousand M hundred" for a resident's payment now asks the amount rather than preparing it.
+
+### Sprint 23 — local SEO: evidence and review
+- Owner confirmed (10 Nov 20:20): address and pincode as shown, enquiry hours 9 am – 8 pm, phone 9880217627. The other page claims (electricity included, resident warden, distances, room types) were not separately confirmed; they repeat what the site already said before this sprint, except "electricity", which he should check.
+- Mutations Q1–Q7 (redirect off, redirect on POST, noindex off, noindex everywhere, canonical removed, H1 demoted, FAQ question changed) all caught.
+- Review (G3): **APPROVE** first round (c067245). Should-fixes taken before merge: HEAD redirected too, FAQ structured answers word-for-word, title under 65 chars (d578ea3).
+- Known test limitation: headless:'new' Chromium does not toggle <details> on a synthetic click/tap (a default launch does), so the UI test opens the row via the DOM property and checks the tap lands on the summary and the answer renders in full.
+- Test isolation: a full run and an api run collided on one database (old tests failed); both were discarded and re-run alone.
+- Gates on d578ea3: 12/12 ×2, 3,520 each (api 492, ui 996). No migration, no new dependency.
+- Open: point `hasMap` at the real Google Business Profile once it exists; add real room photos with alt text when the owner sends them.
