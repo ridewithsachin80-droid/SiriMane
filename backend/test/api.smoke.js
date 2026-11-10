@@ -628,6 +628,32 @@ async function main() {
             ok(!/googletagmanager/.test(body) && !/google-analytics|googletagmanager/.test(c) && /connect-src 'self'(;|$)/.test(c), `S17-4 SECURITY: ${p} serves an app page with the strict policy`);
           }
         }
+        // ── Sprint 23 (SEO): one address, app screens never indexed, valid structured data
+        {
+          const home = await (await fetch(BASE + '/')).text();
+          const ld = JSON.parse((home.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/) || [])[1]);
+          const types = ld['@graph'].map(x => x['@type']);
+          ok(types.includes('LodgingBusiness') && types.includes('FAQPage') && types.includes('WebSite'), `S23-1 the home page carries valid LodgingBusiness + FAQPage structured data (${types.join(', ')})`);
+          const biz = ld['@graph'].find(x => x['@type'] === 'LodgingBusiness');
+          ok(biz.telephone === '+919880217627' && biz.address.postalCode === '572103' && /S\.I\.T\. Extension/.test(biz.address.streetAddress) && biz.openingHoursSpecification.opens === '09:00', 'S23-1 …with the phone, address, pincode and enquiry hours');
+          const faq = ld['@graph'].find(x => x['@type'] === 'FAQPage');
+          const onPage = (home.match(/<details class="faq-item"><summary>([^<]+)<\/summary>/g) || []).map(x => x.replace(/<[^>]+>/g, ''));
+          ok(faq.mainEntity.length === 6 && faq.mainEntity.every(q => onPage.includes(q.name)), 'S23-1 every FAQ in the structured data is the same question shown on the page (Google requires this)');
+          ok((home.match(/<h1[\s>]/g) || []).length === 1 && /<h1 class="hero-title">Safe Ladies PG in Tumakuru, near S\.I\.T\. Extension<\/h1>/.test(home), 'S23-2 one H1, carrying the search phrase');
+          ok(/<link rel="canonical" href="https:\/\/sirimane\.in\/"\/>/.test(home) && /<title>Siri Mane \| Safe Ladies PG in Tumakuru near S\.I\.T\. Extension/.test(home), 'S23-2 canonical link and a local title');
+          // (Node's fetch drops a custom Host header, so these go through the http module.)
+          const raw = (method, p, host) => new Promise(res => { const q = require('http').request(BASE + p, { method, headers: { Host: host, 'Content-Type': 'application/json' } }, r => { r.resume(); r.on('end', () => res({ status: r.statusCode, location: r.headers.location || null })); }); q.end(method === 'POST' ? '{}' : undefined); });
+          const www = await raw('GET', '/some/page?x=1', 'www.sirimane.in');
+          ok(www.status === 301 && www.location === 'https://sirimane.in/some/page?x=1', `S23-3 www.sirimane.in → sirimane.in, path and query kept (${www.status} ${www.location})`);
+          const wwwPost = await raw('POST', '/api/guest-login', 'www.sirimane.in');
+          ok(wwwPost.status !== 301 && wwwPost.status !== 302, `S23-3 …but an API call is never redirected (a redirect would drop the body) (${wwwPost.status})`);
+          eq((await raw('GET', '/', 'sirimane.in')).status, 200, 'S23-3 sirimane.in itself is served');
+          eq((await raw('GET', '/', 'sirimane-test.up.railway.app')).status, 200, 'S23-3 …and so is the Test site, untouched');
+          for (const p of ['/guest.html', '/management.html', '/api/rooms']) eq((await fetch(BASE + p)).headers.get('x-robots-tag'), 'noindex, nofollow', `S23-4 ${p} tells search engines to stay out`);
+          for (const p of ['/', '/home.html', '/robots.txt', '/sitemap.xml']) eq((await fetch(BASE + p)).headers.get('x-robots-tag'), null, `S23-4 …while ${p} is indexable`);
+          const robots = await (await fetch(BASE + '/robots.txt')).text(); const sitemap = await (await fetch(BASE + '/sitemap.xml')).text();
+          ok(/Disallow: \/guest\.html/.test(robots) && /Sitemap: https:\/\/sirimane\.in\/sitemap\.xml/.test(robots) && /<loc>https:\/\/sirimane\.in\/<\/loc>/.test(sitemap) && /<lastmod>2026-/.test(sitemap), 'S23-5 robots.txt points at the sitemap; the sitemap lists the home page with a current date');
+        }
         // S16.3-3 reset a resident's app login
         const n163 = '9' + String(Date.now()).slice(-9);
         const g163 = (await A('POST', '/guests', { name: 'S163 Resident', phone: n163, join_date: today, monthly_rent: 5000, deposit_amount: 0 })).data;
