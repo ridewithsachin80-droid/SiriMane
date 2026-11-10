@@ -66,7 +66,7 @@ const sendHome = (req, res) => { res.setHeader('Content-Security-Policy', CSP_HO
 // so Google counts links to both as one site. Only the public site; the app
 // screens and the API are untouched (cookies are host-bound).
 app.use((req, res, next) => {
-  if (req.hostname === 'www.sirimane.in' && req.method === 'GET') return res.redirect(301, 'https://sirimane.in' + req.originalUrl);
+  if (req.hostname === 'www.sirimane.in' && (req.method === 'GET' || req.method === 'HEAD')) return res.redirect(301, 'https://sirimane.in' + req.originalUrl);
   next();
 });
 // The app screens are for residents and staff — never a search result.

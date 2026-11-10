@@ -639,6 +639,10 @@ async function main() {
           const faq = ld['@graph'].find(x => x['@type'] === 'FAQPage');
           const onPage = (home.match(/<details class="faq-item"><summary>([^<]+)<\/summary>/g) || []).map(x => x.replace(/<[^>]+>/g, ''));
           ok(faq.mainEntity.length === 6 && faq.mainEntity.every(q => onPage.includes(q.name)), 'S23-1 every FAQ in the structured data is the same question shown on the page (Google requires this)');
+          const answers = (home.match(/<details class="faq-item"><summary>[^<]+<\/summary><p>([\s\S]*?)<\/p><\/details>/g) || []).map(x => x.replace(/^[\s\S]*?<p>/, '').replace(/<\/p><\/details>$/, '').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&'));
+          ok(faq.mainEntity.every((q, k) => q.acceptedAnswer.text === answers[k]), 'S23-1 …and each structured answer is the visible answer, word for word');
+          ok(/<title>[^<]{20,65}<\/title>/.test(home), 'S23-2 the title fits a search result (under 65 characters)');
+
           ok((home.match(/<h1[\s>]/g) || []).length === 1 && /<h1 class="hero-title">Safe Ladies PG in Tumakuru, near S\.I\.T\. Extension<\/h1>/.test(home), 'S23-2 one H1, carrying the search phrase');
           ok(/<link rel="canonical" href="https:\/\/sirimane\.in\/"\/>/.test(home) && /<title>Siri Mane \| Safe Ladies PG in Tumakuru near S\.I\.T\. Extension/.test(home), 'S23-2 canonical link and a local title');
           // (Node's fetch drops a custom Host header, so these go through the http module.)
@@ -649,6 +653,7 @@ async function main() {
           ok(wwwPost.status !== 301 && wwwPost.status !== 302, `S23-3 …but an API call is never redirected (a redirect would drop the body) (${wwwPost.status})`);
           eq((await raw('GET', '/', 'sirimane.in')).status, 200, 'S23-3 sirimane.in itself is served');
           eq((await raw('GET', '/', 'sirimane-test.up.railway.app')).status, 200, 'S23-3 …and so is the Test site, untouched');
+          const head = await raw('HEAD', '/x', 'www.sirimane.in'); ok(head.status === 301 && head.location === 'https://sirimane.in/x', `S23-3 HEAD on www is redirected too (Googlebot uses HEAD) (${head.status})`);
           for (const p of ['/guest.html', '/management.html', '/api/rooms']) eq((await fetch(BASE + p)).headers.get('x-robots-tag'), 'noindex, nofollow', `S23-4 ${p} tells search engines to stay out`);
           for (const p of ['/', '/home.html', '/robots.txt', '/sitemap.xml']) eq((await fetch(BASE + p)).headers.get('x-robots-tag'), null, `S23-4 …while ${p} is indexable`);
           const robots = await (await fetch(BASE + '/robots.txt')).text(); const sitemap = await (await fetch(BASE + '/sitemap.xml')).text();
