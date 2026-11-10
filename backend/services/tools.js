@@ -177,6 +177,17 @@ const TOOLS = {
         const s = await resolveResident({ id: a.suggest_id });
         if (s.match) candidates = [{ ...s.match, why: 'suggested from what was heard' }];
       }
+      // Hotfix 21.3 (review): typed on a resident's page with a word that is not
+      // her name. If it resembles nobody, ask whether it is her payment — one
+      // tap — instead of "I could not find that resident". If it resembles
+      // someone else, she is still offered as well.
+      let pageOnly = false;
+      const pageId = a.name && !a.resident_id ? ctx.context?.resident_id : undefined;
+      if (!match && pageId && !candidates.some(c => String(c.id) === String(pageId))) {
+        const s = await resolveResident({ id: pageId });
+        if (s.match) { pageOnly = candidates.length === 0; candidates = [...candidates, { ...s.match, why: 'the resident on this page', page: true }]; }
+      }
+      if (!match && pageOnly) return { clarify: `Is this ${Number(a.amount) > 0 ? fmt(Number(a.amount)) + ' ' : ''}from ${candidates[0].name} — the resident on this page?`, candidates };
       if (!match) return { clarify: candidates.length ? (candidates.some(c => c.why) ? `Did you mean ${candidates.length === 1 ? candidates[0].name : 'one of these'}?` : 'Which resident do you mean?') : 'I could not find that resident — check the name or room.', candidates };
       const amount = Number(a.amount);
       if (!amount || amount <= 0) return { clarify: `How much did ${match.name} pay?`, resident: match };

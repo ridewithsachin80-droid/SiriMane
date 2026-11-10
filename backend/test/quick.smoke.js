@@ -688,7 +688,7 @@ const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toI
     }
     // S-e: on a resident's page, a different name that was said is not given to the page's resident.
     r = await api('POST', '/copilot/ask', { text: 'Suchin aaru saavira cash', context: { page: 'resident', resident_id: jh.id } }, adminTok);
-    ok(!r.data.proposal && /Did you mean Sachin G/.test(r.data.answer || ''), `H21.2 r3 S-e on Jhanavi's page, "Suchin aaru saavira cash" asks about Sachin — it is not Jhanavi's payment (got ${String(r.data.answer).slice(0, 90)} · ${JSON.stringify(r.data.proposal && r.data.proposal.preview)})`);
+    ok(!r.data.proposal && /^Did you mean/.test(r.data.answer || '') && r.data.actions.some(a => a.args && a.args.resident_id === sg.id), `H21.2 r3 S-e on Jhanavi's page, "Suchin aaru saavira cash" asks about Sachin — it is not Jhanavi's payment (got ${String(r.data.answer).slice(0, 90)} · ${JSON.stringify(r.data.proposal && r.data.proposal.preview)})`);
     r = await api('POST', '/copilot/ask', { text: 'record payment', tool: 'prepare_payment', args: { amount: 6000, mode: 'Cash' }, context: { page: 'resident', resident_id: jh.id } }, adminTok);
     ok(r.data.proposal && r.data.proposal.preview.guest_id === jh.id, `H21.2 r3 S-e …while with no name said, the page's resident is still used (got ${JSON.stringify(r.data.proposal && r.data.proposal.preview)} · ${String(r.data.answer).slice(0, 60)})`);
     {
@@ -779,9 +779,24 @@ const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toI
     r = await ask('Jhanavi 500 upi'); ok(/Which resident do you mean\?/.test(r.data.answer) && !r.data.actions.some(a => a.tool === 'prepare_expense'), 'H21.3 a real name shared by two residents ("Jhanavi") gets no expense tap');
     // On a resident's page, another name typed with digits is not that page's resident (review 21.2 S-e, second half).
     const onJh = t => api('POST', '/copilot/ask', { text: t, context: { page: 'resident', resident_id: jh.id } }, adminTok);
-    r = await onJh('Suchin 6000 cash'); ok(!r.data.proposal && /^Did you mean Sachin Gowda\?/.test(r.data.answer), `H21.3 on Jhanavi's page "Suchin 6000 cash" asks about Sachin (got ${String(r.data.answer).slice(0, 80)} · ${JSON.stringify(r.data.proposal && r.data.proposal.preview)})`);
-    r = await onJh('Ramesh 6000 cash'); ok(!r.data.proposal && /could not find that resident/.test(r.data.answer), `H21.3 …and "Ramesh 6000 cash" is nobody here — not Jhanavi (got ${String(r.data.answer).slice(0, 80)})`);
-    for (const t of ['6000 cash', 'received 6000 rent from her by upi', 'record six thousand rent cash', 'collected 6000 rent for november by cash']) {
+    r = await onJh('Suchin 6000 cash');
+    ok(!r.data.proposal && /^Did you mean one of these\?/.test(r.data.answer) && r.data.actions[0].args.resident_id === sc.id && r.data.actions.some(a => a.label === `Jhanavi ${alpha} (Room ${room.room_number}) · this page` && a.args.resident_id === jh.id) && r.data.actions.some(a => a.tool === 'prepare_expense'),
+      `H21.3 on Jhanavi's page "Suchin 6000 cash" prepares nothing: Sachin first, Jhanavi "this page", or an expense (got ${String(r.data.answer).slice(0, 60)} · ${JSON.stringify(r.data.actions.map(a => a.label))})`);
+    // A word that resembles nobody is asked about — one tap — never silently hers, never a dead end.
+    for (const [t, item] of [['Ramesh 6000 cash', 'Ramesh'], ['Jo 6000 cash', 'Jo'], ['6000 cash sound box', 'sound box']]) {
+      r = await onJh(t);
+      const her = r.data.actions.find(a => a.tool === 'prepare_payment'), exp = r.data.actions.find(a => a.tool === 'prepare_expense');
+      ok(!r.data.proposal && r.data.answer === `Is this ₹6,000 from Jhanavi ${alpha} — the resident on this page?` && her && her.args.resident_id === jh.id && exp && exp.label === `Not a resident — expense: ${item} ₹6,000` && exp.args.description === item,
+        `H21.3 on Jhanavi's page "${t}" asks whether it is hers, with the expense way out (got ${String(r.data.answer).slice(0, 70)} · ${JSON.stringify(r.data.actions.map(a => a.label))})`);
+      const t4 = await api('POST', '/copilot/ask', { text: t, tool: her.tool, args: her.args, context: { page: 'resident', resident_id: jh.id } }, adminTok);
+      ok(t4.data.proposal && t4.data.proposal.preview.guest_id === jh.id && Number(t4.data.proposal.preview.amount) === 6000 && t4.data.proposal.preview.payment_mode === 'Cash', `H21.3 …and her tap prepares her ₹6,000 Cash (got ${JSON.stringify(t4.data.proposal && t4.data.proposal.preview)})`);
+    }
+    r = await ask('Ramesh 6000 cash'); ok(!r.data.proposal && /could not find that resident/.test(r.data.answer) && !r.data.actions.length, 'H21.3 off a resident page, "Ramesh 6000 cash" is still "I could not find that resident"');
+    // The warden's ordinary ways of saying it — Kannada, English, typos — need no tap (review 21.3 B1).
+    for (const t of ['6000 cash', 'received 6000 rent from her by upi', 'record six thousand rent cash', 'collected 6000 rent for november by cash',
+                     '6000 cash kottlu', '6000 cash kottaru', '6000 upi kottidaale', 'ivattu 6000 cash', 'baadige 6000 cash', '6000 cash bantu', '6000 cash tagonde', 'ee tingalu rent 6000 upi',
+                     '6000 cash last month rent', '6000 cash room rent', '6000 cash security deposit', '6000 cash next month advance', '6000 upi late fee', '6000 upi from father', '6000 cash by hand',
+                     '6000 cash rent received sir', 'log 6000 cash rent', 'save 6000 cash', 'recieved 6000 cash', 'payed 6000 cash', '6000 upi scan', 'Jhanavi 6000 cash']) {
       r = await onJh(t); ok(r.data.proposal && r.data.proposal.preview.guest_id === jh.id && Number(r.data.proposal.preview.amount) === 6000, `H21.3 …while "${t}" (no other name) is still hers (got ${String(r.data.answer).slice(0, 80)})`);
     }
     {
@@ -796,6 +811,36 @@ const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toI
         for (const [t, who] of [['Satin aaru saavira cash', sc], ['such in aaru saavira cash', sc]]) { i = await say(t, 'Sachin Gowda 6000 cash'); ok(i && i.tool === 'prepare_payment' && i.args.suggest_id === who.id, `H21.3 "${t}" still asks about Sachin (got ${JSON.stringify(i && [i.tool, i.args])})`); }
       } finally { ai.providers.groqText = keep; ai.providers._stub = keepStub; ai.providers.groqDownUntil = 0; }
     }
+    // ── Hotfix 21.3, review round 1 ──────────────────────────────────────
+    // The way-out tap names the whole item she said, not only the word that resembled a name.
+    r = await ask('bindi box 20'); x = r.data.actions.find(z => z.tool === 'prepare_expense');
+    ok(/^Did you mean Bindu Rao\?/.test(r.data.answer) && x && x.label === 'Not a resident — expense: bindi box ₹20' && x.args.description === 'bindi box' && x.args.amount === 20, `H21.3 r1 "bindi box 20" offers the expense "bindi box" (got ${JSON.stringify(r.data.actions.map(z => z.label))})`);
+    // The "bought / purchase / bill" path gets the same question and the same note.
+    for (const [t, big, small] of [['bought tiffin 80 savera', 80000, 80], ['purchase rice 50 savera', 50000, 50]]) {
+      r = await ask(t); ok(!r.data.proposal && r.data.actions.length === 2 && r.data.actions[0].args.amount === big && r.data.actions[1].args.amount === small, `H21.3 r1 "${t}" asks ₹${big} or ₹${small} (got ${String(r.data.answer).slice(0, 70)})`);
+    }
+    r = await ask('bought rice 5 noor'); ok(r.data.proposal && Number(r.data.proposal.preview.amount) === 500 && /I read "5 noor" as ₹500\./.test(r.data.answer), `H21.3 r1 "bought rice 5 noor" → ₹500 with the note (got ${String(r.data.answer).slice(0, 120)})`);
+    r = await ask('bought onion 100'); ok(r.data.proposal && Number(r.data.proposal.preview.amount) === 100 && r.data.via === 'local', 'H21.3 r1 an ordinary "bought onion 100" keeps its old path');
+    // "and" after the multiplier does not hide the question.
+    x = SMParse.extractAmount('tiffin eighty savera and coffee'); ok(x.amount === 80000 && x.alt === 80 && x.matched === 'eighty savera', `H21.3 r1 "tiffin eighty savera and coffee" keeps both readings (got ${JSON.stringify(x)})`);
+    i = await quick.classify('tiffin eighty savera and coffee', adminUser, {}, { allowModel: false }); ok(i && i.ask === 'which_amount' && i.options[1].args.amount === 80, 'H21.3 r1 …and asks');
+    eq(SMParse.extractAmount('six thousand and').matched, 'six thousand', 'H21.3 r1 a trailing "and" is not part of the amount');
+    // Hundreds after the thousands belong to the number.
+    for (const [t, n, roster] of [['Jhanavi 6 savera 5 noor upi', 6500, JK], ['6 thousand 5 hundred', 6500], ['6 saavira 5 nooru', 6500], ['aaru savera aidu noor', 6500], ['eradu savera eradu noor', 2200, NJ], ['6 thousand 500', 6000], ['2 savera 500', 2000]]) eq(amtOf(t, roster), n, `H21.3 r1 "${t}" is ₹${n}`);
+    ok(SMParse.extractAmount('6 savera 5 noor').alt === undefined, 'H21.3 r1 …and "6 savera 5 noor" has one reading');
+    for (const [t, n, roster] of [['tea 8 Savera for guests', 8], ['Jhanavi 5 Savera for rent', 5000, JK], ['Noor upay', null, NJ]]) eq(amtOf(t, roster), n, `H21.3 r1 "${t}" is ${n === null ? 'no amount' : '₹' + n}`);
+    // A resident's "80 savera": ₹80,000 or ₹80 — asked, with her on both taps.
+    r = await ask(`Jhanavi ${alpha} 80 savera upi`);
+    ok(!r.data.proposal && r.data.answer === `Is that ₹80,000 or ₹80 from Jhanavi ${alpha}? Tap the right one.` && r.data.actions.length === 2 && r.data.actions.every(a => a.tool === 'prepare_payment' && a.args.resident_id === jh.id && a.args.mode === 'UPI') && r.data.actions[0].args.amount === 80000 && r.data.actions[1].args.amount === 80,
+      `H21.3 r1 "Jhanavi … 80 savera upi" asks which amount (got ${String(r.data.answer).slice(0, 80)} · ${JSON.stringify(r.data.actions.map(a => a.label))})`);
+    // The "I read …" note survives a resident tap.
+    r = await ask('Sachin 5 savera upi');   // one Sachin here → resolved outright
+    ok(r.data.proposal && /I read "5 savera" as ₹5,000\./.test(r.data.answer), 'H21.3 r1 a matched resident gets the note');
+    r = await ask('Suchin 5 savera upi');
+    const sTap = r.data.actions.find(a => a.tool === 'prepare_payment' && a.args.resident_id === sc.id);
+    ok(!r.data.proposal && sTap, `H21.3 r1 "Suchin 5 savera upi" asks about Sachin (got ${String(r.data.answer).slice(0, 60)})`);
+    t3 = await api('POST', '/copilot/ask', { text: 'Suchin 5 savera upi', tool: sTap.tool, args: sTap.args, context: { page: 'finance-overview' } }, adminTok);
+    ok(t3.data.proposal && Number(t3.data.proposal.preview.amount) === 5000 && /I read "5 savera" as ₹5,000\./.test(t3.data.answer), `H21.3 r1 …and after the tap the preview still says how the amount was read (got ${String(t3.data.answer).slice(0, 140)})`);
     await pool.query(`UPDATE guests SET is_active=false WHERE id = ANY($1)`, [[bd.id, sc.id, kv2.id]]);
     console.log('✓ S21 Kannada');
 

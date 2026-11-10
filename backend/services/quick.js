@@ -309,6 +309,14 @@ async function classify(text, user, context, copts = {}) {
   const match = SMParse.matchResident(nameText, residents, room);
   const type = /\bdeposit\b/i.test(norm) ? 'deposit' : /\badvance\b/i.test(norm) ? 'advance' : 'rent';
   if (match) {
+    // 21.3: "Jhanavi 80 savera" — ₹80,000 or ₹80? Neither is a usual rent: ask.
+    // ("Jhanavi 5 Savera" is ₹5,000: nobody pays ₹5, and the preview says how it was read.)
+    if (amt && amt.alt != null && amt.alt >= 10) {
+      const first = String(match.name).split(/\s+/)[0], base = { resident_id: match.id, mode: mode || undefined, type };
+      const big = '₹' + amount.toLocaleString('en-IN'), small = '₹' + amt.alt.toLocaleString('en-IN');
+      return { tool: null, clarify: `Is that ${big} or ${small} from ${match.name}? Tap the right one.`, via: 'quick', kind: 'collection', ask: 'which_amount',
+        options: [{ label: `${big} · ${first}`, tool: 'prepare_payment', args: { ...base, amount } }, { label: `${small} · ${first}`, tool: 'prepare_payment', args: { ...base, amount: amt.alt } }] };
+    }
     return { tool: 'prepare_payment', args: { resident_id: match.id, amount: amount || undefined, mode: mode || undefined, type }, via: 'quick', kind: 'collection', amount_basis: amountBasis(amt) };
   }
   // Two residents called Jhanavi → this is still a collection; it must ask
@@ -391,6 +399,29 @@ const BUYABLE = new Set(['Groceries', 'Cleaning']);
 // The item words of an expense: no rupee, mode, filler or room words.
 function cleanItem(text) {
   return String(text).split(/\s+/).filter(w => !SMParse.RUPEE_WORD.test(w.toLowerCase().replace(/[^a-z]/g, ''))).join(' ').replace(MODE_WORDS, ' ').replace(NOISE, ' ').replace(/\b(room|rum)\s*[a-z]?\d{1,3}[a-z]?\b/gi, ' ').replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim();
+}
+// For the Copilot (21.3 review): what is left of a phrase once payment modes,
+// rupee words and filler ("paid", "kottlu", "rent", "from") are gone …
+const MODE_SYNS = new RegExp('\\b(' + Object.values(SMParse.MODE_SYNONYMS).flat().map(x => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).sort((a, b) => b.length - a.length).join('|') + ')\\b', 'gi');
+function stripFiller(text) {
+  return String(text || '').replace(MODE_SYNS, ' ').replace(MODE_WORDS, ' ').replace(NOISE, ' ').split(/\s+/).filter(w => w && !SMParse.RUPEE_WORD.test(w.toLowerCase().replace(/[^a-z]/g, ''))).join(' ');
+}
+// … the item words of a phrase ("sound box 500" → "sound box") …
+async function itemOf(text) {
+  const { rows: residents } = await pool.query(`SELECT g.id, g.name FROM guests g WHERE g.is_active=true`);
+  const norm = normaliseAmount(SMParse.toLatin(String(text || '')));
+  const roomHit = SMParse.extractRoom(norm);
+  const sansRoom = roomHit && roomHit.matched ? norm.replace(roomHit.matched, ' ') : norm;
+  const amt = SMParse.extractAmount(SMParse.maskNames(sansRoom, residents));
+  return cleanItem(amt ? dropWords(sansRoom, amt.matched) : sansRoom);
+}
+// … and how its amount was read, when that needed a guess and gave `amount`.
+async function noteFor(text, amount) {
+  const { rows: residents } = await pool.query(`SELECT g.id, g.name FROM guests g WHERE g.is_active=true`);
+  const norm = normaliseAmount(SMParse.toLatin(String(text || '')));
+  const roomHit = SMParse.extractRoom(norm);
+  const amt = SMParse.extractAmount(SMParse.maskNames(roomHit && roomHit.matched ? norm.replace(roomHit.matched, ' ') : norm, residents));
+  return amt && amt.amount === Number(amount) ? amountBasis(amt) : undefined;
 }
 // Hotfix 21.3: when the amount came from a word that is also a name ("noor",
 // "savera"), the preview says how it was read, so a wrong guess is seen.
@@ -507,4 +538,4 @@ async function matchVendor(item) {
   return null;
 }
 
-module.exports = { intent, classify, repairVoice, checkRepair, fuzzyResidents, phoneticKey, looseKey, similarity, categorise, normaliseAmount, historyIndex, invalidateHistory, CATEGORIES, DICT, FAULT_WORDS, QUESTION };
+module.exports = { intent, classify, repairVoice, checkRepair, stripFiller, itemOf, noteFor, fuzzyResidents, phoneticKey, looseKey, similarity, categorise, normaliseAmount, historyIndex, invalidateHistory, CATEGORIES, DICT, FAULT_WORDS, QUESTION };
