@@ -247,6 +247,25 @@ const api = async (method, path, body, token) => {
       ai.providers.groqText = async ({ user }) => { groqCalls++; return user === 'ping' ? 'OK' : JSON.stringify({ category: 'Electrical', priority: 'low', description: 'x' }); };
       r = await api('GET', '/ai/probe', null, adminTok);
       ok(r.data.groq.ok === true && r.data.in_use === 'groq' && ai.providers.groqDownUntil === 0, 'S20-2 a working Groq is used again straight away');
+      // Sprint 22: the connection test pauses Groq only when Gemini can stand in.
+      ai.providers.groqText = async () => { const e = new Error('Groq 503: down'); e.status = 503; throw e; };
+      ai.providers.geminiText = async () => { throw new Error('Gemini 500: also down'); };
+      ai.providers.groqDownUntil = 0;
+      r = await api('GET', '/ai/probe', null, adminTok);
+      ok(r.data.groq.ok === false && r.data.gemini.ok === false && ai.providers.groqDownUntil === 0 && r.data.fallback === false, `S22 both down: the test does not start a Groq pause — there is nothing to fall back to (${JSON.stringify([r.data.in_use, r.data.fallback])})`);
+      ai.providers.geminiText = async () => 'OK';
+      r = await api('GET', '/ai/probe', null, adminTok);
+      ok(r.data.groq.ok === false && ai.providers.groqDownUntil > Date.now() + 9 * 60000 && r.data.in_use === 'gemini', 'S22 Groq down, Gemini fine: Groq is paused and Gemini is in use');
+      ai.providers.groqDownUntil = 0;
+      // Sprint 22: the real Gemini request — JSON asked for only when wanted, key in a header, never in the URL.
+      { const keepFetch = global.fetch, keepKey = process.env.GEMINI_API_KEY; process.env.GEMINI_API_KEY = 'gem-test-key';
+        const aiPath = require.resolve('../routes/ai'); const cached = require.cache[aiPath]; delete require.cache[aiPath];
+        const freshGem = require('../routes/ai').providers.geminiText; require.cache[aiPath] = cached;
+        const seen = [];
+        global.fetch = async (url, opts) => /generativelanguage/.test(url) ? (seen.push({ url, headers: opts.headers, body: JSON.parse(opts.body) }), { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: '{"a":1}' }] } }] }) }) : keepFetch(url, opts);
+        let outJ, outT; try { outJ = await freshGem({ prompt: 'p1', json: true }); outT = await freshGem({ prompt: 'p2' }); } finally { global.fetch = keepFetch; if (keepKey === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = keepKey; }
+        ok(seen.length === 2 && seen[0].body.generationConfig.responseMimeType === 'application/json' && seen[1].body.generationConfig.responseMimeType === undefined, `S22 Gemini is asked for JSON only when JSON is wanted (${JSON.stringify(seen.map(x => x.body.generationConfig))})`);
+        ok(seen.every(x => x.headers['x-goog-api-key'] === 'gem-test-key' && !/gem-test-key/.test(x.url)) && seen[0].body.contents[0].parts[0].text === 'p1' && outJ === '{"a":1}' && outT === '{"a":1}', 'S22 …with the key in a header (never in the URL), the prompt as sent, and the text returned'); }
       // No provider at all → a clear error, not a hang
       ai.providers.groqText = async () => { throw new Error('down'); };
       ai.providers.geminiText = async () => { throw new Error('also down'); };

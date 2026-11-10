@@ -556,7 +556,8 @@ router.post('/collections', auth, async (req, res) => {
   // lock checks that date too (a blank date used to get the UTC date, past the lock).
   const cDate = (req.body && req.body.collection_date) || istToday();
   if (cDate && await require('../services/finance').isDayClosed(cDate)) {
-    return res.status(409).json({ error: `${cDate} has been closed and counted. Reopen the day first (Admin) or record this against today.` });
+    // Sprint 22: "record this against today" is no help when today is the closed day.
+    return res.status(409).json({ error: cDate === istToday() ? `Today (${cDate}) has been closed and counted. An admin must reopen the day before more money can be recorded.` : `${cDate} has been closed and counted. Reopen the day first (Admin) or record this against today.` });
   }
   const src = ['manual','voice','photo','copilot','quick'].includes(req.body.source) ? req.body.source : 'manual';
   const { guest_id,guest_name,amount,collection_date,collection_month,collection_type,payment_mode,description,receipt_number } = req.body;

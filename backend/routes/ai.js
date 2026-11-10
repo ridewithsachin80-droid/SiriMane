@@ -216,7 +216,11 @@ router.get('/probe', auth, async (req, res) => {
   // Sprint 20: a working Groq ends any skip window; a failing one starts it.
   if (process.env.GROQ_API_KEY || providers._stub) {
     if (out.groq.ok) providers.groqDownUntil = 0;
-    else { providers.groqDownUntil = Date.now() + GROQ_COOLDOWN_MS; providers.groqLastError = out.groq.error || 'probe failed'; }
+    else {
+      providers.groqLastError = out.groq.error || 'probe failed';
+      // Sprint 22: with no working Gemini to stand in, skipping Groq would leave no AI at all.
+      if (out.gemini && out.gemini.ok) providers.groqDownUntil = Date.now() + GROQ_COOLDOWN_MS;
+    }
   }
   const groqUsable = !!(process.env.GROQ_API_KEY || providers._stub) && Date.now() >= providers.groqDownUntil;
   out.in_use = groqUsable ? 'groq' : (out.gemini.ok ? 'gemini' : null);
