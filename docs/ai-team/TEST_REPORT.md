@@ -505,3 +505,8 @@ Backlog (minor): the probe still starts the skip window in a Groq-only setup (pr
 - Test isolation: a full run and an api run collided on one database (old tests failed); both were discarded and re-run alone.
 - Gates on d578ea3: 12/12 ×2, 3,520 each (api 492, ui 996). No migration, no new dependency.
 - Open: point `hasMap` at the real Google Business Profile once it exists; add real room photos with alt text when the owner sends them.
+
+### Sprint 23.1 — owner-confirmed facts in the copy (10 Nov 20:21)
+- Owner confirmed: hours 9–8 every day; rent includes everything; resident warden and visitor log; SIT is a 4–5 minute walk.
+- Copy updated accordingly (hero, FAQ 1 and 3, business description); FAQPage structured data regenerated from the page text. No code change.
+- Gates: api 492, ui 996 (full run below). Lighter review: parse + diff only, since the words are the owner's.
