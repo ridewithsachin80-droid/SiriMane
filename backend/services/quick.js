@@ -69,7 +69,7 @@ const QUESTION = /^(who|what|which|how|when|where|why|is|are|do|does|did|can|cou
 // "yaaru kottilla" — so these count anywhere in the sentence. A word that is
 // part of a resident's name ("Elli") is not a question word.
 const KN_QUESTION_WORDS = new Set(['yaaru', 'yaru', 'eshtu', 'estu', 'eshtidhe', 'eshtide', 'yaavaga', 'yavaga', 'elli', 'yaake', 'yake', 'enu', 'yenu', 'yaava', 'yava', 'yaavudu', 'hege', 'heege']);
-const MODE_WORDS = /\b(upi|gpay|google pay|phonepe|phone pe|paytm|cash|nagadu|bank|neft|imps|transfer|card)\b/gi;
+const MODE_WORDS = /\b(upi|upay|upai|gpay|google pay|phonepe|phone pe|paytm|cash|nagadu|bank|neft|imps|transfer|card)\b/gi;
 const NOISE = /\b(rs\.?|rupees?|rupaye|rupai|rupaayi|rupayi|roopaayi|inr|kottaru|kottlu|kotlu|kotte|kotta|kottu|kottidaare|kottidaale|kottide|tagondu|tagonde|tegedukonde|kharchu|kharch|ge|ige|ke|paid|pay|payment|gave|give|given|got|received|collected|collect|for|of|to|the|a|an|and|today|yesterday|bought|brought|bougt|buy|purchased|purchsed|purchase|spent|expense|expenses|bill|by|via|from|on|in|at|rent|deposit|advance)\b/gi;
 
 // "100rs", "rs100", "rs.100", "₹100", "100/-", "1k" → a number the parser sees.
@@ -171,6 +171,71 @@ Reply ONLY with JSON {"phrase": "<the phrase>", "confidence": "high"|"low"}. Nev
     return phrase && phrase.toLowerCase() !== raw.toLowerCase() ? { phrase, confidence: parsed.confidence === 'high' ? 'high' : 'low' } : null;
   } catch (e) { return null; }
 }
+// Hotfix 21.2: the model may fix how a word was HEARD, never add a fact. It
+// once turned "Nooru rupee" into "Sachin Gs 100 cash deposit". What was heard
+// is read here exactly as classify reads it (room out, names blanked, amount,
+// mode, type), and a repaired reading is used only if:
+//  · a payment's resident was actually heard — in the words left once the
+//    amount, mode and filler words are gone ("aaru savira" is not Savitha) —
+//    and, where two residents share that name, a word unique to this one was;
+//  · its type (rent / deposit / advance) is the type that was heard;
+//  · its amount is an amount that was heard;
+//  · an expense is not conjured from a bare number, nor a question re-worded.
+// A payment mode that was not heard is dropped (she is asked for it).
+// Returns { ok } — or { ok:false, suggest:<resident> } when she DID say a word
+// nobody could place and the model thinks it is this resident: that becomes a
+// "Did you mean …?" question with a tap, never a prepared entry.
+function readHeard(h, residents) {
+  const norm = normaliseAmount(SMParse.toLatin(String(h || '')));
+  const roomHit = SMParse.extractRoom(norm);
+  const sansRoom = roomHit && roomHit.matched ? norm.replace(roomHit.matched, ' ') : norm;
+  const amt = SMParse.extractAmount(SMParse.maskNames(sansRoom, residents));
+  const modeHit = SMParse.extractMode(norm);
+  const nameText = (amt && amt.matched ? dropWords(sansRoom, amt.matched) : sansRoom).replace(MODE_WORDS, ' ').replace(NOISE, ' ');
+  return { amount: amt ? amt.amount : null, mode: modeHit ? modeHit.mode : null, type: /\bdeposit\b/i.test(norm) ? 'deposit' : /\badvance\b/i.test(norm) ? 'advance' : 'rent',
+    words: tokens(nameText).filter(w => w.length >= 3 && !SMParse.RUPEE_WORD.test(w) && !SMParse.extractAmount(w)) };
+}
+function soundsLike(w, p) {
+  if (w === p || similarity(w, p) >= 0.7) return true;
+  const kw = phoneticKey(w), kp = phoneticKey(p), sk = kp.replace(/[aeiou]/g, '');
+  return (kw === kp && kp.length >= 3) || (sk.length >= 3 && sk === kw.replace(/[aeiou]/g, '') && w.length >= 4);
+}
+function checkRepair(first, second, heard, residents, hist) {
+  if (!second || !second.tool) return { ok: false };                       // a re-worded question adds nothing she said
+  const said = heard.map(h => readHeard(h, residents));
+  const words = [...new Set(said.flatMap(x => x.words))];
+  const a = second.args || {};
+  if (second.tool === 'prepare_payment') {
+    const r = residents.find(x => x.id === a.resident_id);
+    const parts = who => String(who || '').toLowerCase().split(/\s+/).filter(p => p.length >= 3);
+    const heardName = who => parts(who).some(p => words.some(w => soundsLike(w, p)));
+    if (!heardName(r ? r.name : a.name)) {
+      // A word she said that is no amount, mode, filler, known item or learned item.
+      // …and that at least starts like, or half-resembles, the model's resident
+      // ("Satin" → Sachin, "Johnny" → Jhanavi; never "heerly" → Sachin).
+      const loose = (said[0] ? said[0].words : []).filter(w => !DICT_INDEX.has(w) && !(hist && hist.has(w) && Object.keys(hist.get(w)).some(c => c !== 'Other')));
+      const word = r ? loose.find(w => parts(r.name).some(p => w[0] === p[0] || similarity(w, p) >= 0.5)) : null;
+      return { ok: false, suggest: word ? r : null, said: said[0], word };
+    }
+    if (r) {
+      // "Priya" does not pick between two Priyas, nor "Somya" between Sowmya and
+      // Soumya: some heard word must sound like HER name and like nobody else's.
+      const others = residents.filter(x => x.id !== r.id && heardName(x.name));
+      const like = (w, who) => parts(who.name).some(p => soundsLike(w, p));
+      if (others.length && !words.some(w => like(w, r) && !others.some(o => like(w, o)))) return { ok: false };
+    }
+    // The type is the one in what she said first; an alternative transcript may
+    // not drop a "deposit" (review 21.2 r2 S-d).
+    const type = a.type || 'rent';
+    if (said[0] && said[0].type !== 'rent' ? type !== said[0].type : !said.some(x => x.type === type)) return { ok: false };
+  }
+  if (second.tool === 'prepare_expense' && first && first.ask === 'what') return { ok: false };   // only a number was heard
+  if (a.amount != null && !said.some(x => x.amount === Number(a.amount))) return { ok: false };
+  // The mode is the one she said (review 21.2 S1) — or none, and she is asked.
+  const heardMode = (said.find(x => x.mode) || {}).mode;
+  if (heardMode) a.mode = heardMode; else delete a.mode;
+  return { ok: true };
+}
 function weak(i) {
   if (!i) return true;
   if (i.kind === 'expense' && i.tool && (!i.args.category || i.args.category === 'Other')) return true;   // item nobody recognised
@@ -191,7 +256,20 @@ async function intent(text, user, context, opts = {}) {
   const fix = await repairVoice(String(text || '').trim(), opts.alternatives, residents);
   if (fix) {
     const second = await classify(fix.phrase, user, context, { allowModel: true });
-    if (second) return { ...second, heard: String(text || '').trim(), understood: fix.phrase, repair_confidence: fix.confidence };
+    const heard = [String(text || '').trim(), ...(opts.alternatives || [])];
+    const verdict = checkRepair(first, second, heard, residents, await historyIndex());
+    if (verdict.ok) return { ...second, heard: String(text || '').trim(), understood: fix.phrase, repair_confidence: fix.confidence };
+    if (second && second.tool === 'prepare_payment') {
+      // Review 21.2 S3: never slide from a payment the model could not prove into
+      // an expense preview of the same money. Ask who it was — with what was HEARD.
+      if (first && first.tool === 'prepare_payment') return first;   // the rules already read a collection (and ask who, or how much)
+      if (verdict.suggest) {
+        const h = verdict.said;
+        return { tool: 'prepare_payment', args: { name: verdict.word, suggest_id: verdict.suggest.id, amount: h.amount || undefined, mode: h.mode || undefined, type: h.type }, via: 'quick', kind: 'collection',
+          fuzzy: [{ id: verdict.suggest.id, name: verdict.suggest.name, room_number: verdict.suggest.room_number, why: 'suggested from what was heard' }] };
+      }
+      if (first && !(first.tool === 'prepare_expense')) return first;
+    } else if (first && !first.tool) return first;   // a rejected repair never replaces the rules' own question
   }
   // No repair possible: give the item one chance at a model category, as typed text gets.
   return classify(text, user, context, { allowModel: true });
@@ -223,7 +301,7 @@ async function classify(text, user, context, copts = {}) {
   const nameWords = new Set(residents.flatMap(r => String(r.name || '').toLowerCase().split(/\s+/)));
   if (tokens(raw).some(w => KN_QUESTION_WORDS.has(w) && !nameWords.has(w))) return null;
   // Review S21: the amount's own words ("nooraivattu", "5000") are never a name.
-  const nameText = (amt && amt.matched ? dropWords(sansRoom, amt.matched) : norm).replace(MODE_WORDS, ' ');
+  const nameText = (amt && amt.matched ? dropWords(sansRoom, amt.matched) : norm).replace(MODE_WORDS, ' ').split(/\s+/).filter(w => !SMParse.RUPEE_WORD.test(w.toLowerCase().replace(/[^a-z]/g, ''))).join(' ');
   const match = SMParse.matchResident(nameText, residents, room);
   const type = /\bdeposit\b/i.test(norm) ? 'deposit' : /\badvance\b/i.test(norm) ? 'advance' : 'rent';
   if (match) {
@@ -253,10 +331,10 @@ async function classify(text, user, context, copts = {}) {
 
   // 4. Money without a name → an expense.
   if (amount) {
-    const item = dropWords(sansRoom, amt.matched).replace(MODE_WORDS, ' ').replace(NOISE, ' ').replace(/\b(room|rum)\s*[a-z]?\d{1,3}[a-z]?\b/gi, ' ').replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim();
+    const item = dropWords(sansRoom, amt.matched).split(/\s+/).filter(w => !SMParse.RUPEE_WORD.test(w.toLowerCase().replace(/[^a-z]/g, ''))).join(' ').replace(MODE_WORDS, ' ').replace(NOISE, ' ').replace(/\b(room|rum)\s*[a-z]?\d{1,3}[a-z]?\b/gi, ' ').replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim();
     if (!item) {
       // Decision 2: never file a blind rupee figure.
-      return { tool: null, clarify: `What was ₹${amount.toLocaleString('en-IN')} for? Say the item too — e.g. "onion ${amount}".`, retry_text: raw + ' ', via: 'quick', kind: 'expense' };
+      return { tool: null, clarify: `What was ₹${amount.toLocaleString('en-IN')} for? Say the item too — e.g. "onion ${amount}".`, retry_text: raw + ' ', via: 'quick', kind: 'expense', ask: 'what' };
     }
     const vendor = await matchVendor(item);
     const { category, basis, via } = await categorise(vendor ? item.replace(new RegExp(vendor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), ' ') : item, { allowModel: copts.allowModel !== false });
@@ -341,8 +419,25 @@ for (const [word, cat] of DICT_INDEX) { const key = looseKey(word); DICT_KEYS.pu
 
 // Residents whose name is CLOSE to something in the text, best first.
 // Returns [] when nothing is close enough — never a wild guess.
+// Review 21.2 B2: only for a word that has never been given a real category.
+// "sweet" filed under Groceries stays an item beside a resident Swathi; a word
+// filed only under Other ("Janvi", from a mis-heard entry) taught nothing and
+// must not bar the resident's name.
+function clearlyAName(w, residents, hist) {
+  const e = hist && hist.get(w);
+  if (!e || Object.keys(e).some(c => c !== 'Other')) return false;
+  const kw = phoneticKey(w), skw = kw.replace(/[aeiou]/g, '');
+  return residents.some(r => String(r.name || '').toLowerCase().split(/\s+/).some(p => {
+    if (p.length < 3) return false;
+    const kp = phoneticKey(p), sk = kp.replace(/[aeiou]/g, '');
+    return p === w || (kp === kw && kp.length >= 3) || (sk.length >= 3 && sk === skw && w.length >= 4);
+  }));
+}
 function fuzzyResidents(text, residents, hist) {
-  const words = tokens(text).filter(w => w.length >= 3 && !NOISE.test(' ' + w + ' ') && !DICT_INDEX.has(w) && !(hist && hist.has(w)));
+  // Hotfix 21.2: a word once saved in an expense note ("Janvi I Savera") used to
+  // be barred as a name for ever — then "Janvi 5000 upi" became an expense. A
+  // history word still counts when it clearly IS a resident's name.
+  const words = tokens(text).filter(w => w.length >= 3 && !NOISE.test(' ' + w + ' ') && !DICT_INDEX.has(w) && !(hist && hist.has(w) && !clearlyAName(w, residents, hist)));
   const out = [];
   for (const r of residents) {
     const parts = String(r.name || '').toLowerCase().split(/\s+/).filter(p => p.length >= 3);
@@ -383,4 +478,4 @@ async function matchVendor(item) {
   return null;
 }
 
-module.exports = { intent, classify, repairVoice, fuzzyResidents, phoneticKey, looseKey, similarity, categorise, normaliseAmount, historyIndex, invalidateHistory, CATEGORIES, DICT, FAULT_WORDS, QUESTION };
+module.exports = { intent, classify, repairVoice, checkRepair, fuzzyResidents, phoneticKey, looseKey, similarity, categorise, normaliseAmount, historyIndex, invalidateHistory, CATEGORIES, DICT, FAULT_WORDS, QUESTION };

@@ -424,3 +424,38 @@ Backlog (minor): the probe still starts the skip window in a Groq-only setup (pr
 - Mutations H1–H6 all caught. H5 survived once, until the "Kitten food ten" and "Paneer 1500g 500" tests were added.
 - Test isolation: one full run picked up a test edit made mid-run and was discarded.
 - Gates on d47f73b: 12/12 ×2, 3,207 each (quick 460, ui 958). No migration.
+
+### Hotfix 21.2 — the owner's phone on Test, English-mode mic (10 Nov, 16:13–16:15)
+- Evidence (seven screenshots, mic still in English mode in all of them):
+  - "Nooru rupee" → the rules asked "What was ₹100 for?", then the voice-repair model rewrote it as "Sachin Gs 100 cash deposit" and a ₹100 deposit from Sachin Gs was previewed. Nobody said a name or "deposit".
+  - "noorulu upay" → the repair invented "groceries 100 upi".
+  - "Janvi I do Savera upi" (ಐದು ಸಾವಿರ) → a ₹2 expense "Janvi I Savera" ("do" read as Hindi 2; and "Janvi" was barred as a name because an earlier expense note contained it).
+  - "Janvi I Jo Savera upi" → no amount. "Noor upay" → fell through to the Copilot, which answered about rent.
+- Fix, first cut (71b51de): a guard on the repair (resident, type, amount and item must have been heard), "I do/I jo" + ಸಾವಿರ = 5, savera/noor/upay spellings, a history word no longer bars a clear resident name.
+- Review round 1: **BLOCK** (71b51de).
+  - B1: "noor"/"savera" as free multipliers gave wrong figures ("Noor salary aidu saavira" → ₹100; with a Noorjahan, "Noor, five thousand upi" → ₹5,100; "savera hotel tiffin two hundred" → ₹1,000).
+  - B2: the name-over-history rule fired on any skeleton match ("sweet" filed under Groceries → "Did you mean Swathi?").
+  - B3: the guard counted amount, rupee and mode words as proof of a name ("aaru savira upi" → Savitha), and let the model choose between two Priyas.
+  - S1–S6: mode swap, type swap/drop/Kannada-script bypass, rejected payment falling to an expense preview, "I do sabira" → ₹2, re-worded questions, room number read as a heard amount.
+- Fixes (e471434, bbbe8ad):
+  - Noor/Savera multiply only straight after a number; a lone "noor" is ₹100 only when it ends the phrase; names (and 4+-letter name prefixes that are not real number words) are blanked before any amount is read.
+  - A history word bars a name unless its history is solely "Other".
+  - The repair check reads each heard transcript the way the rules do (room out, names blanked) and compares resident, type, amount and mode against it; a shared first name is never settled by the model; a re-worded question is rejected.
+  - A resident the model recognised but nobody can prove becomes "Did you mean …?" with a tap (new optional `suggest_id` on prepare_payment), using only the amount, mode and type that were heard — and only when a heard word resembles the name.
+  - Found while replaying the review table, present before this hotfix: "rupai"/"rupaye" matched a resident named Rupa by prefix. Rupee words are no longer name evidence.
+- Deliberate change to an existing test (Sprint 14, VOICE "janvi five thousand upi"): with two Jhanavis the model used to pick one; it now asks with both offered.
+- Mutations: J1–J9 on the first cut and K1–K20 + K6b on the fixes, all caught. Two survived at first (J9 name evidence, K6b second rupee filter) until tests were added for them.
+- Review round 2: **BLOCK** (bbbe8ad). Round-1 findings verified fixed; all four owner incidents replay correctly.
+  - N1 (my own regression): a number under 100 before a shop name was multiplied — "rice 50 Noor stores" → ₹5,000, "tiffin 80 Savera hotel" → ₹80,000.
+  - S-a similar names (Sowmya/Soumya) still settled by the model; S-b more rupee spellings read as Rupa; S-c "rice from Noor" → ₹100; S-d a heard "deposit" dropped through an alternative transcript; S-e on a resident's page, a different spoken name went to the page's resident.
+- Fixes (f7979a4):
+  - A heard multiplier counts only if the count fits (ನೂರು takes 1–9, ಸಾವಿರ 1–99) and what follows is the end, a rupee/mode word, a payment word or more of the number. Otherwise a real number stands as said, and a guessed one ("I do", "I") gives no amount.
+  - A heard word must sound like the chosen resident and like no other; rupee spellings extended and removed from name evidence and from the expense item; "noor" after from/to/by/salary is a person; a "deposit" in the first transcript must be kept; prepare_payment uses the page's resident only when no name was said.
+- Mutations L1–L11 on these fixes, all caught.
+- Review round 3: **APPROVE** (f7979a4). No phrase worse than base on rupee figure or resident, apart from the known residuals below. The reviewer stubbed the repair model throughout: the real model's behaviour is not tested here, so the owner replays the four phrases on Test.
+- Gates on f7979a4: 12/12 ×2, 3,338 each (quick 591, ui 958). No migration, no new dependency.
+- Open, from the review (none blocking):
+  - S-e is half closed: copilot.js `localIntent`/`enrichRawArgs` (phrases with a 3–6 digit number and a mode word, e.g. "Suchin 6000 cash" on Jhanavi's page) still fall back to the page's resident, as at base. The new comment in tools.js cites that very phrase and is therefore inaccurate until this is fixed.
+  - A resident's name or "for" right after a heard multiplier stops it multiplying ("five savera Jhanavi" → ₹5, as at base).
+  - A vendor called Savera or Noor as the LAST word: "tiffin 80 savera" → ₹80,000, "rice 5 noor" → ₹500 (base ₹80, ₹5). Comes with reading "5 Savera" as 5,000.
+  - Items filed only under Other still flip to a resident question (bindi → Bindu); the "Did you mean" suggestion matches on first letter alone; an invented expense item passes when the amount was heard; Hindi fraction words.

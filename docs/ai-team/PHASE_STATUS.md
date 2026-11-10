@@ -261,3 +261,7 @@ Note: the owner said to start building at once, so these criteria were written a
 | S21-15 | Gates 12/12 twice; mutations caught; independent review before merge. **Not verifiable here:** what Chrome on a real Android phone writes in ಕನ್ನಡ mode (digits vs words, loan-word spellings). The owner tries it after release | QA |
 
 **Sprint 21 status:** approved by the independent review in round 6 (d103b88), after BLOCK ×5. Gates 12/12 ×2, 3,169 each. Merged to ai/test. No migration. The owner checks ಕನ್ನಡ voice on a real phone on Test (S21-15).
+
+**Hotfix 21.1 status:** approved (d47f73b), merged to ai/test (PR #30).
+
+**Hotfix 21.2 status:** approved by the independent review in round 3 (f7979a4), after BLOCK ×2. Gates 12/12 ×2, 3,338 each. Merged to ai/test. No migration. Follow-ups are listed under Hotfix 21.2 in TEST_REPORT.md; the first is the other half of S-e (copilot.js page-resident fallback). Still unverified on a real phone: ಕನ್ನಡ mode (every owner screenshot so far is English mode), and the real repair model on the four owner phrases.
