@@ -267,3 +267,21 @@ Note: the owner said to start building at once, so these criteria were written a
 **Hotfix 21.2 status:** approved by the independent review in round 3 (f7979a4), after BLOCK ×2. Gates 12/12 ×2, 3,338 each. Merged to ai/test. No migration. Follow-ups are listed under Hotfix 21.2 in TEST_REPORT.md; the first is the other half of S-e (copilot.js page-resident fallback). Still unverified on a real phone: ಕನ್ನಡ mode (every owner screenshot so far is English mode), and the real repair model on the four owner phrases.
 
 **Hotfix 21.3 status:** approved by the independent review in round 2 (bb31178), after BLOCK ×1. Gates 12/12 ×2, 3,454 each. Merged to ai/test. No migration. Follow-ups are listed under Hotfix 21.3 in TEST_REPORT.md.
+
+## Sprint 22 — stability sweep (backlog from Sprints 17–21 and the 21.x reviews)
+Owner, 10 Nov: "keep working, stop whenever my decision is required". No decision needed: every item is a known defect with the fix already agreed in a review.
+
+| ID | Acceptance criterion | Review |
+|---|---|---|
+| S22-1 | On a resident's page, an ordinary leftover word inside another resident's name ("6000 cash van" → Bhavana) does not list that resident; only a whole name word, the start of one (4+ letters) or a sound-alike counts | UX |
+| S22-2 | More Kannada/English filler on a resident's page needs no tap (avalu, old dues, morning, hostel fee, token, qr code …) | UX |
+| S22-3 | A weight is never money: "rice 2 thousand 5 hundred grams" has no amount; "rice 5 hundred grams 60" is ₹60 | MONEY |
+| S22-4 | A resident's payment in thousands ("hattu savera deposit" → ₹10,000) is prepared with the note; only an unusual figure (above ₹25,000) is asked about | UX |
+| S22-5 | The "Test AI connection" probe pauses Groq only when Gemini can stand in (as `providers.text` does) | COST |
+| S22-6 | Gemini's request body is tested: JSON asked for only when wanted, the key in a header and never in the URL | QA |
+| S22-7 | The 409 closed-day message, when the closed day is today, says an admin must reopen it (not "record this against today") | UX |
+| S22-8 | Stopping the mic (or a silent timeout) never leaves "Listening…" on screen | UX |
+| S22-9 | "+ Add Staff" and the search box fit a 360 px screen | UX |
+| S22-10 | Gates 12/12 twice; mutations caught; independent review before merge | QA |
+
+**Sprint 22 status:** approved by the independent review in round 1 (3c2b159). Gates 12/12 (3,490) on e482643. Merged to ai/test. No migration.

@@ -841,6 +841,26 @@ const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toI
     ok(!r.data.proposal && sTap, `H21.3 r1 "Suchin 5 savera upi" asks about Sachin (got ${String(r.data.answer).slice(0, 60)})`);
     t3 = await api('POST', '/copilot/ask', { text: 'Suchin 5 savera upi', tool: sTap.tool, args: sTap.args, context: { page: 'finance-overview' } }, adminTok);
     ok(t3.data.proposal && Number(t3.data.proposal.preview.amount) === 5000 && /I read "5 savera" as ₹5,000\./.test(t3.data.answer), `H21.3 r1 …and after the tap the preview still says how the amount was read (got ${String(t3.data.answer).slice(0, 140)})`);
+    // ── Sprint 22: stability sweep ───────────────────────────────────────
+    // A weight is not money, with or without a multiplier word.
+    for (const [t, n] of [['rice 2 thousand 5 hundred grams', null], ['onion 1 thousand 2 hundred gm 50', 50], ['rice 5 hundred grams 60', 60], ['rice 500 grams 60', 60], ['plumber 2 thousand 5 hundred cash', 2500], ['6 thousand', 6000], ['a thousand', 1000], ['onion hundred', 100], ['1.5k', 1500]]) eq(amtOf(t), n, `S22 "${t}" is ${n === null ? 'no amount' : '₹' + n}`);
+    // A resident's deposit in thousands is prepared, not asked about; an unusual figure still is.
+    r = await ask(`Jhanavi ${alpha} hattu savera deposit upi`);
+    ok(r.data.proposal && Number(r.data.proposal.preview.amount) === 10000 && r.data.proposal.preview.collection_type === 'deposit' && r.data.proposal.preview.guest_id === jh.id && /I read "hattu savera" as ₹10,000\./.test(r.data.answer), `S22 "hattu savera deposit" is her ₹10,000 deposit, with the note (got ${String(r.data.answer).slice(0, 120)})`);
+    r = await ask(`Jhanavi ${alpha} 80 savera upi`); ok(!r.data.proposal && r.data.actions.length === 2, 'S22 …while ₹80,000 is still asked about');
+    // On a resident's page: a leftover word that merely sits inside another name is not about her.
+    const bh = await mk5('Bhavana Rao', 34), rn = await mk5('Rani Shetty', 35);
+    ok(bh && bh.id && rn && rn.id, 'S22 (fixtures) Bhavana, Rani');
+    for (const t of ['6000 cash van', '6000 cash ran']) {
+      r = await onJh(t); ok(!r.data.proposal && r.data.answer === `Is this ₹6,000 from Jhanavi ${alpha} — the resident on this page?` && r.data.actions[0].args.resident_id === jh.id && !r.data.actions.some(a => a.args && (a.args.resident_id === bh.id || a.args.resident_id === rn.id)), `S22 on Jhanavi's page "${t}" asks about Jhanavi only (got ${String(r.data.answer).slice(0, 60)} · ${JSON.stringify(r.data.actions.map(a => a.label))})`);
+    }
+    r = await onJh('Bhavana 6000 cash'); ok(r.data.proposal && r.data.proposal.preview.guest_id === bh.id, 'S22 …while "Bhavana 6000 cash" there is Bhavana\'s payment');
+    r = await onJh('Bhav 6000 cash'); ok((r.data.proposal && r.data.proposal.preview.guest_id === bh.id) || (r.data.actions || []).some(a => a.args && a.args.resident_id === bh.id), `S22 …and "Bhav" (the start of her name) still leads to Bhavana (got ${String(r.data.answer).slice(0, 60)})`);
+    r = await ask('van 6000 cash'); ok(!r.data.proposal && r.data.actions.some(a => a.args && a.args.resident_id === bh.id), 'S22 off a resident page the old name search is unchanged');
+    for (const t of ['6000 cash avalu kottlu', 'old dues 6000 cash', 'morning 6000 upi', 'hostel fee 6000 upi', '6000 cash all dues', 'idu 6000 cash', 'token 6000 upi', 'qr code 6000 upi']) {
+      r = await onJh(t); ok(r.data.proposal && r.data.proposal.preview.guest_id === jh.id && Number(r.data.proposal.preview.amount) === 6000, `S22 "${t}" on her page needs no tap (got ${String(r.data.answer).slice(0, 70)})`);
+    }
+    await pool.query(`UPDATE guests SET is_active=false WHERE id = ANY($1)`, [[bh.id, rn.id]]);
     await pool.query(`UPDATE guests SET is_active=false WHERE id = ANY($1)`, [[bd.id, sc.id, kv2.id]]);
     console.log('✓ S21 Kannada');
 

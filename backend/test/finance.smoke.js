@@ -145,6 +145,9 @@ const monthsAgo = n => { const d = ist(); d.setUTCMonth(d.getUTCMonth() - n); re
     r = await S('POST', '/day-closing', { date: today(), counted: { cash: 5000, upi: 3000, bank: 0 } }); eq(r.status, 409, 'a closed day cannot be closed twice');
     r = await A('POST', '/collections', { guest_id: punctual.id, guest_name: punctual.name, amount: 100, collection_date: today(), collection_type: 'rent', payment_mode: 'cash' });
     eq(r.status, 409, 'MONEY: money cannot be backdated into a closed day'); ok(/closed and counted/.test(r.data.error), 'and the message says why');
+    // Sprint 22: when the closed day IS today, "record this against today" is no help.
+    { const isToday = today() === require('../services/istdate').istToday();
+      ok(isToday ? (/^Today \(/.test(r.data.error) && /admin must reopen/.test(r.data.error) && !/against today/.test(r.data.error)) : /record this against today/.test(r.data.error), `S22 the closed-day message fits the day (${r.data.error})`); }
     r = await S('POST', '/day-closing/reopen', { date: today() }); eq(r.status, 403, 'staff cannot reopen a day');
     r = await A('POST', '/day-closing/reopen', { date: today() }); eq(r.status, 200, 'admin can');
     r = await A('POST', '/collections', { guest_id: punctual.id, guest_name: punctual.name, amount: 100, collection_date: today(), collection_type: 'rent', payment_mode: 'cash' });

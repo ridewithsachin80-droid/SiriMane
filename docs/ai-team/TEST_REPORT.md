@@ -484,3 +484,15 @@ Backlog (minor): the probe still starts the skip window in a Groq-only setup (pr
   - Hundreds of a weight are added to a price ("rice 2 thousand 5 hundred grams" → ₹2,500).
   - Prefix name-matching (present before 21.x): "6000 upi rose" → Rosemary.
   - Unchanged: "6 thousand 500" = ₹6,000; glued "80savera"; Hindi fraction words.
+
+### Sprint 22 — stability sweep: evidence and review
+- Scope: nine backlog items from the 17–21.x reviews (PHASE_STATUS S22-1…9). No migration, no new dependency.
+- Mutations P1–P11 (10: candidate filter, weight after hundreds, digit re-read, unit after multiplier, ₹25,000 threshold, probe pause, Gemini JSON flag, closed-day message, mic-off message, header wrap) all caught.
+- Review (G3): **APPROVE** first round (code 3c2b159). Verified against e87d3b8 with a 39-name roster and the 21.2 corpora; no money regression. The reviewer did not run the UI suite (S22-8/9 verified by code reading); the UI gate here passes at 360/390 px.
+- Test flake found by the full run: "Bhav 6000 cash" tied with another fixture's name in one database state and asked instead of preparing. The assertion now accepts either path that leads to Bhavana (e482643).
+- One xss run hit a 30 s navigation timeout on page load (a suite this sprint does not touch); it passed on both reruns.
+- Gates on e482643: 12/12, 3,490 (first full run); second run 11/12 + xss rerun 2/2 (141).
+- Open, from the review (none blocking):
+  - 3-letter name prefixes ("Anu" for Anusha) on a resident's page now ask about the page resident instead of offering the other resident.
+  - Off a resident's page, a phrase made only of stop words ("6000 cash all dues") says "I could not find that resident" where a "from whom?" question would be better.
+  - A quantity unit after "N thousand M hundred" for a resident's payment now asks the amount rather than preparing it.

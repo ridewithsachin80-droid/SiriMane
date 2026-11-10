@@ -463,6 +463,12 @@ async function runAtWidth(browser, BASE, width) {
   const adminTabs = await page.$$eval('.admin-tabs .btn', (bs) => bs.map(b => { const r = b.getBoundingClientRect(); return { t: b.textContent.trim(), left: r.left, right: r.right, h: r.height }; }));
   const vw = await page.evaluate(() => document.documentElement.clientWidth);
   eq(adminTabs.length, 6, `${tag} S20-3 Admin has six tabs`);
+  // Sprint 22: "+ Add Staff" was pushed off a phone screen by the search box.
+  await page.evaluate(() => switchAdminTab('staff'));
+  await page.waitForFunction(() => [...document.querySelectorAll('#admin-tab-content button')].some(b => /Add Staff/.test(b.textContent)), { timeout: 8000 });
+  const addStaff = await page.evaluate(() => { const b = [...document.querySelectorAll('#admin-tab-content button')].find(x => /Add Staff/.test(x.textContent)); const r = b.getBoundingClientRect(); const s = document.querySelector('#admin-tab-content .card-header input'); const sr = s ? s.getBoundingClientRect() : null; return { left: r.left, right: r.right, h: r.height, search: sr ? [sr.left, sr.right, sr.width] : null }; });
+  ok(addStaff.left >= 0 && addStaff.right <= vw + 0.5, `${tag} S22 "+ Add Staff" is on screen (${Math.round(addStaff.left)}–${Math.round(addStaff.right)} of ${vw})`);
+  ok(!addStaff.search || (addStaff.search[0] >= 0 && addStaff.search[1] <= vw + 0.5 && addStaff.search[2] >= 100), `${tag} S22 …and so is the search box (${JSON.stringify(addStaff.search && addStaff.search.map(Math.round))})`);
   ok(adminTabs.every(x => x.left >= 0 && x.right <= vw + 0.5), `${tag} S20-3 every Admin tab is on screen (${adminTabs.filter(x => x.right > vw + 0.5).map(x => x.t).join(', ') || 'all visible'})`);
   ok(adminTabs.every(x => x.h >= 44), `${tag} S20-3 Admin tabs are 44 px tap targets (${Math.min(...adminTabs.map(x => Math.round(x.h)))} px)`);
   const tapTab = async (label) => { const all = await page.$$('.admin-tabs .btn'); for (const b of all) { if ((await b.evaluate(e => e.textContent.trim())) === label) { await b.tap(); return; } } throw new Error('no tab ' + label); };
@@ -527,6 +533,13 @@ async function runAtWidth(browser, BASE, width) {
   await page.tap('#copilot-mic');
   await page.waitForFunction(() => window.__recs.length === 3, { timeout: 5000 }).catch(async e => { console.log('DEBUG', await page.evaluate(() => { const m = document.getElementById('copilot-mic').getBoundingClientRect(); const at = document.elementFromPoint(m.left + m.width / 2, m.top + m.height / 2); return JSON.stringify({ n: window.__recs.length, smRec: !!smRec, at: at && (at.id || at.className), m: [m.top, m.left], status: document.getElementById('copilot-voice-status').textContent }); })); throw e; });
   eq(await page.evaluate(() => window.__recs[2].lang), 'kn-IN', `${tag} S21-12 the next tap listens in Kannada again`);
+  // Sprint 22: tapping the mic again to stop leaves no stale "Listening…".
+  await page.waitForFunction(() => /Listening in ಕನ್ನಡ/.test(document.getElementById('copilot-voice-status').textContent), { timeout: 5000 });
+  await page.tap('#copilot-mic');
+  await page.waitForFunction(() => /Mic is off — tap it to speak/.test(document.getElementById('copilot-voice-status').textContent), { timeout: 5000 });
+  ok(!/Listening/.test(await page.$eval('#copilot-voice-status', e => e.textContent)) && await page.$('#copilot-voice-status .voice-lang'), `${tag} S22 stopping the mic says it is off (and keeps the language switch)`);
+  await page.tap('#copilot-mic');
+  await page.waitForFunction(() => window.__recs.length === 4, { timeout: 5000 });
   // A phone without Kannada speech falls back to English and says so.
   // (A real recogniser starts before it can fail: wait for "Listening" first.)
   await page.waitForFunction(() => /Listening in ಕನ್ನಡ/.test(document.getElementById('copilot-voice-status').textContent), { timeout: 5000 });

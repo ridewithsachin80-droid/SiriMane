@@ -232,6 +232,9 @@
   const KN_MULT = new Set(['saavira', 'savira', 'sasira', 'saavirada', 'savirada', 'saviradha', 'sawida', 'sawira', 'savida', 'saavida', 'sawir', 'saweera', 'saveera', 'sawirada']);
   const DIGIT_UNITS = Object.keys(MULTIPLIERS).filter(k => k !== 'noora').concat(Object.keys(HEARD_MULT)).sort((a, b) => b.length - a.length).join('|');
   const HUNDREDS_AFTER = /^\s*(?:and\s+)?([1-9])\s*(?:hundred|hundreds|nooru|noor|sau)(?=\s|[^a-z0-9.]|$)/;
+  // "5 hundred" after the thousands — unless a unit of weight or count follows it.
+  function weightAfterHundreds(tail) { const h = tail.match(HUNDREDS_AFTER); if (!h) return false; const nx = (tail.slice(h[0].length).trim().split(/\s+/)[0] || '').replace(/[^a-z]/g, ''); return QTY.test(nx) || QTY_GLUED.test(nx); }
+  function moneyHundreds(tail) { return weightAfterHundreds(tail) ? null : tail.match(HUNDREDS_AFTER); }
   const ONE_OK = new Set(['a', 'an', 'and', 'one', 'ek', 'ondu', 'rs', 'rs.', 'rupees', 'rupee', 'inr']);
 
   // Returns { amount, matched } for the first amount in the text that is not
@@ -247,7 +250,8 @@
     while ((m = re.exec(lower))) {
       const after = lower.slice(m.index + m[0].length).trim().split(/\s+/)[0] || '';
       const glued = (lower.slice(m.index + 1).match(/^\d+(?:\.\d+)?([a-z]+)/) || [])[1] || '';
-      if (!m[2] && (QTY.test(after.replace(/[^a-z]/g, '')) || QTY_GLUED.test(glued))) continue;   // "5 kg", "5kg" — never "6000 g pay"
+      // Sprint 22: also "5 hundred grams" — a multiplier does not make a weight into money.
+      if ((m[2] !== 'k' && QTY.test(after.replace(/[^a-z]/g, ''))) || (!m[2] && QTY_GLUED.test(glued))) continue;   // "5 kg", "5kg" — never "6000 g pay"
       let n = parseFloat(m[1]);
       const unit = m[2] ? m[2].trim() : '';
       if (unit === 'k') n *= 1000;
@@ -259,14 +263,17 @@
         const after2 = rest.trim().split(/\s+/)[1] || '';
         if (!heardMultFits(unit, n, after, after2)) return { amount: Math.round(n), matched: m[1] };
         // "6 savera 5 noor" = 6,500 — the hundreds that follow belong to the number.
-        const more = unit !== 'noor' ? rest.match(HUNDREDS_AFTER) : null;
+        const more = unit !== 'noor' ? moneyHundreds(rest) : null;
         if (more) return { amount: Math.round(n * HEARD_MULT[unit] + Number(more[1]) * 100), matched: (m[0] + more[0]).trim() };
         return { amount: Math.round(n * HEARD_MULT[unit]), matched: m[0].trim(), alt: Math.round(n), altMatched: m[1], heardWord: unit };
       }
       else if (unit) {
         n *= MULTIPLIERS[unit];
         // "6 thousand 5 hundred", "6 saavira 5 nooru" = 6,500.
-        const more = MULTIPLIERS[unit] >= 1000 ? lower.slice(m.index + m[0].length).match(HUNDREDS_AFTER) : null;
+        const tail = lower.slice(m.index + m[0].length);
+        const more = MULTIPLIERS[unit] >= 1000 ? moneyHundreds(tail) : null;
+        // Sprint 22: "rice 2 thousand 5 hundred grams" is a weight, not ₹2,500 — keep looking for the price.
+        if (MULTIPLIERS[unit] >= 1000 && !more && weightAfterHundreds(tail)) { re.lastIndex = m.index + m[0].length + tail.match(HUNDREDS_AFTER)[0].length; continue; }
         if (more) return { amount: Math.round(n + Number(more[1]) * 100), matched: (m[0] + more[0]).trim() };
       }
       return { amount: Math.round(n), matched: m[0].trim() };
@@ -319,6 +326,8 @@
       if (w === 'noora' && numberWord(nextW) == null) { if (seenAny) return null; matchedWords = []; continue; }   // "aidu noora" — unclear: ask
       if (w in MULTIPLIERS) {
         if (!seenAny && !pendingHalf) {
+          // A digit right before it was already read (and set aside as a quantity) above: not "1 ×".
+          if (/^\d/.test(words[i - 1] || '')) { matchedWords = []; continue; }
           const prev = (words[i - 1] || '').replace(/[^a-z.]/g, '');
           // B1: a Kannada ಸಾವಿರ/ನೂರು after a word we could not read ("ಐದೂವ್ರೆ ಸಾವಿರ") is a
           // number we missed — no amount, so she is asked. English "onion hundred" stays ₹100.

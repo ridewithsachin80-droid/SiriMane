@@ -311,7 +311,9 @@ async function classify(text, user, context, copts = {}) {
   if (match) {
     // 21.3: "Jhanavi 80 savera" — ₹80,000 or ₹80? Neither is a usual rent: ask.
     // ("Jhanavi 5 Savera" is ₹5,000: nobody pays ₹5, and the preview says how it was read.)
-    if (amt && amt.alt != null && amt.alt >= 10) {
+    // Sprint 22: up to ₹25,000 (a rent, a deposit — "hattu savera deposit") the
+    // small reading (₹10) is not believable, so it is prepared with the note.
+    if (amt && amt.alt != null && amt.alt >= 10 && amount > 25000) {
       const first = String(match.name).split(/\s+/)[0], base = { resident_id: match.id, mode: mode || undefined, type };
       const big = '₹' + amount.toLocaleString('en-IN'), small = '₹' + amt.alt.toLocaleString('en-IN');
       return { tool: null, clarify: `Is that ${big} or ${small} from ${match.name}? Tap the right one.`, via: 'quick', kind: 'collection', ask: 'which_amount',

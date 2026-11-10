@@ -2940,10 +2940,10 @@ async function renderAdminStaffTab() {
     const users = await API.getUsers();
     (adminHost(__seq) || {}).innerHTML = `
       <div class="card">
-        <div class="card-header">
+        <div class="card-header" style="flex-wrap:wrap;gap:10px">
           <h3>Staff &amp; Admin Accounts</h3>
-          <div class="flex gap-2">
-            ${users.length>0?`<input type="text" placeholder="🔍 Search username..." style="width:180px;margin:0" oninput="filterTable(this.value,'staff-tb')" />`:''}
+          <div class="flex gap-2" style="flex:1 1 220px;min-width:0;justify-content:flex-end">
+            ${users.length>0?`<input type="text" placeholder="🔍 Search username..." style="flex:1 1 120px;min-width:0;max-width:220px;margin:0" oninput="filterTable(this.value,'staff-tb')" />`:''}
             <button class="btn btn-primary btn-sm" onclick="staffModal()">+ Add Staff</button>
           </div>
         </div>
@@ -3552,8 +3552,10 @@ function smVoice(btnId, statusId, onText, hint) {
     // 14.1: Chrome's 2nd or 3rd guess is often the right one for Indian
     // English and Kannada words — keep five and let the server choose.
     rec.lang = lang; rec.continuous = false; rec.interimResults = false; rec.maxAlternatives = 5;
+    let settled = false;   // Sprint 22: a result or an error has replaced "Listening…"
     rec.onstart = () => { btn.classList.add('listening'); btn.textContent = '⏹'; say(`Listening in ${SM_VOICE_LANGS[lang]}… ` + (hint || 'speak now'), false, true); };
     rec.onresult = e => {
+      settled = true;
       const t = e.results && e.results[0] && e.results[0][0] ? e.results[0][0].transcript : '';
       if (!t) { say('Didn\'t catch that — tap the mic and try again', true, true); return; }
       const alts = e.results && e.results[0] ? Array.from(e.results[0]).map(a => a.transcript).filter(Boolean) : [t];
@@ -3563,9 +3565,14 @@ function smVoice(btnId, statusId, onText, hint) {
     rec.onerror = e => {
       if (e && e.error === 'language-not-supported') smSetVoiceLang('en-IN');
       const msg = e && e.error in SM_VOICE_ERRORS ? SM_VOICE_ERRORS[e.error] : 'Voice input failed — please fill the form';
-      if (msg) say(msg, true, e.error === 'no-speech');
+      if (msg) { settled = true; say(msg, true, e.error === 'no-speech'); }
     };
-    rec.onend = () => { if (smRec === rec) smRec = null; btn.classList.remove('listening'); btn.textContent = '🎤'; if (rec.__then) { const go = rec.__then; rec.__then = null; go(); } };
+    rec.onend = () => {
+      if (smRec === rec) smRec = null; btn.classList.remove('listening'); btn.textContent = '🎤';
+      if (rec.__then) { const go = rec.__then; rec.__then = null; go(); return; }
+      // The mic closed with nothing heard and no error (she tapped stop, or it timed out): say so.
+      if (!settled) say('Mic is off — tap it to speak', false, true);
+    };
     rec.start();
   } catch { smRec = null; say('Could not start voice on this device', true); }
 }

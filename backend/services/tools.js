@@ -183,6 +183,13 @@ const TOOLS = {
       // someone else, she is still offered as well.
       let pageOnly = false;
       const pageId = a.name && !a.resident_id ? ctx.context?.resident_id : undefined;
+      if (!match && pageId) {
+        // Sprint 22 (review 21.3): "6000 cash all dues" is not about Pallavi. On a
+        // resident's page keep only candidates that were really named — a whole
+        // name word, the start of one (4+ letters), or a near-match by sound.
+        const toks = String(a.name || '').toLowerCase().split(/\s+/).filter(Boolean);
+        candidates = candidates.filter(c => c.why || String(c.name || '').toLowerCase().split(/\s+/).some(p => toks.some(t => t === p || (t.length >= 4 && p.startsWith(t)))));
+      }
       if (!match && pageId && !candidates.some(c => String(c.id) === String(pageId))) {
         const s = await resolveResident({ id: pageId });
         if (s.match) { pageOnly = candidates.length === 0; candidates = [...candidates, { ...s.match, why: 'the resident on this page', page: true }]; }
