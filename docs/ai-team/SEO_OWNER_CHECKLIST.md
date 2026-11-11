@@ -33,7 +33,7 @@ These are now written on the website. Tell me if any is wrong and I will change 
 1. Go to https://search.google.com/search-console → Add property → choose **Domain** → type `sirimane.in`.
 2. Google gives you a TXT record. In GoDaddy DNS for sirimane.in, add a TXT record with host `@` and that value. Wait 10–30 min, then click Verify.
 3. In Search Console: Sitemaps → enter `sitemap.xml` → Submit.
-4. URL Inspection → paste `https://sirimane.in/` → "Request indexing".
+4. URL Inspection → paste `https://www.sirimane.in/` → "Request indexing".
 5. Come back in a week: Performance shows which searches show the site. Send me a screenshot of the top queries; I will tune the words on the page to match.
 
 ## 4. Local directories — 1 hour, once

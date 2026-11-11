@@ -171,7 +171,7 @@ const TEMPLATES = {
   rent_overdue: (g, pg) => `Namaste ${g.name}, your rent of ${fmt(g.amount_due)} at ${pg} is still pending. Please clear it at the earliest, or tell us if you need a few days. Thank you.`,
   payment_confirmed: (g, pg, extra) => `Namaste ${g.name}, we have received ${fmt(extra.amount)} towards your rent at ${pg}. Thank you!`,
   request_updated: (g, pg, extra) => `Namaste ${g.name}, your ${extra.category} request is now ${String(extra.status).replace('_', ' ')}.${extra.note ? ` ${extra.note}` : ''} — ${pg}`,
-  welcome: (g, pg) => `Welcome to ${pg}, ${g.name}! Your room is ${g.room_number || 'ready'}. You can see your rent, pay online and report any issue at sirimane.in/guest — log in with your mobile number.`,
+  welcome: (g, pg) => `Welcome to ${pg}, ${g.name}! Your room is ${g.room_number || 'ready'}. You can see your rent, pay online and report any issue at www.sirimane.in/guest — log in with your mobile number.`,
   checkout_reminder: (g, pg) => `Namaste ${g.name}, we have your checkout noted for ${g.expected_checkout}. Please let us know the time so we can settle the deposit. — ${pg}`
 };
 
