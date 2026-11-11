@@ -68,7 +68,9 @@ const sendHome = (req, res) => { res.setHeader('Content-Security-Policy', CSP_HO
 // DNS record and took the site down). With CANONICAL_HOST=www.sirimane.in, a
 // GET/HEAD for its twin (sirimane.in) is sent to it — the API, which can carry
 // a body, is never redirected, and no other host is touched.
-const CANONICAL_HOST = String(process.env.CANONICAL_HOST || '').trim().toLowerCase();
+// The variable is normalised (scheme, path, case stripped) and logged once, so a mis-set value is visible in Railway logs.
+const CANONICAL_HOST = (() => { const v = String(process.env.CANONICAL_HOST || '').trim(); if (!v) return ''; try { return new URL('https://' + v.replace(/^https?:\/\//i, '')).hostname.toLowerCase(); } catch { return ''; } })();
+if (process.env.CANONICAL_HOST) console.log(`CANONICAL_HOST: "${process.env.CANONICAL_HOST}" → ${CANONICAL_HOST ? `redirecting ${CANONICAL_HOST.startsWith('www.') ? CANONICAL_HOST.slice(4) : 'www.' + CANONICAL_HOST} → ${CANONICAL_HOST}` : 'INVALID, no redirect'}`);
 const CANONICAL_TWIN = CANONICAL_HOST ? (CANONICAL_HOST.startsWith('www.') ? CANONICAL_HOST.slice(4) : 'www.' + CANONICAL_HOST) : '';
 app.locals.CANONICAL_HOST = CANONICAL_HOST; app.locals.CANONICAL_TWIN = CANONICAL_TWIN;
 app.use((req, res, next) => {   // read from app.locals so the gate can prove both settings in one process

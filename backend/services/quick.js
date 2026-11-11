@@ -327,7 +327,7 @@ async function intent(text, user, context, opts = {}) {
     if (primaryIsQuestion) usable = usable.filter(r => !(r.i.tool === 'prepare_payment' && !(r.i.args && r.i.args.resident_id)));
     const best = usable[0] || (primaryIsQuestion ? null : reads[0]);
     if (!best) return first;   // a question in her ear, nothing trustworthy in the other: the question stands (no repair call — the Copilot answers it)
-    {
+    {   // (block kept only to avoid re-indenting the Sprint 24 code below)
     // Review S24 S1: English speech makes Kannada noise in the other ear, and
     // that noise can fuzzy-match a name. A reading that found nobody cannot
     // outrank a complaint, and a complaint is kept over such a payment.

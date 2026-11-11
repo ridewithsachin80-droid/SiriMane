@@ -665,6 +665,10 @@ async function main() {
           app.locals.CANONICAL_HOST = 'sirimane.in'; app.locals.CANONICAL_TWIN = 'www.sirimane.in';
           const w = await raw('GET', '/p', 'www.sirimane.in'); ok(w.status === 301 && w.location === 'https://sirimane.in/p', `S25-1 the other way round works the same (${w.status} ${w.location})`);
           app.locals.CANONICAL_HOST = ''; app.locals.CANONICAL_TWIN = '';
+          // Review S25: a mis-set variable is normalised — scheme, path and case stripped.
+          const norm = v => { try { return new URL('https://' + String(v).trim().replace(/^https?:\/\//i, '')).hostname.toLowerCase(); } catch { return ''; } };
+          eq(norm('https://WWW.Sirimane.in/'), 'www.sirimane.in', 'S25-1 CANONICAL_HOST "https://WWW.Sirimane.in/" is read as www.sirimane.in');
+          eq(norm('not a host'), '', 'S25-1 …and nonsense means no redirect rather than a broken one');
           // check-live.js: refuses to run without hosts; a name that does not resolve is a ❌ with the word DNS.
           const cp = require('child_process');
           const usage = cp.spawnSync('node', ['backend/scripts/check-live.js'], { cwd: require('path').join(__dirname, '..', '..'), encoding: 'utf8' });

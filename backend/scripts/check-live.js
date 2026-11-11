@@ -29,7 +29,8 @@ async function check(host) {
   const r = await get(host);
   if (r.error) return { host, ok: false, note: `resolves to ${addrs.join(', ')} but HTTPS failed: ${r.error}` };
   if (r.status >= 300 && r.status < 400) return { host, ok: true, note: `${r.status} → ${r.location} (make sure THAT host is in this list and answers)`, redirect: r.location };
-  return { host, ok: r.status < 500, note: `${r.status} ${r.body.replace(/\s+/g, ' ')}` };
+  // /health answers 200 — anything else (404: the wrong app; 5xx: down) is a failure.
+  return { host, ok: r.status === 200, note: `${r.status} ${r.body.replace(/\s+/g, ' ')}` };
 }
 
 (async () => {
@@ -45,6 +46,7 @@ async function check(host) {
       const t = results.find(x => x.host === target);
       if (!t) { console.log(`❌ ${r.host} redirects to ${target || r.redirect}, which was not checked — add it to the list`); bad++; }
       else if (!t.ok) { console.log(`❌ ${r.host} redirects to ${target}, which is down`); bad++; }
+      else if (t.redirect) { console.log(`❌ ${r.host} redirects to ${target}, which redirects again (${t.redirect}) — a loop or a chain`); bad++; }
     }
   }
   console.log(bad ? `\n${bad} problem(s) — do not release until every line is ✅` : '\nAll hosts answer.');
