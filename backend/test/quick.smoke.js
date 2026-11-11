@@ -882,10 +882,29 @@ const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toI
         eq(calls, 0, 'S24-2 …the AI is not asked to break the tie');
         i = await dual('Sachin 5000 upi', ['Sachin 5000 upi', 'ಸಚಿನ್ 5000 ಯುಪಿಐ']);
         ok(i && i.tool === 'prepare_payment' && !i.ask && i.args.amount === 5000, 'S24-2 the same reading in two scripts is simply prepared');
-        // A reading that cannot tell two Jhanavis apart is less complete than one that can: no tie.
+        // Review S24 B1: a less complete reading that heard a DIFFERENT amount still forces the question —
+        // the Kannada ear's "jaanavi" is only a fuzzy match (one point less), but ₹6,000 is not ₹5,000.
         i = await dual(`Jhanavi ${alpha} 5000 upi`, [`Jhanavi ${alpha} 5000 upi`, 'ಜಾನವಿ ಆರು ಸಾವಿರ ಯುಪಿಐ']);
-        ok(i && i.tool === 'prepare_payment' && i.args.resident_id === jh.id && i.args.amount === 5000, `S24-2 the reading that names her fully wins over one that could be either Jhanavi (got ${JSON.stringify(i && (i.args || i.options))})`);
-        await pool.query(`UPDATE guests SET is_active=false WHERE id=$1`, [sg2.id]);
+        ok(i && !i.tool && i.ask === 'which_reading' && i.options.length === 2 && new Set(i.options.map(o => o.args.amount)).size === 2 && i.options.some(o => /^Janavi\? · ₹6,000/.test(o.label) || /^Jaanavi\? · ₹6,000/.test(o.label)), `S24-3 (B1) exact-name ₹5,000 vs fuzzy-name ₹6,000 is asked, and the unresolved tap says "Name?" (got ${JSON.stringify(i && (i.options ? i.options.map(o => o.label) : i.args))})`);
+        // …but the same amount with a fuzzy name is one entry (the fuller reading wins, no question).
+        i = await dual(`Jhanavi ${alpha} 5000 upi`, [`Jhanavi ${alpha} 5000 upi`, 'ಜಾನವಿ ಐದು ಸಾವಿರ ಯುಪಿಐ']);
+        ok(i && i.tool === 'prepare_payment' && i.args.resident_id === jh.id && i.args.amount === 5000 && !i.ask, `S24-3 (B1) the same ₹5,000 for "Jhanavi"/"ಜಾನವಿ" is simply prepared (got ${JSON.stringify(i && (i.args || i.options))})`);
+        // Different people at the same amount: asked. Income vs expense: asked, whichever ear is primary.
+        const sv2 = (await A('POST', '/guests', { name: `Savitha Q${alpha}`, phone: `97${uniq}43`.slice(0, 10), room_id: room5.id, bed_number: '7', monthly_rent: 6000, deposit_amount: 0, join_date: daysAgo(30), id_proof_type: 'Aadhaar' })).data;
+        i = await dual('Sachin 5000 upi', ['Sachin 5000 upi', 'ಸವಿತಾ ಐದು ಸಾವಿರ ಯುಪಿಐ']);
+        ok(i && i.ask === 'which_reading' && i.options.some(o => o.args.resident_id === sg2.id) && i.options.some(o => /^Savit\w*\? · ₹5,000/.test(o.label) || o.args.resident_id === sv2.id), `S24-3 (B1) Sachin vs Savitha at ₹5,000 is asked (got ${JSON.stringify(i && (i.options ? i.options.map(o => o.label) : i.args))})`);
+        i = await dual('sugar 5000 upi', ['sugar 5000 upi', 'ಸಚಿನ್ ಐದು ಸಾವಿರ ಯುಪಿಐ']);
+        ok(i && i.ask === 'which_reading' && i.options.map(o => o.tool).sort().join(',') === 'prepare_expense,prepare_payment', `S24-3 (B1) "sugar" expense vs Sachin's payment is asked (got ${JSON.stringify(i && (i.options ? i.options.map(o => o.label) : [i.tool, i.args]))})`);
+        i = await dual('Sachin 5000 upi', ['Sachin 5000 upi', 'ಸಕ್ಕರೆ ಐದು ಸಾವಿರ ಯುಪಿಐ']);
+        ok(i && i.ask === 'which_reading' && i.options.map(o => o.tool).sort().join(',') === 'prepare_expense,prepare_payment', `S24-3 (B1) …and the other way round (got ${JSON.stringify(i && (i.options ? i.options.map(o => o.label) : [i.tool, i.args]))})`);
+        i = await dual('sugar 5000 upi', ['sugar 5000 upi', 'ಸವಿತಾ ಐದು ಸಾವಿರ ಯುಪಿಐ']);
+        ok(i && i.ask === 'which_reading' && i.options.map(o => o.tool).sort().join(',') === 'prepare_expense,prepare_payment', `S24-3 (B1) an expense vs a payment whose resident is still fuzzy is asked too — income or expense is never a guess (got ${JSON.stringify(i && (i.options ? i.options.map(o => o.label) : [i.tool, i.args]))})`);
+        // Review S24 S1: English speech makes Kannada noise; noise that fuzzy-matches a name cannot outrank a complaint.
+        i = await dual('fan not working', ['fan not working', 'ಜಾನವಿ ಕೆ ಐದು ಸಾವಿರ']);
+        ok(i && i.tool === 'prepare_complaint' && !i.ask, `S24-3 (S1) "fan not working" is kept over Kannada noise that half-matched a name (got ${JSON.stringify(i && [i.tool, i.ask, i.args || i.options])})`);
+        i = await dual('fan not working', ['fan not working', 'ಸಚಿನ್ ಐದು ಸಾವಿರ ಯುಪಿಐ']);
+        ok(i && i.ask === 'which_reading' && i.options.some(o => o.tool === 'prepare_complaint' && /^Complaint/.test(o.label)) && i.options.some(o => o.tool === 'prepare_payment' && o.args.resident_id === sg2.id), `S24-3 (S1) …but a payment that found its resident and an amount is offered beside it (got ${JSON.stringify(i && (i.options ? i.options.map(o => o.label) : i.args))})`);
+        await pool.query(`UPDATE guests SET is_active=false WHERE id = ANY($1)`, [[sg2.id, sv2.id]]);
         // English first and correct: kept as the primary, nothing re-ordered.
         i = await dual(`Jhanavi ${alpha} 5000 upi`, [`Jhanavi ${alpha} 5000 upi`, 'ಜಾನವಿ ಐದು ಸಾವಿರ']);
         ok(i && i.tool === 'prepare_payment' && i.args.resident_id === jh.id && i.args.amount === 5000 && i.args.mode === 'UPI' && !i.understood, `S24-1 a complete English reading stays (got ${JSON.stringify(i && [i.args, i.understood])})`);

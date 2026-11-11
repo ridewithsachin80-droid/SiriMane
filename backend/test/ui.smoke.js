@@ -522,7 +522,8 @@ async function runAtWidth(browser, BASE, width) {
     try { localStorage.removeItem('sm_voice_lang'); } catch (e) {}
     window.__recs = [];
     window.webkitSpeechRecognition = class { constructor() { this.lang = ''; this.state = 'new'; window.__recs.push(this); }
-      start() { if (window.__refuseSecond && window.__recs.some(r => r !== this && r.state === 'on')) { this.state = 'refused'; setTimeout(() => { this.onerror && this.onerror({ error: 'aborted' }); this.onend && this.onend(); }, 0); return; } this.state = 'on'; setTimeout(() => { this.started = !!this.onstart; this.onstart && this.onstart(); }, 0); }
+      start() { if (window.__refuseSecond && window.__recs.some(r => r !== this && r.state === 'on')) { this.state = 'refused'; setTimeout(() => { this.onerror && this.onerror({ error: 'aborted' }); this.onend && this.onend(); }, 0); return; } if (window.__killFirst) { const other = window.__recs.find(r => r !== this && r.state === 'on'); if (other) { other.state = 'off'; setTimeout(() => { other.onerror && other.onerror({ error: 'aborted' }); other.onend && other.onend(); }, 0); } }
+        this.state = 'on'; setTimeout(() => { this.started = !!this.onstart; this.onstart && this.onstart(); }, 0); }
       stop() { if (this.state === 'on') { this.state = 'off'; setTimeout(() => this.onend && this.onend(), 0); } }
       abort() { this.aborted = true; if (window.__abortThrows) { this.state = 'off'; throw new Error('abort failed'); } if (this.state === 'on') { this.state = 'off'; setTimeout(() => { this.onerror && this.onerror({ error: 'aborted' }); this.onend && this.onend(); }, 0); } } };
     window.SpeechRecognition = window.webkitSpeechRecognition;
@@ -573,6 +574,23 @@ async function runAtWidth(browser, BASE, width) {
   ok(/^(I heard two different things|Which resident do you mean)/.test(tie.text) && !tie.preview && tie.taps.length >= 2 && tie.taps.every(b => b.h >= 44), `${tag} S24-5 two different amounts are asked about, not guessed (${tie.text.slice(0, 50)} · ${JSON.stringify(tie.taps.map(b => b.t))})`);
   await page.screenshot({ path: path.join(SHOTS, `s24-two-readings-${width}.png`) });
   await page.evaluate(() => copilotDismiss());
+  // Review S24 S2: a phone that ENDS the first ear when the second starts → back to one ear, with the button, for the visit.
+  await page.evaluate(() => { window.__killFirst = true; });
+  await page.tap('#copilot-mic');
+  await page.waitForFunction(() => window.__ready(1) && document.querySelector('#copilot-voice-status .voice-lang') && /Listening/.test(document.getElementById('copilot-voice-status').textContent), { timeout: 5000 });
+  const s2 = await page.evaluate(() => ({ open: window.__open(), off: smDualOff, status: document.getElementById('copilot-voice-status').textContent }));
+  ok(s2.open.length === 1 && s2.open[0] === 'en-IN' && s2.off === true, `${tag} S2 first ear killed by the second → one English ear, dual off for this visit (${JSON.stringify(s2)})`);
+  await page.evaluate(() => window.__say('onion 100', 'en-IN'));
+  await page.waitForFunction(() => /onion/i.test(document.getElementById('copilot-out').textContent) && document.querySelector('#copilot-out .copilot-preview'), { timeout: 10000 });
+  ok(true, `${tag} S2 …and she is understood on that one ear`);
+  await page.waitForNetworkIdle({ idleTime: 300, timeout: 8000 }).catch(() => {});
+  await page.tap('#copilot-mic');
+  await page.waitForFunction(() => window.__ready(1), { timeout: 5000 });
+  await sleep(200);
+  eq(await page.evaluate(() => window.__recs.filter(r => r.state === 'on').length), 1, `${tag} S2 the next tap opens one ear only — no second attempt, no loop`);
+  await page.tap('#copilot-mic');
+  await page.waitForFunction(() => /Mic is off/.test(document.getElementById('copilot-voice-status').textContent), { timeout: 5000 });
+  await page.evaluate(() => { window.__killFirst = false; smDualOff = false; });
   // S24-6 A phone that refuses the second ear: one ear, exactly as before, with the language button.
   await page.evaluate(() => { window.__refuseSecond = true; });
   await page.tap('#copilot-mic');

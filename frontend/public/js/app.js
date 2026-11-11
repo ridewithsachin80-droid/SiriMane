@@ -3544,6 +3544,11 @@ let smRec = null;
 // refuses the second recogniser silently falls back to one language — the
 // one chosen with the button, as before.
 const SM_DUAL_WAIT_MS = 1200;
+// Review S24 S2: some Android builds END the first recogniser the moment a
+// second one starts. When that happens the mic goes back to one ear (with
+// the language button) for the rest of the visit, instead of listening in
+// the wrong language with no way out.
+let smDualOff = false;
 function smVoice(btnId, statusId, onText, hint) {
   const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition || null;
   const btn = document.getElementById(btnId);
@@ -3552,7 +3557,7 @@ function smVoice(btnId, statusId, onText, hint) {
   const again = () => smVoice(btnId, statusId, onText, hint);
   const say = (msg, err, offer) => { status.textContent = msg; status.classList.toggle('voice-error', !!err); if (offer) { status.appendChild(document.createTextNode(' ')); status.appendChild(smLangButton(() => smRec, again)); } };
   if (!Ctor) { say('Voice needs Chrome on Android. Please type instead.', true); return; }
-  if (smRec) { try { smRec.stop(); } catch {} if (smRec.__twin) { try { smRec.__twin.abort(); } catch {} } smRec = null; return; }
+  if (smRec) { smRec.__stopped = true; try { smRec.stop(); } catch {} if (smRec.__twin) { try { smRec.__twin.abort(); } catch {} } smRec = null; return; }
   try {
     const lang = smVoiceLang(), other = lang === 'kn-IN' ? 'en-IN' : 'kn-IN';
     const rec = new Ctor();
@@ -3560,9 +3565,9 @@ function smVoice(btnId, statusId, onText, hint) {
     rec.lang = lang; rec.continuous = false; rec.interimResults = false; rec.maxAlternatives = 5;
     // The second ear. Created up front; if the phone refuses it (error / never starts) nothing changes.
     let twin = null, twinAlive = false, twinAlts = null, twinDone = false;
-    try { twin = new Ctor(); twin.lang = other; twin.continuous = false; twin.interimResults = false; twin.maxAlternatives = 5; } catch (e) { twin = null; }
+    try { if (!smDualOff) { twin = new Ctor(); twin.lang = other; twin.continuous = false; twin.interimResults = false; twin.maxAlternatives = 5; } } catch (e) { twin = null; }
     rec.__twin = twin;
-    let settled = false, primaryAlts = null, primaryDone = false, delivered = false, timer = null;
+    let settled = false, primaryAlts = null, primaryDone = false, delivered = false, timer = null, startedAt = 0;
     const alts = e => e && e.results && e.results[0] ? Array.from(e.results[0]).map(a => a.transcript).filter(Boolean) : [];
     const deliver = () => {
       if (delivered) return; delivered = true; if (timer) clearTimeout(timer);
@@ -3580,7 +3585,7 @@ function smVoice(btnId, statusId, onText, hint) {
     // While both ears are open there is nothing to choose, so the language
     // button only appears when this phone gives us a single ear.
     const listening = offer => say(`Listening… ` + (hint || 'speak now'), false, offer);
-    rec.onstart = () => { btn.classList.add('listening'); btn.textContent = '⏹'; listening(!twin || !twinAlive); };
+    rec.onstart = () => { startedAt = Date.now(); btn.classList.add('listening'); btn.textContent = '⏹'; listening(!twin || !twinAlive); };
     rec.onresult = e => { settled = true; primaryAlts = alts(e); if (!primaryAlts.length) primaryAlts = null; };
     rec.onerror = e => {
       if (e && e.error === 'language-not-supported') smSetVoiceLang('en-IN');
@@ -3592,6 +3597,11 @@ function smVoice(btnId, statusId, onText, hint) {
       primaryDone = true;
       if (smRec === rec) smRec = null; btn.classList.remove('listening'); btn.textContent = '🎤';
       if (rec.__then) { const go = rec.__then; rec.__then = null; if (twin) { try { twin.abort(); } catch (x) {} } go(); return; }
+      // Ended at once, silently, right after the second ear started, and not by her: this phone allows one ear. Restart with one.
+      if (!settled && !delivered && !primaryAlts && twin && !twinDone && !twinAlts && !rec.__stopped && startedAt && Date.now() - startedAt < 1500) {
+        smDualOff = true; delivered = true; twinAlive = false; try { twin.abort(); } catch (x) {}
+        again(); return;
+      }
       if (settled && !delivered) { maybeDeliver(); return; }
       if (!settled && !delivered && !twinAlts) { if (twinAlive && !twinDone) { maybeDeliver(); return; } say('Mic is off — tap it to speak', false, true); }
     };

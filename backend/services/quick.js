@@ -275,30 +275,73 @@ function sameEntry(a, b) {
   if (a.tool === 'prepare_expense') { const k = d => looseKey(SMParse.toLatin(String(d || '')).toLowerCase()); if (k(x.description) !== k(y.description) && (x.category || 'Other') === (y.category || 'Other')) return false; }
   return true;
 }
+// Review S24 B1: the people a reading could mean — the matched resident, or
+// the fuzzy candidates ("jaanavi" from the Kannada ear is fuzzy, never exact).
+function peopleOf(i) {
+  if (!i || i.tool !== 'prepare_payment') return null;
+  if (i.args && i.args.resident_id) return [Number(i.args.resident_id)];
+  if (i.fuzzy && i.fuzzy.length) return i.fuzzy.map(f => Number(f.id));
+  return null;
+}
+// Does reading b contradict reading a on anything that matters — money, the
+// person, income vs expense, the item? Score gaps never settle these.
+function conflicts(a, b) {
+  if (!a || !b || !a.tool || !b.tool) return false;
+  const x = a.args || {}, y = b.args || {};
+  const money = t => t === 'prepare_payment' || t === 'prepare_expense';
+  if (a.tool !== b.tool) {
+    if (money(a.tool) && money(b.tool)) return true;                          // income vs expense
+    // complaint vs a payment: only a payment that found its resident AND an amount can contest it
+    const pay = a.tool === 'prepare_payment' ? a : b.tool === 'prepare_payment' ? b : null;
+    return !!(pay && pay.args && pay.args.resident_id && pay.args.amount);
+  }
+  if (x.amount && y.amount && Number(x.amount) !== Number(y.amount)) return true;
+  if (a.tool === 'prepare_payment') {
+    const pa = peopleOf(a), pb = peopleOf(b);
+    if (pa && pb && !pa.some(id => pb.includes(id))) return true;             // different people
+    if (x.type && y.type && x.type !== y.type) return true;                   // rent vs deposit
+  }
+  if (a.tool === 'prepare_expense' && !sameEntry(a, b) && x.amount && y.amount) return true;   // onion vs garlic
+  return false;
+}
 async function intent(text, user, context, opts = {}) {
   if (!opts.voice) return classify(text, user, context, { allowModel: true });
   let first = await classify(text, user, context, { allowModel: false });
   // Sprint 24: with transcripts from a second language, the rules read each
-  // one; the most complete reading wins. Equally complete readings that
-  // disagree are shown as taps (ask:'which_reading') — never guessed between.
+  // one; the most complete reading wins — unless another usable reading
+  // contradicts it on money, the person, income vs expense or the item, in
+  // which case both are shown as taps (ask:'which_reading'). Never guessed between.
   const others = (opts.alternatives || []).map(a => String(a || '').trim()).filter(a => a && a !== String(text || '').trim()).slice(0, 5);
   if (others.length && opts.dual) {
-    const reads = [{ t: String(text || '').trim(), i: first }];
+    const heardText = String(text || '').trim();
+    const reads = [{ t: heardText, i: first }];
     for (const t of others) reads.push({ t, i: await classify(t, user, context, { allowModel: false }) });
     reads.sort((p, q) => completeness(q.i) - completeness(p.i));
-    const best = reads[0], top = completeness(best.i);
-    if (top >= 4) {
-      const rival = reads.slice(1).find(r => completeness(r.i) === top && !sameEntry(r.i, best.i) && r.i.tool === best.i.tool && r.i.tool !== 'prepare_complaint');
+    const usable = reads.filter(r => r.i && r.i.tool && completeness(r.i) >= 4);
+    const best = usable[0] || reads[0];
+    // Review S24 S1: English speech makes Kannada noise in the other ear, and
+    // that noise can fuzzy-match a name. A reading that found nobody cannot
+    // outrank a complaint, and a complaint is kept over such a payment.
+    const complaint = usable.find(r => r.i.tool === 'prepare_complaint');
+    const unresolvedPay = r => r.i.tool === 'prepare_payment' && !(r.i.args && r.i.args.resident_id);
+    const pick = complaint && usable.every(r => r === complaint || unresolvedPay(r)) ? complaint : best;
+    if (pick.i && pick.i.tool && completeness(pick.i) >= 4) {
+      const rival = usable.find(r => r !== pick && conflicts(pick.i, r.i));
       if (rival) {
-        const ids = [best, rival].map(r => r.i.args && r.i.args.resident_id).filter(Boolean);
+        const ids = [pick, rival].map(r => r.i.args && r.i.args.resident_id).filter(Boolean);
         const names = {}; if (ids.length) for (const row of (await pool.query(`SELECT id, name FROM guests WHERE id = ANY($1)`, [ids])).rows) names[row.id] = row.name;
-        const label = r => r.i.tool === 'prepare_payment' ? `${(r.i.args.resident_id && names[r.i.args.resident_id]) || (r.i.args.name ? r.i.args.name.charAt(0).toUpperCase() + r.i.args.name.slice(1) : 'resident')} · ₹${Number(r.i.args.amount || 0).toLocaleString('en-IN')}${r.i.args.mode ? ' · ' + r.i.args.mode : ''}` : `${r.i.args.description || 'expense'} · ₹${Number(r.i.args.amount || 0).toLocaleString('en-IN')}`;
-        return { tool: null, clarify: 'I heard two different things — tap the right one.', via: 'quick', kind: best.i.kind, ask: 'which_reading',
-          options: [best, rival].map(r => ({ label: label(r), tool: r.i.tool, args: { ...r.i.args, source: 'quick' }, heard: r.t })) };
+        const rupees = n => '₹' + Number(n || 0).toLocaleString('en-IN');
+        const cap = w => w ? w.charAt(0).toUpperCase() + w.slice(1) : w;
+        // Review S24 S3: when the person is still to be chosen the label says so ("Janvi?").
+        const label = r => r.i.tool === 'prepare_payment' ? `${(r.i.args.resident_id && names[r.i.args.resident_id]) || (cap(r.i.args.name) || 'Resident') + '?'} · ${rupees(r.i.args.amount)}${r.i.args.mode ? ' · ' + r.i.args.mode : ''}`
+          : r.i.tool === 'prepare_complaint' ? `Complaint · ${r.i.args.description || r.i.args.category || 'issue'}`
+          : `${r.i.args.description || 'expense'} · ${rupees(r.i.args.amount)}`;
+        return { tool: null, clarify: 'I heard two different things — tap the right one.', via: 'quick', kind: pick.i.kind, ask: 'which_reading',
+          options: [pick, rival].map(r => ({ label: label(r), tool: r.i.tool, args: { ...r.i.args, source: 'quick' }, heard: r.t })) };
       }
-      if (best !== reads[0] || best.t !== String(text || '').trim()) return { ...best.i, heard: String(text || '').trim(), understood: best.t, via: 'quick' };
-      first = best.i;
-    } else if (completeness(best.i) > completeness(first)) first = { ...best.i, heard: String(text || '').trim(), understood: best.t };
+      if (pick.t !== heardText) return { ...pick.i, heard: heardText, understood: pick.t, via: 'quick' };
+      first = pick.i;
+    } else if (completeness(best.i) > completeness(first)) first = { ...best.i, heard: heardText, understood: best.t };
   }
   if (!weak(first)) return first;
   const { rows: residents } = await pool.query(`SELECT g.id, g.name, r.room_number FROM guests g LEFT JOIN rooms r ON r.id=g.room_id WHERE g.is_active=true`);
