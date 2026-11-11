@@ -463,6 +463,12 @@ async function runAtWidth(browser, BASE, width) {
   const adminTabs = await page.$$eval('.admin-tabs .btn', (bs) => bs.map(b => { const r = b.getBoundingClientRect(); return { t: b.textContent.trim(), left: r.left, right: r.right, h: r.height }; }));
   const vw = await page.evaluate(() => document.documentElement.clientWidth);
   eq(adminTabs.length, 6, `${tag} S20-3 Admin has six tabs`);
+  // Sprint 22: "+ Add Staff" was pushed off a phone screen by the search box.
+  await page.evaluate(() => switchAdminTab('staff'));
+  await page.waitForFunction(() => [...document.querySelectorAll('#admin-tab-content button')].some(b => /Add Staff/.test(b.textContent)), { timeout: 8000 });
+  const addStaff = await page.evaluate(() => { const b = [...document.querySelectorAll('#admin-tab-content button')].find(x => /Add Staff/.test(x.textContent)); const r = b.getBoundingClientRect(); const s = document.querySelector('#admin-tab-content .card-header input'); const sr = s ? s.getBoundingClientRect() : null; return { left: r.left, right: r.right, h: r.height, search: sr ? [sr.left, sr.right, sr.width] : null }; });
+  ok(addStaff.left >= 0 && addStaff.right <= vw + 0.5, `${tag} S22 "+ Add Staff" is on screen (${Math.round(addStaff.left)}–${Math.round(addStaff.right)} of ${vw})`);
+  ok(!addStaff.search || (addStaff.search[0] >= 0 && addStaff.search[1] <= vw + 0.5 && addStaff.search[2] >= 100), `${tag} S22 …and so is the search box (${JSON.stringify(addStaff.search && addStaff.search.map(Math.round))})`);
   ok(adminTabs.every(x => x.left >= 0 && x.right <= vw + 0.5), `${tag} S20-3 every Admin tab is on screen (${adminTabs.filter(x => x.right > vw + 0.5).map(x => x.t).join(', ') || 'all visible'})`);
   ok(adminTabs.every(x => x.h >= 44), `${tag} S20-3 Admin tabs are 44 px tap targets (${Math.min(...adminTabs.map(x => Math.round(x.h)))} px)`);
   const tapTab = async (label) => { const all = await page.$$('.admin-tabs .btn'); for (const b of all) { if ((await b.evaluate(e => e.textContent.trim())) === label) { await b.tap(); return; } } throw new Error('no tab ' + label); };
@@ -480,6 +486,177 @@ async function runAtWidth(browser, BASE, width) {
   const logTxt = await page.$eval('#admin-tab-content', e => e.textContent);
   ok(/record 700 rent/.test(logTxt), `${tag} Copilot log lists the ask made earlier (${logTxt.replace(/\s+/g, ' ').slice(0, 160)})`);
   ok(await page.$eval('#admin-tab-content', e => /done/.test(e.textContent)), `${tag} Copilot log shows the confirmed outcome`);
+  // S21-9: on a phone the outcome badge and Siri's reply stack — reply under the badge, not squeezed beside it
+  const outcomeGeo = await page.evaluate(() => { const o = [...document.querySelectorAll('#admin-tab-content .cl-outcome')].find(x => x.querySelector('.cl-reply')); if (!o) return null; const b = o.querySelector('.badge').getBoundingClientRect(), t = o.querySelector('.cl-reply').getBoundingClientRect(); return { below: t.top >= b.bottom - 1, w: t.width }; });
+  ok(outcomeGeo && outcomeGeo.below, `${tag} S21-9 Copilot log: the reply sits under the outcome badge (${JSON.stringify(outcomeGeo)})`);
+  eq(await page.evaluate(() => { const o = document.querySelector('#admin-tab-content .cl-outcome'); return o ? getComputedStyle(o).textAlign : null; }), 'left', `${tag} S21-9 the reply reads left to right from the badge, not ragged right`);
+  ok(outcomeGeo && outcomeGeo.w >= 150, `${tag} S21-9 …with room to read (${outcomeGeo && Math.round(outcomeGeo.w)} px wide)`);
+  await noHScroll('S21 Copilot log');
+  await page.screenshot({ path: path.join(SHOTS, `s21-copilot-log-${width}.png`) });
+
+  // ── Sprint 23 (SEO): the public page on a phone — H1 readable, FAQ taps 44 px, no sideways scroll, fast ──
+  {
+    const pub = await browser.newPage(); await pub.setViewport({ width, height: 780, isMobile: true, hasTouch: true });
+    const t0 = Date.now(); await pub.goto(BASE + '/', { waitUntil: 'domcontentloaded' }); const dcl = Date.now() - t0;
+    ok(dcl < 3000, `${tag} S23-6 the public page's DOM is ready in ${dcl} ms`);
+    const h1 = await pub.$eval('h1', e => { const r = e.getBoundingClientRect(); return { t: e.textContent.trim(), fs: parseFloat(getComputedStyle(e).fontSize), w: r.width, right: r.right }; });
+    ok(/Safe Ladies PG in Tumakuru/.test(h1.t) && h1.fs >= 15 && h1.right <= width + 0.5, `${tag} S23-6 the H1 is on screen and readable (${h1.fs}px)`);
+    ok(await pub.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), `${tag} S23-6 no sideways scroll on the public page`);
+    await pub.evaluate(() => document.querySelector('#faq').scrollIntoView());
+    const sums = await pub.$$eval('.faq-item summary', ss => ss.map(s => s.getBoundingClientRect().height));
+    ok(sums.length === 6 && sums.every(h => h >= 44), `${tag} S23-6 six FAQ rows, each a 44 px tap target (${sums.map(Math.round).join(',')})`);
+    // (Headless Chromium with headless:'new' does not toggle <details> on a synthetic
+    // click or tap — verified by hand that a default launch does. So: the tap
+    // lands on the summary, and an opened row shows its answer in full.)
+    const faqState = await pub.evaluate(() => { const d = document.querySelector('.faq-item'); const r = d.querySelector('summary').getBoundingClientRect(); const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); d.open = true; const pr = d.querySelector('p').getBoundingClientRect(); return { at: at && at.tagName, ph: pr.height, pRight: pr.right, text: d.querySelector('p').textContent.length }; });
+    ok(faqState.at === 'SUMMARY' && faqState.ph > 40 && faqState.pRight <= width + 0.5 && faqState.text > 80, `${tag} S23-6 the tap lands on the question, and the opened answer is shown in full (${JSON.stringify(faqState)})`);
+    await pub.screenshot({ path: path.join(SHOTS, `s23-home-faq-${width}.png`) });
+    await pub.close();
+  }
+
+  // ── Sprint 21: the mic listens in Kannada ─────────────────────────────
+  // Headless Chrome has no speech engine: a stand-in records the language it
+  // was started in and plays back what "she said". Sprint 24: every tap opens
+  // TWO ears (English and Kannada); __say(text, lang) speaks into one of them.
+  await page.evaluate(() => {
+    try { localStorage.removeItem('sm_voice_lang'); } catch (e) {}
+    window.__recs = [];
+    window.webkitSpeechRecognition = class { constructor() { this.lang = ''; this.state = 'new'; window.__recs.push(this); }
+      start() { if (window.__refuseSecond && window.__recs.some(r => r !== this && r.state === 'on')) { this.state = 'refused'; setTimeout(() => { this.onerror && this.onerror({ error: 'aborted' }); this.onend && this.onend(); }, 0); return; } if (window.__killFirst) { const other = window.__recs.find(r => r !== this && r.state === 'on'); if (other) { other.state = 'off'; setTimeout(() => { other.onerror && other.onerror({ error: 'aborted' }); other.onend && other.onend(); }, 0); } }
+        this.state = 'on'; setTimeout(() => { this.started = !!this.onstart; this.onstart && this.onstart(); }, 0); }
+      stop() { if (this.state === 'on') { this.state = 'off'; setTimeout(() => this.onend && this.onend(), 0); } }
+      abort() { this.aborted = true; if (window.__abortThrows) { this.state = 'off'; throw new Error('abort failed'); } if (this.state === 'on') { this.state = 'off'; setTimeout(() => { this.onerror && this.onerror({ error: 'aborted' }); this.onend && this.onend(); }, 0); } } };
+    window.SpeechRecognition = window.webkitSpeechRecognition;
+    window.__ear = lang => [...window.__recs].reverse().find(r => r.state === 'on' && (!lang || r.lang === lang));
+    window.__open = () => window.__recs.filter(r => r.state === 'on').map(r => r.lang);
+    window.__ready = n => { const o = window.__recs.filter(r => r.state === 'on'); return o.length === n && o.every(r => r.started); };
+    window.__say = (t, lang) => { const r = window.__ear(lang); r.state = 'off'; r.onresult({ results: [[{ transcript: t }]] }); r.onend && r.onend(); };
+    window.__fail = (err, lang) => { const r = window.__ear(lang); r.state = 'off'; r.onerror({ error: err }); r.onend && r.onend(); };
+    window.__silence = lang => { const r = window.__ear(lang); r.state = 'off'; r.onerror({ error: 'no-speech' }); r.onend && r.onend(); };
+  });
+  const purchasesBefore = (await pool.query(`SELECT COUNT(*)::int AS n FROM purchases`)).rows[0].n;
+  // S24-3 One tap, two ears, no language button needed.
+  await page.tap('#copilot-mic');
+  await page.waitForFunction(() => window.__ready(2), { timeout: 5000 });
+  const ears = await page.evaluate(() => window.__open().sort());
+  eq(ears.join(','), 'en-IN,kn-IN', `${tag} S24-3 one tap opens an English ear and a Kannada ear`);
+  await page.waitForFunction(() => /Listening…/.test(document.getElementById('copilot-voice-status').textContent) && !document.querySelector('#copilot-voice-status .voice-lang'), { timeout: 5000 }).catch(() => {});
+  const st3 = await page.evaluate(() => ({ t: document.getElementById('copilot-voice-status').textContent, btn: !!document.querySelector('#copilot-voice-status .voice-lang') }));
+  ok(/Listening…/.test(st3.t) && !/Listening in/.test(st3.t) && !st3.btn, `${tag} S24-3 the status says "Listening…" with no language button to press (${JSON.stringify(st3)})`);
+  // The English ear garbles the Kannada; the Kannada ear got it. No button, no AI: onion ₹100.
+  await page.evaluate(() => { window.__say('heroine Nooru rupaye', 'en-IN'); window.__say('ಈರುಳ್ಳಿ ನೂರು ರೂಪಾಯಿ', 'kn-IN'); });
+  await page.waitForSelector('#copilot-out .copilot-preview', { timeout: 10000 });
+  const knPrev = await page.$eval('#copilot-out', e => e.textContent.replace(/\s+/g, ' '));
+  ok(/Groceries/.test(knPrev) && /₹100/.test(knPrev) && /eerulli|onion/i.test(knPrev), `${tag} S24-3 "heroine" (en) + "ಈರುಳ್ಳಿ" (kn) → onion ₹100 in Groceries, without touching anything (${knPrev.slice(0, 120)})`);
+  await sleep(300);
+  eq((await pool.query(`SELECT COUNT(*)::int AS n FROM purchases`)).rows[0].n, purchasesBefore, `${tag} S24-3 …as a preview to confirm — nothing is saved`);
+  await page.evaluate(() => document.getElementById('copilot-bar').scrollIntoView({ block: 'center' }));
+  await page.screenshot({ path: path.join(SHOTS, `s24-dual-voice-${width}.png`) });
+  ok(/Heard: "heroine Nooru rupaye"/.test(await page.$eval('#copilot-voice-status', e => e.textContent)) && !(await page.$('#copilot-voice-status .voice-lang')), `${tag} S24-3 she sees what the first ear heard, with no language button to press`);
+  // S24-4 Only one ear hears (the other times out silent): still one clean result, after a short wait.
+  await page.waitForNetworkIdle({ idleTime: 300, timeout: 8000 }).catch(() => {});
+  await page.tap('#copilot-mic');
+  await page.waitForFunction(() => window.__ready(2), { timeout: 5000 });
+  const t0 = Date.now();
+  await page.evaluate(() => { window.__say('onion 100', 'en-IN'); });
+  await page.waitForFunction(() => /onion/i.test(document.getElementById('copilot-out').textContent) && document.querySelector('#copilot-out .copilot-preview'), { timeout: 10000 });
+  const waited = Date.now() - t0;
+  ok(waited < 4000, `${tag} S24-4 with the Kannada ear silent, the English result shows after a short wait (${waited} ms)`);
+  await page.waitForFunction(() => window.__open().length === 0, { timeout: 3000 }).catch(() => {});
+  eq(await page.evaluate(() => window.__open().length), 0, `${tag} S24-4 …and the silent ear is closed, so the mic is not left on`);
+  // S24-5 A tie: ₹5,000 (en) vs ₹6,000 (kn) for the same resident → two taps, never a guess.
+  await page.waitForNetworkIdle({ idleTime: 300, timeout: 8000 }).catch(() => {});
+  await page.tap('#copilot-mic');
+  await page.waitForFunction(() => window.__ready(2), { timeout: 5000 });
+  await page.evaluate(() => { window.__say('Jhanavi 5000 upi', 'en-IN'); window.__say('ಜಾನವಿ ಆರು ಸಾವಿರ ಯುಪಿಐ', 'kn-IN'); });
+  await page.waitForFunction(() => document.querySelectorAll('#copilot-out .copilot-actions button').length >= 2, { timeout: 10000 });
+  const tie = await page.evaluate(() => ({ text: document.querySelector('#copilot-out .copilot-text').textContent.trim(), taps: [...document.querySelectorAll('#copilot-out .copilot-actions button')].map(b => ({ t: b.textContent.trim(), h: b.getBoundingClientRect().height })), preview: !!document.querySelector('#copilot-out .copilot-preview') }));
+  ok(/^(I heard two different things|Which resident do you mean)/.test(tie.text) && !tie.preview && tie.taps.length >= 2 && tie.taps.every(b => b.h >= 44), `${tag} S24-5 two different amounts are asked about, not guessed (${tie.text.slice(0, 50)} · ${JSON.stringify(tie.taps.map(b => b.t))})`);
+  await page.screenshot({ path: path.join(SHOTS, `s24-two-readings-${width}.png`) });
+  await page.evaluate(() => copilotDismiss());
+  // Review S24 S2: a phone that ENDS the first ear when the second starts → back to one ear, with the button, for the visit.
+  await page.evaluate(() => { window.__killFirst = true; });
+  await page.tap('#copilot-mic');
+  await page.waitForFunction(() => window.__ready(1) && document.querySelector('#copilot-voice-status .voice-lang') && /Listening/.test(document.getElementById('copilot-voice-status').textContent), { timeout: 5000 });
+  const s2 = await page.evaluate(() => ({ open: window.__open(), off: smDualOff, status: document.getElementById('copilot-voice-status').textContent }));
+  ok(s2.open.length === 1 && s2.open[0] === 'en-IN' && s2.off === true, `${tag} S2 first ear killed by the second → one English ear, dual off for this visit (${JSON.stringify(s2)})`);
+  await page.evaluate(() => window.__say('onion 100', 'en-IN'));
+  await page.waitForFunction(() => /onion/i.test(document.getElementById('copilot-out').textContent) && document.querySelector('#copilot-out .copilot-preview'), { timeout: 10000 });
+  ok(true, `${tag} S2 …and she is understood on that one ear`);
+  await page.waitForNetworkIdle({ idleTime: 300, timeout: 8000 }).catch(() => {});
+  await page.tap('#copilot-mic');
+  await page.waitForFunction(() => window.__ready(1), { timeout: 5000 });
+  await sleep(200);
+  eq(await page.evaluate(() => window.__recs.filter(r => r.state === 'on').length), 1, `${tag} S2 the next tap opens one ear only — no second attempt, no loop`);
+  await page.tap('#copilot-mic');
+  await page.waitForFunction(() => /Mic is off/.test(document.getElementById('copilot-voice-status').textContent), { timeout: 5000 });
+  await page.evaluate(() => { window.__killFirst = false; smDualOff = false; });
+  // S24-6 A phone that refuses the second ear: one ear, exactly as before, with the language button.
+  await page.evaluate(() => { window.__refuseSecond = true; });
+  await page.tap('#copilot-mic');
+  await page.waitForFunction(() => window.__ready(1) && document.querySelector('#copilot-voice-status .voice-lang'), { timeout: 5000 });
+  eq(await page.evaluate(() => window.__open()[0]), 'en-IN', `${tag} S24-6 second ear refused → one English ear`);
+  const sw = await page.$eval('#copilot-voice-status .voice-lang', b => { const r = b.getBoundingClientRect(); return { t: b.textContent, h: r.height, right: r.right }; });
+  ok(sw.t === 'ಕನ್ನಡದಲ್ಲಿ ಹೇಳಿ' && sw.h >= 44 && sw.right <= width + 0.5, `${tag} S21-10 …and the ಕನ್ನಡ button is still there as a 44 px fallback (${sw.t})`);
+  await page.tap('#copilot-voice-status .voice-lang');
+  await page.waitForFunction(() => window.__ready(1) && window.__open()[0] === 'kn-IN', { timeout: 5000 });
+  eq(await page.evaluate(() => localStorage.getItem('sm_voice_lang')), 'kn-IN', `${tag} S21-10 one tap switches the single ear to Kannada and remembers it`);
+  await page.evaluate(() => window.__say('ಈರುಳ್ಳಿ 100 ರೂಪಾಯಿ', 'kn-IN'));
+  await page.waitForSelector('#copilot-out .copilot-preview', { timeout: 10000 });
+  ok(/Groceries/.test(await page.$eval('#copilot-out', e => e.textContent)), `${tag} S21-11 spoken "ಈರುಳ್ಳಿ 100 ರೂಪಾಯಿ" on one Kannada ear previews Groceries`);
+  // Sprint 22: tapping the mic again to stop leaves no stale "Listening…".
+  await page.waitForNetworkIdle({ idleTime: 300, timeout: 8000 }).catch(() => {});
+  await page.tap('#copilot-mic');
+  await page.waitForFunction(() => /Listening/.test(document.getElementById('copilot-voice-status').textContent) && window.__open().length === 1, { timeout: 5000 });
+  await page.tap('#copilot-mic');
+  await page.waitForFunction(() => /Mic is off — tap it to speak/.test(document.getElementById('copilot-voice-status').textContent), { timeout: 5000 });
+  ok(!/Listening/.test(await page.$eval('#copilot-voice-status', e => e.textContent)) && await page.$('#copilot-voice-status .voice-lang'), `${tag} S22 stopping the mic says it is off (and keeps the language switch)`);
+  // A phone without Kannada speech falls back to English and says so.
+  await page.tap('#copilot-mic');
+  await page.waitForFunction(() => window.__ready(1) && /Listening/.test(document.getElementById('copilot-voice-status').textContent), { timeout: 5000 });
+  await page.evaluate(() => window.__fail('language-not-supported', 'kn-IN'));
+  await page.waitForFunction(() => /switched back to English/.test(document.getElementById('copilot-voice-status').textContent), { timeout: 5000 });
+  eq(await page.evaluate(() => localStorage.getItem('sm_voice_lang')), 'en-IN', `${tag} S21-12 no Kannada voice on this phone → back to English, and it says so`);
+  await page.evaluate(() => { window.__refuseSecond = false; });
+  // Review S21 (S5): with browser storage blocked the switch still works; and
+  // if the old recogniser's abort() throws, the mic still restarts.
+  await page.evaluate(() => {
+    window.__gi = Storage.prototype.getItem; window.__si = Storage.prototype.setItem;
+    Storage.prototype.getItem = function () { throw new Error('storage blocked'); };
+    Storage.prototype.setItem = function () { throw new Error('storage blocked'); };
+    smVoiceLangNow = null; window.__abortThrows = true; window.__refuseSecond = true;
+  });
+  await page.tap('#copilot-mic');
+  await page.waitForFunction(() => window.__ready(1) && window.__open()[0] === 'en-IN' && document.querySelector('#copilot-voice-status .voice-lang'), { timeout: 5000 });
+  await page.tap('#copilot-voice-status .voice-lang');
+  await page.waitForFunction(() => window.__ready(1) && window.__open()[0] === 'kn-IN' && /Listening/.test(document.getElementById('copilot-voice-status').textContent), { timeout: 5000 }).catch(() => {});
+  const blk = await page.evaluate(() => ({ open: window.__open(), status: document.getElementById('copilot-voice-status').textContent }));
+  await page.evaluate(() => { Storage.prototype.getItem = window.__gi; Storage.prototype.setItem = window.__si; window.__abortThrows = false; window.__refuseSecond = false; const r = window.__ear(); if (r) { r.state = 'off'; r.onend && r.onend(); } });
+  ok(blk.open.length === 1 && blk.open[0] === 'kn-IN' && /Listening/.test(blk.status), `${tag} S5 storage blocked + abort() throwing: one tap still switches to ಕನ್ನಡ and listens (${JSON.stringify(blk)})`);
+  // S21-13 The purchase form: Kannada words, spoken numbers, a category its own list lacks.
+  await page.evaluate(() => { smSetVoiceLang('kn-IN'); purchaseModal(); });
+  await page.waitForSelector('#pu-mic-btn', { timeout: 8000 });
+  const catBefore = await page.$eval('#pu-cat', e => e.value);
+  await page.tap('#pu-mic-btn');
+  await page.waitForFunction(() => window.__ready(1), { timeout: 5000 });
+  eq(await page.evaluate(() => window.__open()[0]), 'kn-IN', `${tag} S21-13 the purchase mic uses the same language`);
+  await page.evaluate(() => window.__say('ಫಿನಾಯಿಲ್ ನೂರು ಇಪ್ಪತ್ತು ಕ್ಯಾಶ್', 'kn-IN'));
+  await page.waitForFunction(() => document.getElementById('pu-cat').value === 'Cleaning', { timeout: 8000 }).catch(() => {});
+  const pu = await page.evaluate(() => ({ amt: document.getElementById('pu-amt').value, cat: document.getElementById('pu-cat').value, desc: document.getElementById('pu-desc').value, mode: document.getElementById('pu-mode').value }));
+  ok(catBefore !== 'Cleaning' && pu.cat === 'Cleaning', `${tag} S21-13 "ಫಿನಾಯಿಲ್" fills Cleaning (was ${catBefore}; ${JSON.stringify(pu)})`);
+  ok(pu.amt === '120' && pu.mode === 'Cash' && /^phenyl$/i.test(pu.desc), `${tag} S21-13 …₹120 ("nooru ippattu"), Cash, "Phenyl" (${JSON.stringify(pu)})`);
+  await page.evaluate(() => closeModal());
+  // S21-14 What was heard is shown as text, never as markup.
+  const xss = await page.evaluate(async () => {
+    const a = document.createElement('div'); a.id = 'collect-preview'; document.body.appendChild(a);
+    showCollectPreview('<img id="s21x1" src="x">', { guest: null });
+    const b = document.createElement('div'); b.id = 'cp-preview'; document.body.appendChild(b);
+    await complaintApplyVoice('<img id="s21x2" src="x"> tap leaking');
+    const r = !!(document.getElementById('s21x1') || document.getElementById('s21x2'));
+    a.remove(); b.remove(); return r;
+  });
+  ok(!xss, `${tag} S21-14 voice previews show what was heard as plain text`);
+  await page.evaluate(() => { try { localStorage.removeItem('sm_voice_lang'); } catch (e) {} smVoiceLangNow = null; });
   await page.evaluate(() => switchAdminTab('settings'));
   await page.waitForSelector('#set-evening-time', { timeout: 8000 });
   ok(await page.$('#set-evening-time'), `${tag} evening time is editable in Settings`);
@@ -491,6 +668,32 @@ async function runAtWidth(browser, BASE, width) {
   eq(await page.evaluate(() => document.activeElement && document.activeElement.id), 'search-q', `${tag} Ctrl+K opens search`);
   await page.keyboard.press('Escape');
   ok(await page.$('#copilot-q'), `${tag} Copilot bar still reachable on the page`);
+
+  // ── Hotfix 21.3: a question whose answers are taps — "₹80,000, or ₹80 at Savera?" ──
+  const purchases213 = (await pool.query(`SELECT COUNT(*)::int AS n FROM purchases`)).rows[0].n;
+  await page.evaluate(() => { copilotAsk('tiffin 80 savera'); });
+  await page.waitForFunction(() => document.querySelectorAll('#copilot-out .copilot-actions button').length === 2, { timeout: 10000 });
+  const qText = await page.$eval('#copilot-out .copilot-text', e => e.textContent.replace(/\s+/g, ' ').trim());
+  ok(/Is that ₹80,000 — or ₹80 at "Savera"\? Tap the right one\./.test(qText), `${tag} H21.3 "tiffin 80 savera" asks which amount (${qText.slice(0, 80)})`);
+  ok(!(await page.$('#copilot-out .copilot-preview')), `${tag} H21.3 …and prepares nothing yet`);
+  const taps213 = await page.$$eval('#copilot-out .copilot-actions button', bs => bs.map(b => { const r = b.getBoundingClientRect(); return { t: b.textContent.trim(), h: r.height, left: r.left, right: r.right }; }));
+  ok(taps213[0].t === '₹80,000 · tiffin' && taps213[1].t === '₹80 · tiffin savera', `${tag} H21.3 both readings are taps (${JSON.stringify(taps213.map(b => b.t))})`);
+  ok(taps213.every(b => b.h >= 44 && b.left >= 0 && b.right <= width + 0.5), `${tag} H21.3 …44 px high and on screen (${JSON.stringify(taps213.map(b => [Math.round(b.h), Math.round(b.right)]))})`);
+  await noHScroll('H21.3 which amount');
+  await page.evaluate(() => document.getElementById('copilot-bar').scrollIntoView({ block: 'center' }));
+  await page.screenshot({ path: path.join(SHOTS, `h213-which-amount-${width}.png`) });
+  await page.evaluate(() => document.querySelectorAll('#copilot-out .copilot-actions button')[1].click());
+  await page.waitForSelector('#copilot-out .copilot-preview', { timeout: 10000 });
+  const prev213 = await page.$eval('#copilot-out', e => e.textContent.replace(/\s+/g, ' '));
+  ok(/₹80 · Groceries/.test(prev213) && /tiffin savera/.test(prev213) && !/80,000/.test(prev213), `${tag} H21.3 tapping "₹80" previews ₹80 "tiffin savera" to confirm (${prev213.slice(0, 120)})`);
+  eq((await pool.query(`SELECT COUNT(*)::int AS n FROM purchases`)).rows[0].n, purchases213, `${tag} H21.3 …nothing saved until she confirms`);
+  // A long "Not a resident — expense: …" tap wraps instead of pushing the screen sideways.
+  await page.evaluate(() => renderCopilotResult({ answer: 'Did you mean Sachin Gowda?', clarify: 'Did you mean Sachin Gowda?', confidence: 'low', actions: [{ label: 'Sachin Gowda (Room 107)', tool: 'prepare_payment', args: { resident_id: 1, amount: 6000 }, level: 'prepare' }, { label: 'Not a resident — expense: suchindranath ₹6,00,000', tool: 'prepare_expense', args: { amount: 600000, description: 'suchindranath' }, level: 'prepare', chip: 'expense' }] }));
+  const long213 = await page.$$eval('#copilot-out .copilot-actions button', bs => bs.map(b => { const r = b.getBoundingClientRect(); return { h: r.height, left: r.left, right: r.right }; }));
+  ok(long213.length === 2 && long213.every(b => b.h >= 44 && b.left >= 0 && b.right <= width + 0.5), `${tag} H21.3 the "Not a resident — expense" tap fits a ${width}px screen (${JSON.stringify(long213.map(b => [Math.round(b.h), Math.round(b.right)]))})`);
+  await noHScroll('H21.3 did-you-mean with expense tap');
+  await page.screenshot({ path: path.join(SHOTS, `h213-did-you-mean-${width}.png`) });
+  await page.evaluate(() => { copilotDismiss(); document.getElementById('copilot-q').value = ''; });
 
   // ── Sprint 7: one product — Home in one call, groups, search, quick add ──
   // Let any in-flight navigation settle, then count the requests one fresh

@@ -237,3 +237,84 @@ Correction: the earlier plan ("add voice to collections and complaints") was wro
 | S20-4 | Audit Log cards on a phone carry the right labels (no "PAYS") | UX |
 | S20-5 | Backlog: the resident app's notice list respects room/floor targeting (a notice for one room is not shown to everyone); a 401 from change-password caused by an expired or turned-off login logs out instead of showing "Invalid token" | PRIVACY, UX |
 | S20-6 | Gates 12/12 twice; tests prove the fallback (Groq failing → Gemini answers; skip window), the tabs and the labels at 360/390, the notice targeting; independent review before merge | QA |
+
+## Sprint 21 — she speaks Kannada (criteria recorded during build — see note)
+Owner, 9 Nov 11:55: "nothing is live now so start building after that i will make them use" — with six production screenshots of Admin → Copilot log. Evidence from them:
+- Voice: "eerulli" (ಈರುಳ್ಳಿ, onion) arrived as **"heroine"**, **"Erode"**, "heroine urupai"; "aloo get a new Rupee". Every mic listens only in English (`rec.lang='en-IN'` in both voice engines), so Kannada words are lost before any parser sees them.
+- "eruli 500rs" → Other and the Groq 404 → "I'm not sure" entries are from **17 Sept**. Re-run on today's code: typed Kanglish already works ("eruli 500rs", "pudina soppu 500rs" → Groceries) and Sprint 20 fixed the 404. Correction to my first read of the screenshots.
+- Still open on today's code: an item with no amount ("pudina soppu", "eerulli") → "I'm not sure"; "hal 60" (milk) → Other; on a phone the Copilot log squeezes Siri's reply into a narrow column beside the badge.
+Note: the owner said to start building at once, so these criteria were written alongside the build, not before it. The gate and the independent review are unchanged.
+
+| ID | Acceptance criterion | Review |
+|---|---|---|
+| S21-1 | **Kannada script is understood.** A shared, keyless transliteration (`SMParse.toLatin`) spells Kannada script the way WhatsApp Kannada is typed (ಈರುಳ್ಳಿ → eerulli, ಜಾನವಿ → jaanavi, ಕ್ಯಾಶ್ → cash, ರೂಮ್ ನಂಬರ್ ೧೦೬ → room number 106). Text with no Kannada letters is returned untouched | QA |
+| S21-2 | Kannada number words: digits ೦–೯, ಐದು ಸಾವಿರ, ಎರಡು ಸಾವಿರದ ಐನೂರು, ಐನೂರು, ನೂರು ಇಪ್ಪತ್ತು, teens | QA |
+| S21-3 | Quick Entry (Copilot bar, quick sheet) handles Kannada script end to end: expenses with category, amount and mode; a resident's name said in Kannada is a collection, never an expense; "-kaayi" vegetables are Groceries | QA |
+| S21-4 | Complaints in Kannada (ಸೋರುತ್ತಿದೆ, ಕೆಲಸ ಮಾಡ್ತಿಲ್ಲ, ಬರುತ್ತಿಲ್ಲ, "current illa") are complaints, kept in her words, with the room read | QA |
+| S21-5 | An item she buys, said with no amount, asks "How much was the …?" and puts the item back in the box. This happens only when every word is a known grocery or cleaning item, so commands and questions ("rent due", "milk finished") still go to the Copilot | UX |
+| S21-6 | Questions in Kannada (ಯಾರು…, eshtu…) are not entries | QA |
+| S21-7 | A clearly spoken Kannada phrase needs no AI call (on-device recognition + rules) | COST |
+| S21-8 | The purchase form's mic fills a category its own word list lacks (eerulli, phenyl, ಹಾಲು) through `POST /copilot/category`. It uses the dictionary and this PG's history only, **never the model**, and needs a login | PRIVACY, QA |
+| S21-9 | Copilot log on a phone: Siri's reply sits under the outcome badge with room to read | UX |
+| S21-10..13 | **Mic language switch.** Every mic (Copilot bar, quick sheet, Collect, Complaints, Purchase) listens in the language chosen on this phone (English by default). While listening, and after each result, the status line offers one 44 px button, "ಕನ್ನಡದಲ್ಲಿ ಹೇಳಿ" or "Speak English", that stops, switches and listens again. A phone without Kannada speech falls back to English and says so | UX |
+| S21-14 | In the Collect and Complaint voice previews, what was heard is shown as plain text, never as markup | SECURITY |
+| S21-15 | Gates 12/12 twice; mutations caught; independent review before merge. **Not verifiable here:** what Chrome on a real Android phone writes in ಕನ್ನಡ mode (digits vs words, loan-word spellings). The owner tries it after release | QA |
+
+**Sprint 21 status:** approved by the independent review in round 6 (d103b88), after BLOCK ×5. Gates 12/12 ×2, 3,169 each. Merged to ai/test. No migration. The owner checks ಕನ್ನಡ voice on a real phone on Test (S21-15).
+
+**Hotfix 21.1 status:** approved (d47f73b), merged to ai/test (PR #30).
+
+**Hotfix 21.2 status:** approved by the independent review in round 3 (f7979a4), after BLOCK ×2. Gates 12/12 ×2, 3,338 each. Merged to ai/test. No migration. Follow-ups are listed under Hotfix 21.2 in TEST_REPORT.md; the first is the other half of S-e (copilot.js page-resident fallback). Still unverified on a real phone: ಕನ್ನಡ mode (every owner screenshot so far is English mode), and the real repair model on the four owner phrases.
+
+**Hotfix 21.3 status:** approved by the independent review in round 2 (bb31178), after BLOCK ×1. Gates 12/12 ×2, 3,454 each. Merged to ai/test. No migration. Follow-ups are listed under Hotfix 21.3 in TEST_REPORT.md.
+
+## Sprint 22 — stability sweep (backlog from Sprints 17–21 and the 21.x reviews)
+Owner, 10 Nov: "keep working, stop whenever my decision is required". No decision needed: every item is a known defect with the fix already agreed in a review.
+
+| ID | Acceptance criterion | Review |
+|---|---|---|
+| S22-1 | On a resident's page, an ordinary leftover word inside another resident's name ("6000 cash van" → Bhavana) does not list that resident; only a whole name word, the start of one (4+ letters) or a sound-alike counts | UX |
+| S22-2 | More Kannada/English filler on a resident's page needs no tap (avalu, old dues, morning, hostel fee, token, qr code …) | UX |
+| S22-3 | A weight is never money: "rice 2 thousand 5 hundred grams" has no amount; "rice 5 hundred grams 60" is ₹60 | MONEY |
+| S22-4 | A resident's payment in thousands ("hattu savera deposit" → ₹10,000) is prepared with the note; only an unusual figure (above ₹25,000) is asked about | UX |
+| S22-5 | The "Test AI connection" probe pauses Groq only when Gemini can stand in (as `providers.text` does) | COST |
+| S22-6 | Gemini's request body is tested: JSON asked for only when wanted, the key in a header and never in the URL | QA |
+| S22-7 | The 409 closed-day message, when the closed day is today, says an admin must reopen it (not "record this against today") | UX |
+| S22-8 | Stopping the mic (or a silent timeout) never leaves "Listening…" on screen | UX |
+| S22-9 | "+ Add Staff" and the search box fit a 360 px screen | UX |
+| S22-10 | Gates 12/12 twice; mutations caught; independent review before merge | QA |
+
+**Sprint 22 status:** approved by the independent review in round 1 (3c2b159). Gates 12/12 (3,490) on e482643. Merged to ai/test. No migration.
+
+## Sprint 23 — local SEO for sirimane.in (owner, 10 Nov 17:56: "do which all can be done from your side")
+The public page already had a title, description, Open Graph/Twitter tags, geo tags, LodgingBusiness structured data, robots.txt and a sitemap. This sprint fixes what was weak or missing. Address, phone and pincode come from the existing structured data and footer (5th Cross, Gangotri Road, S.I.T. Extension, Tumakuru 572103 · 9880217627). Enquiry hours 9 am – 8 pm are an assumption the owner must confirm.
+
+| ID | Acceptance criterion | Review |
+|---|---|---|
+| S23-1 | Structured data is valid JSON-LD: LodgingBusiness (phone, address, pincode, hours, area served), FAQPage whose questions are word-for-word the ones shown on the page, WebSite | SEO |
+| S23-2 | Exactly one H1, carrying the search phrase ("Safe Ladies PG in Tumakuru, near S.I.T. Extension"); a local title; a canonical link to https://sirimane.in/ | SEO |
+| S23-3 | GET on www.sirimane.in → 301 to sirimane.in with path and query kept; API calls are never redirected; other hosts (Test site) untouched | SEC |
+| S23-4 | /guest.html, /management.html and /api/* send X-Robots-Tag noindex; the home page, robots.txt and sitemap.xml do not | SEO |
+| S23-5 | robots.txt points at the sitemap; the sitemap lists the home page with a current lastmod | SEO |
+| S23-6 | On a 360/390 px phone: DOM ready under 3 s, the H1 readable and on screen, no sideways scroll, six FAQ rows at 44 px that open to a full answer | UX |
+| S23-7 | Gates 12/12 twice; mutations caught; independent review; a step-by-step list for the owner's side (Google Business Profile, Search Console, directories, reviews, photos) | QA |
+
+**Sprint 23 status:** approved by the independent review in round 1 (c067245), should-fixes taken (d578ea3). Gates 12/12 ×2, 3,520. Owner confirmed address, hours and phone on 10 Nov. Merged to ai/test. No migration. Owner-side steps: docs/ai-team/SEO_OWNER_CHECKLIST.md.
+
+## Sprint 24 — no language button: the mic hears English and Kannada at once (owner, 11 Nov: "it should be automatic, this extra pressing is not appropriate" · "it could be Kanglish also" · "go ahead with your recommendation")
+Recommendation taken: two recognisers per tap (English and Kannada), both transcripts to the server, the rules read each and keep the more complete reading; equally complete readings that disagree are shown as two taps; a phone that refuses the second recogniser falls back to the single-language mic with the ಕನ್ನಡ button exactly as in Sprint 21. Plus the "Review us on Google" card in the resident app (owner's review link, once per resident after 30 days, dismissible, no reward).
+
+| ID | Acceptance criterion | Review |
+|---|---|---|
+| S24-1 | One mic tap opens an English ear and a Kannada ear; no language button is shown while both are open; the status reads "Listening…" | UX |
+| S24-2 | Server: with two transcripts the more complete reading wins ("heroine Nooru rupaye" + "ಈರುಳ್ಳಿ ನೂರು ರೂಪಾಯಿ" → onion ₹100; "Suchin I sawida" + "ಸಚಿನ್ ಐದು ಸಾವಿರ ಯುಪಿಐ" → ₹5,000 UPI), without an AI call; a complete English reading is kept | AI |
+| S24-3 | Two usable readings that differ in amount, person, type, item, or income-vs-expense are never guessed between — whatever their completeness scores (review B1): "I heard two different things — tap the right one" with two 44 px taps; a tap prepares that reading; nothing is saved. Kannada noise that only half-matches a name cannot outrank a complaint (review S1) | MONEY |
+| S24-4 | The same reading in two scripts is one entry; a reading that only asks a question (two Jhanavis) loses to a complete one; nonsense in both ears still goes through the Sprint 21 repair with its honesty guard | AI |
+| S24-5 | If only one ear hears, the result shows after at most ~1.2 s and the silent ear is closed (mic not left on); a phone that refuses the second ear — or ends the first ear when the second starts (review S2) — gets the single-language mic and ಕನ್ನಡ button for the rest of the visit; "Mic is off", storage-blocked and abort-throws cases still pass | UX |
+| S24-6 | Quick Entry and the Copilot bar both send both ears (`dual`); the Copilot route shows the tie as taps | UX |
+| S24-7 | Resident app: a resident of 30+ days sees one optional "Review on Google" card linking to the owner's g.page review link in a new tab; two 44 px taps; fits 360/390 | UX |
+| S24-8 | "Not now" or "Review on Google" removes the card and is remembered on the server (once per resident, any phone); the first answer is never overwritten; nothing about the review is stored | PRIV |
+| S24-9 | No card in her first 30 days; no card unless the link in app_settings is https | SEC |
+| S24-10 | Migration `migrate-google-review.js` additive (two guests columns + one setting), re-runnable, in migrate-all; gates 12/12 twice; mutations caught; independent review before merge | QA |
+
+**Sprint 24 status:** BLOCK in round 1 (028fd58: a score gap let one ear's amount win over a different amount) → fixed; APPROVED round 2 (d5edc3c); round-2 should-fix (complaint vs expense) taken. Gates 12/12 (3,571) on the final tree, 12/12 ×2 (3,570) on d5edc3c. Mutations 20/21 killed, 1 equivalent replaced and killed. Migration: `node backend/scripts/migrate-google-review.js`. Merged to ai/test. Owner to confirm on his phone that both ears start before main.

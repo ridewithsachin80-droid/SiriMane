@@ -22,7 +22,7 @@ router.post('/ask', auth, async (req, res) => {
       ? { tool: String(req.body.tool).slice(0, 60), args: req.body.args } : null;
     const voice = req.body.voice === true;
     const alternatives = Array.isArray(req.body.alternatives) ? req.body.alternatives.slice(0, 5).map(a => String(a || '').slice(0, 200)) : [];
-    res.json(await copilot.ask({ user: req.user, text, context: ctx, tap, voice, alternatives, authorization: 'Bearer ' + req.authToken, port: req.socket.localPort }));
+    res.json(await copilot.ask({ user: req.user, text, context: ctx, tap, voice, alternatives, dual: req.body.dual === true, authorization: 'Bearer ' + req.authToken, port: req.socket.localPort }));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -58,6 +58,21 @@ router.get('/audit', auth, async (req, res) => {
       ORDER BY a.id DESC LIMIT $1`, [limit]);
     res.json(r.rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /copilot/category { item } — S21: the category for an item the
+// purchase form's own word list doesn't know ("eerulli", "phenyl", ಹಾಲು).
+// Dictionary and this PG's past purchases only — never the model — so it is
+// instant, free, and no text leaves the server.
+router.post('/category', auth, async (req, res) => {
+  const item = req.body && typeof req.body.item === 'string' ? req.body.item.slice(0, 120) : '';
+  if (!item.trim()) return res.status(400).json({ error: 'item is required' });
+  try {
+    const quick = require('../services/quick');
+    const SMParse = require('../../frontend/public/js/speech-parser.js');
+    const r = await quick.categorise(SMParse.toLatin(item), { allowModel: false });
+    res.json({ category: r.category || null, basis: r.basis });
+  } catch (e) { res.status(500).json({ error: 'Could not work out a category' }); }
 });
 
 // GET /copilot/tools — what this user may ask for (drives the chips)

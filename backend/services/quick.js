@@ -42,8 +42,13 @@ const DICT = {
 // Kannada (ಕನ್ನಡ) and Hindi words as the warden types them. One or two
 // spellings each is enough: matching below is phonetic, so eruli / eerulli /
 // irulli / eerulli all land on the same entry.
+// S21: Kannada words added in Sprint 21. Short ones (rave, koli, hal) match
+// a longer word only with a Kannada case ending — "raveena" is not ರವೆ — while
+// the older dictionary keeps its prefix match ("milkman" → milk, review R3).
+const S21_WORDS = 'sautekaayi soutekayi hal haal hittu pudi hannu koli meenu maamsa mamsa rave heerekaayi heerekayi kaayi tarakaari maidaa';
+const S21_SHORT = new Set(S21_WORDS.split(/\s+/));
 const DICT_KN_HI = {
-  Groceries: 'eerulli eruli irulli pyaz pyaaz tamate tamatar aloogadde alugadde aalu aloo akki chawal bele togari bele dal daal godhi atta sakkare cheeni uppu namak enne tel haalu halu doodh mosaru dahi tuppa ghee motte anda balehannu bale hannu kela tenginakayi tengina kayi kobbari nariyal menasinakayi menasu mirchi hunase imli bella gud tarkari sabzi sabji soppu saag kottambari dhaniya pudina shunti adrak bellulli lehsun lahsun nimbe nimbu huralikayi hurali badanekayi badane baingan bendekayi bende bhindi kosu gobi patta gajjari gajar kumbalakayi kaddu southekayi sowthe kheera nuggekayi drumstick hagalakayi karela dappa menasinakayi shimla mirch mulangi mooli beetroot avarekayi avare kadalekayi kadale chana bataani matar palak methi menthya chapati roti idli dosa dose upittu uppittu chitranna avalakki poha ragi mudde jola navane sajje rava thindi tiffin oota bhojana naashta nasta kirani kirana anganadi angadi bakery brede biscat biskut'.split(/\s+/),
+  Groceries: (S21_WORDS + ' eerulli eruli irulli pyaz pyaaz tamate tamatar aloogadde alugadde aalu aloo akki chawal bele togari bele dal daal godhi atta sakkare cheeni uppu namak enne tel haalu halu doodh mosaru dahi tuppa ghee motte anda balehannu bale hannu kela tenginakayi tengina kayi kobbari nariyal menasinakayi menasu mirchi hunase imli bella gud tarkari sabzi sabji soppu saag kottambari dhaniya pudina shunti adrak bellulli lehsun lahsun nimbe nimbu huralikayi hurali badanekayi badane baingan bendekayi bende bhindi kosu gobi patta gajjari gajar kumbalakayi kaddu southekayi sowthe kheera nuggekayi drumstick hagalakayi karela dappa menasinakayi shimla mirch mulangi mooli beetroot avarekayi avare kadalekayi kadale chana bataani matar palak methi menthya chapati roti idli dosa dose upittu uppittu chitranna avalakki poha ragi mudde jola navane sajje rava thindi tiffin oota bhojana naashta nasta kirani kirana anganadi angadi bakery brede biscat biskut').split(/\s+/),
   Cleaning: 'sabbu sabun soap fenail phenyl phenoyl pore porake kasabarige jhadu jhaadu balti bakeet bucket mugu mug bleach harpik lizol safai swachhata dustbin kasa kasada dabbi tholeyuva powder washing powder'.split(/\s+/),
   Repairs: 'nalli nal tap nalli repair pipu pipe geyser giser heater fan fanu bulbu bulb tube light tubelight switch swich socket wire wiring current repair karpentar carpenter bagilu darwaza door kitaki khidki window beega lock chavi key kili welding painting bannna paint sement cement marali sand itige eent brick plumber plumbar electrician electrishian mistri mechanic motoru motor pump pumpu'.split(/\s+/),
   Water: 'neeru pani water tanker tankar borewell bore motor water bill'.split(/\s+/),
@@ -55,10 +60,17 @@ for (const [cat, words] of Object.entries(DICT_KN_HI)) DICT[cat] = (DICT[cat] ||
 const DICT_INDEX = new Map();
 for (const [cat, words] of Object.entries(DICT)) for (const w of words) if (!DICT_INDEX.has(w)) DICT_INDEX.set(w, cat);
 
-const FAULT_WORDS = /\b(leak\w*|not working|not workin|notworking|broken|broke|damaged|jammed|stuck|no water|no power|no current|no light|no wifi|no internet|blocked|clogged|overflow\w*|smell\w*|noise|noisy|repair needed|complaint|complain|problem|issue|fused|flicker\w*|sparking|dripping)\b/i;
+// S21: and as she says it in Kannada — "nalli soruttide" (tap leaking),
+// "fan kelasa maadtilla" (fan not working), "neeru baruttilla" (no water),
+// "light haalaagide" (light gone bad), "current illa" (no power).
+const FAULT_WORDS = /\b(sorut\w*|soru?t+ide|sortide|tirug\w*illa|(?:current|light|power|karent|neeru|wifi|net)\s+hogide|kela?sa\s+maa?d\w*illa|\w+\s+aag\w*illa|baruttilla|bartilla|barta\s+illa|baratilla|haala?agide|haalaagide|haalagide|kettide|kettu\s+hogide|muridide|murididhe|block\s+aagide|(?:neeru|niru|current|karent|light|fan|wifi|net|nalli|bisi\s+neeru|geyser)\s+illa|leak\w*|not working|not workin|notworking|broken|broke|damaged|jammed|stuck|no water|no power|no current|no light|no wifi|no internet|blocked|clogged|overflow\w*|smell\w*|noise|noisy|repair needed|complaint|complain|problem|issue|fused|flicker\w*|sparking|dripping)\b/i;
 const QUESTION = /^(who|what|which|how|when|where|why|is|are|do|does|did|can|could|should|show|list|find|tell|give|any|whats|what's)\b|\?\s*$/i;
-const MODE_WORDS = /\b(upi|gpay|google pay|phonepe|phone pe|paytm|cash|nagadu|bank|neft|imps|transfer|card)\b/gi;
-const NOISE = /\b(rs\.?|rupees?|rupaye|rupai|inr|paid|pay|payment|gave|give|given|got|received|collected|collect|for|of|to|the|a|an|and|today|yesterday|bought|brought|bougt|buy|purchased|purchsed|purchase|spent|expense|expenses|bill|by|via|from|on|in|at|rent|deposit|advance)\b/gi;
+// Review S21 (S2): Kannada puts the question word LAST — "priya rent eshtu",
+// "yaaru kottilla" — so these count anywhere in the sentence. A word that is
+// part of a resident's name ("Elli") is not a question word.
+const KN_QUESTION_WORDS = new Set(['yaaru', 'yaru', 'eshtu', 'estu', 'eshtidhe', 'eshtide', 'yaavaga', 'yavaga', 'elli', 'yaake', 'yake', 'enu', 'yenu', 'yaava', 'yava', 'yaavudu', 'hege', 'heege']);
+const MODE_WORDS = /\b(upi|upay|upai|gpay|google pay|phonepe|phone pe|paytm|cash|nagadu|bank|neft|imps|transfer|card)\b/gi;
+const NOISE = /\b(rs\.?|rupees?|rupaye|rupai|rupaayi|rupayi|roopaayi|inr|kottaru|kottlu|kotlu|kotte|kotta|kottu|kottidaare|kottidaale|kottide|tagondu|tagonde|tegedukonde|kharchu|kharch|ge|ige|ke|paid|pay|payment|gave|give|given|got|received|collected|collect|for|of|to|the|a|an|and|today|yesterday|bought|brought|bougt|buy|purchased|purchsed|purchase|spent|expense|expenses|bill|by|via|from|on|in|at|rent|deposit|advance)\b/gi;
 
 // "100rs", "rs100", "rs.100", "₹100", "100/-", "1k" → a number the parser sees.
 function normaliseAmount(text) {
@@ -101,7 +113,7 @@ async function categorise(item, opts = {}) {
   if (ranked.length && (ranked.length === 1 || ranked[0][1] > ranked[1][1])) return { category: ranked[0][0], basis: `you have filed "${words.find(w => hist.get(w))}" under ${ranked[0][0]} ${ranked[0][1]} time${ranked[0][1] === 1 ? '' : 's'}` };
   // (b) the dictionary — exact, then by sound
   for (const w of words) { const c = DICT_INDEX.get(w); if (c) return { category: c, basis: `"${w}" is usually ${c}` }; }
-  for (const w of words) for (const [dw, c] of DICT_INDEX) if (dw.length >= 4 && w.length >= 4 && (dw.startsWith(w) || w.startsWith(dw))) return { category: c, basis: `"${w}" looks like ${dw} (${c})` };
+  for (const w of words) for (const [dw, c] of DICT_INDEX) if (dw.length >= 4 && w.length >= 4 && (dw.startsWith(w) || (w.startsWith(dw) && (!S21_SHORT.has(dw) || ITEM_SUFFIX.test(w.slice(dw.length)))))) return { category: c, basis: `"${w}" looks like ${dw} (${c})` };
   // Kannada and Hindi in Latin letters have no fixed spelling: eruli, eerulli,
   // irulli, eeruli are one word. Compare phonetic keys, then near-misses.
   for (const w of words) {
@@ -113,6 +125,9 @@ async function categorise(item, opts = {}) {
       if (skw.length >= 4 && dw.skel === skw) return { category: c, basis: `"${w}" sounds like ${dw.word} (${c})` };
     }
   }
+  // S21: Kannada names most vegetables "<something>kaayi" (ಸೌತೆಕಾಯಿ, ಹೀರೇಕಾಯಿ)
+  // and greens "<something> soppu" — a safe Groceries guess for any of them.
+  for (const w of words) if (w.length >= 6 && /(kaa?yi|kaai)$/.test(w)) return { category: 'Groceries', basis: `"${w}" is a vegetable (-kaayi)` };
   // (c) the model — item words only. Never a name, never a rupee figure.
   if (opts.allowModel !== false && (process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY || ai.providers._stub)) {
     try {
@@ -141,7 +156,7 @@ async function repairVoice(raw, alternatives, residents) {
   if (!modelReady()) return null;
   const alts = [raw, ...(alternatives || [])].map(a => String(a || '').trim()).filter(Boolean).filter((a, i, arr) => arr.indexOf(a) === i).slice(0, 5);
   const roster = residents.map(r => `${r.name}${r.room_number ? ' (room ' + r.room_number + ')' : ''}`).join('; ');
-  const system = `A paying-guest hostel warden in Karnataka spoke to her phone. Chrome's transcripts are listed best-first; they may contain mis-heard English, Kannada or Hindi words and spoken numbers. Decide what she most likely said and rewrite it as ONE short phrase in exactly one of these shapes:
+  const system = `A paying-guest hostel warden in Karnataka spoke to her phone. Chrome's transcripts are listed best-first; they may contain mis-heard English, Kannada or Hindi words and spoken numbers, and may be written in Kannada script (ಕನ್ನಡ) or spelt out in English letters (eerulli = onion, haalu = milk, soppu = greens). Decide what she most likely said and rewrite it as ONE short phrase in exactly one of these shapes:
 - "<item> <amount> [upi|cash|bank]"  for something bought (item in plain English, e.g. onion, phenyl, plumber, bescom, wifi)
 - "<resident name exactly as in the list> <amount> [upi|cash|bank] [deposit|advance]"  for money a resident paid
 - "<fault> room <number>"  for a complaint
@@ -156,11 +171,80 @@ Reply ONLY with JSON {"phrase": "<the phrase>", "confidence": "high"|"low"}. Nev
     return phrase && phrase.toLowerCase() !== raw.toLowerCase() ? { phrase, confidence: parsed.confidence === 'high' ? 'high' : 'low' } : null;
   } catch (e) { return null; }
 }
+// Hotfix 21.2: the model may fix how a word was HEARD, never add a fact. It
+// once turned "Nooru rupee" into "Sachin Gs 100 cash deposit". What was heard
+// is read here exactly as classify reads it (room out, names blanked, amount,
+// mode, type), and a repaired reading is used only if:
+//  · a payment's resident was actually heard — in the words left once the
+//    amount, mode and filler words are gone ("aaru savira" is not Savitha) —
+//    and, where two residents share that name, a word unique to this one was;
+//  · its type (rent / deposit / advance) is the type that was heard;
+//  · its amount is an amount that was heard;
+//  · an expense is not conjured from a bare number, nor a question re-worded.
+// A payment mode that was not heard is dropped (she is asked for it).
+// Returns { ok } — or { ok:false, suggest:<resident> } when she DID say a word
+// nobody could place and the model thinks it is this resident: that becomes a
+// "Did you mean …?" question with a tap, never a prepared entry.
+function readHeard(h, residents) {
+  const norm = normaliseAmount(SMParse.toLatin(String(h || '')));
+  const roomHit = SMParse.extractRoom(norm);
+  const sansRoom = roomHit && roomHit.matched ? norm.replace(roomHit.matched, ' ') : norm;
+  const amt = SMParse.extractAmount(SMParse.maskNames(sansRoom, residents));
+  const modeHit = SMParse.extractMode(norm);
+  const nameText = (amt && amt.matched ? dropWords(sansRoom, amt.matched) : sansRoom).replace(MODE_WORDS, ' ').replace(NOISE, ' ');
+  return { amount: amt ? amt.amount : null, mode: modeHit ? modeHit.mode : null, type: /\bdeposit\b/i.test(norm) ? 'deposit' : /\badvance\b/i.test(norm) ? 'advance' : 'rent',
+    words: tokens(nameText).filter(w => w.length >= 3 && !SMParse.RUPEE_WORD.test(w) && !SMParse.extractAmount(w)) };
+}
+function soundsLike(w, p) {
+  if (w === p || similarity(w, p) >= 0.7) return true;
+  const kw = phoneticKey(w), kp = phoneticKey(p), sk = kp.replace(/[aeiou]/g, '');
+  return (kw === kp && kp.length >= 3) || (sk.length >= 3 && sk === kw.replace(/[aeiou]/g, '') && w.length >= 4);
+}
+function checkRepair(first, second, heard, residents, hist) {
+  if (!second || !second.tool) return { ok: false };                       // a re-worded question adds nothing she said
+  const said = heard.map(h => readHeard(h, residents));
+  const words = [...new Set(said.flatMap(x => x.words))];
+  const a = second.args || {};
+  if (second.tool === 'prepare_payment') {
+    const r = residents.find(x => x.id === a.resident_id);
+    const parts = who => String(who || '').toLowerCase().split(/\s+/).filter(p => p.length >= 3);
+    const heardName = who => parts(who).some(p => words.some(w => soundsLike(w, p)));
+    if (!heardName(r ? r.name : a.name)) {
+      // A word she said that is no amount, mode, filler, known item or learned item.
+      // …and that at least starts like, or half-resembles, the model's resident
+      // ("Satin" → Sachin, "Johnny" → Jhanavi; never "heerly" → Sachin).
+      const loose = (said[0] ? said[0].words : []).filter(w => !DICT_INDEX.has(w) && !(hist && hist.has(w) && Object.keys(hist.get(w)).some(c => c !== 'Other')));
+      // 21.3: half-alike, or the same first two consonants — "Satin" → Sachin,
+      // "Johnny" → Jhanavi; a shared first letter alone ("samosa") is not enough.
+      const cons = x => phoneticKey(x).replace(/[aeiou]/g, '').slice(0, 2);
+      const word = r ? loose.find(w => parts(r.name).some(p => similarity(w, p) >= 0.5 || (cons(w).length === 2 && cons(w) === cons(p)))) : null;
+      return { ok: false, suggest: word ? r : null, said: said[0], word };
+    }
+    if (r) {
+      // "Priya" does not pick between two Priyas, nor "Somya" between Sowmya and
+      // Soumya: some heard word must sound like HER name and like nobody else's.
+      const others = residents.filter(x => x.id !== r.id && heardName(x.name));
+      const like = (w, who) => parts(who.name).some(p => soundsLike(w, p));
+      if (others.length && !words.some(w => like(w, r) && !others.some(o => like(w, o)))) return { ok: false };
+    }
+    // The type is the one in what she said first; an alternative transcript may
+    // not drop a "deposit" (review 21.2 r2 S-d).
+    const type = a.type || 'rent';
+    if (said[0] && said[0].type !== 'rent' ? type !== said[0].type : !said.some(x => x.type === type)) return { ok: false };
+  }
+  if (second.tool === 'prepare_expense' && first && first.ask === 'what') return { ok: false };   // only a number was heard
+  if (second.tool === 'prepare_expense' && first && first.tool === 'prepare_payment') return { ok: false };   // 21.3: the rules read a collection ("Kavia 5000 upi") — the model may not make it a purchase
+  if (a.amount != null && !said.some(x => x.amount === Number(a.amount))) return { ok: false };
+  // The mode is the one she said (review 21.2 S1) — or none, and she is asked.
+  const heardMode = (said.find(x => x.mode) || {}).mode;
+  if (heardMode) a.mode = heardMode; else delete a.mode;
+  return { ok: true };
+}
 function weak(i) {
   if (!i) return true;
   if (i.kind === 'expense' && i.tool && (!i.args.category || i.args.category === 'Other')) return true;   // item nobody recognised
   if (i.kind === 'collection' && i.tool && !i.args.resident_id) return true;                                // name not resolved
-  if (!i.tool && i.clarify) return true;                                                                    // e.g. only a number was heard
+  if (!i.tool && i.clarify && i.ask !== 'amount' && i.ask !== 'which_amount' && i.ask !== 'which_reading') return true;                                            // e.g. only a number was heard ("How much was the eerulli?" is a real answer — review S21 S1)
   return false;
 }
 
@@ -168,41 +252,163 @@ function weak(i) {
 // Spoken: deterministic pass with NO model; if it is weak, repair the
 // transcript once and classify the repaired phrase (model allowed there).
 // A clearly-heard "onion 100" therefore never touches the model at all.
+// Sprint 24: the mic listens in English AND Kannada at once, so the
+// transcripts come in two scripts ("Jhanavi 5000 UPI" / "ಜಾನವಿ ಐದು ಸಾವಿರ
+// ಯುಪಿಐ"). How complete a reading is: a resident or an item found, an amount,
+// a mode, a type/room — each one point; a question or nothing is 0.
+function completeness(i) {
+  if (!i) return 0;
+  if (!i.tool) return i.ask ? 1 : 0;
+  const a = i.args || {};
+  let n = 2;   // the rules read SOMETHING (an entry, not a question)
+  if (i.tool === 'prepare_payment') { if (a.resident_id) n += 2; else if (i.fuzzy && i.fuzzy.length) n += 1; if (a.amount) n += 2; if (a.mode) n += 1; if (a.type && a.type !== 'rent') n += 1; }
+  else if (i.tool === 'prepare_expense') { if (a.amount) n += 2; if (a.description) n += 1; if (a.category && a.category !== 'Other') n += 1; if (a.mode) n += 1; }
+  else if (i.tool === 'prepare_complaint') { n += 2; if (a.room) n += 1; }
+  return n;
+}
+// Two readings that disagree on money or on the person are never guessed between.
+function sameEntry(a, b) {
+  if (!a || !b || a.tool !== b.tool) return false;
+  const x = a.args || {}, y = b.args || {};
+  if ((x.resident_id || null) !== (y.resident_id || null) || Number(x.amount || 0) !== Number(y.amount || 0) || (x.type || 'rent') !== (y.type || 'rent')) return false;
+  // For a purchase the item matters too — onion ₹100 is not garlic ₹100 (same spelling in two scripts is the same item).
+  if (a.tool === 'prepare_expense') { const k = d => looseKey(SMParse.toLatin(String(d || '')).toLowerCase()); if (k(x.description) !== k(y.description) && (x.category || 'Other') === (y.category || 'Other')) return false; }
+  return true;
+}
+// Review S24 B1: the people a reading could mean — the matched resident, or
+// the fuzzy candidates ("jaanavi" from the Kannada ear is fuzzy, never exact).
+function peopleOf(i) {
+  if (!i || i.tool !== 'prepare_payment') return null;
+  if (i.args && i.args.resident_id) return [Number(i.args.resident_id)];
+  if (i.fuzzy && i.fuzzy.length) return i.fuzzy.map(f => Number(f.id));
+  return null;
+}
+// Does reading b contradict reading a on anything that matters — money, the
+// person, income vs expense, the item? Score gaps never settle these.
+function conflicts(a, b) {
+  if (!a || !b || !a.tool || !b.tool) return false;
+  const x = a.args || {}, y = b.args || {};
+  const money = t => t === 'prepare_payment' || t === 'prepare_expense';
+  if (a.tool !== b.tool) {
+    if (money(a.tool) && money(b.tool)) return true;                          // income vs expense
+    // complaint vs money: a payment that found its resident AND an amount, or an expense with an amount, contests it
+    const pay = a.tool === 'prepare_payment' ? a : b.tool === 'prepare_payment' ? b : null;
+    const exp = a.tool === 'prepare_expense' ? a : b.tool === 'prepare_expense' ? b : null;
+    return !!((pay && pay.args && pay.args.resident_id && pay.args.amount) || (exp && exp.args && exp.args.amount));
+  }
+  if (x.amount && y.amount && Number(x.amount) !== Number(y.amount)) return true;
+  if (a.tool === 'prepare_payment') {
+    const pa = peopleOf(a), pb = peopleOf(b);
+    if (pa && pb && !pa.some(id => pb.includes(id))) return true;             // different people
+    if (x.type && y.type && x.type !== y.type) return true;                   // rent vs deposit
+  }
+  if (a.tool === 'prepare_expense' && !sameEntry(a, b) && x.amount && y.amount) return true;   // onion vs garlic
+  return false;
+}
 async function intent(text, user, context, opts = {}) {
   if (!opts.voice) return classify(text, user, context, { allowModel: true });
-  const first = await classify(text, user, context, { allowModel: false });
+  let first = await classify(text, user, context, { allowModel: false });
+  // Sprint 24: with transcripts from a second language, the rules read each
+  // one; the most complete reading wins — unless another usable reading
+  // contradicts it on money, the person, income vs expense or the item, in
+  // which case both are shown as taps (ask:'which_reading'). Never guessed between.
+  const others = (opts.alternatives || []).map(a => String(a || '').trim()).filter(a => a && a !== String(text || '').trim()).slice(0, 5);
+  if (others.length && opts.dual) {
+    const heardText = String(text || '').trim();
+    const reads = [{ t: heardText, i: first }];
+    for (const t of others) reads.push({ t, i: await classify(t, user, context, { allowModel: false }) });
+    reads.sort((p, q) => completeness(q.i) - completeness(p.i));
+    const usable = reads.filter(r => r.i && r.i.tool && completeness(r.i) >= 4);
+    const best = usable[0] || reads[0];
+    // Review S24 S1: English speech makes Kannada noise in the other ear, and
+    // that noise can fuzzy-match a name. A reading that found nobody cannot
+    // outrank a complaint, and a complaint is kept over such a payment.
+    const complaint = usable.find(r => r.i.tool === 'prepare_complaint');
+    const unresolvedPay = r => r.i.tool === 'prepare_payment' && !(r.i.args && r.i.args.resident_id);
+    const pick = complaint && usable.every(r => r === complaint || unresolvedPay(r)) ? complaint : best;
+    if (pick.i && pick.i.tool && completeness(pick.i) >= 4) {
+      const rival = usable.find(r => r !== pick && conflicts(pick.i, r.i));
+      if (rival) {
+        const ids = [pick, rival].map(r => r.i.args && r.i.args.resident_id).filter(Boolean);
+        const names = {}; if (ids.length) for (const row of (await pool.query(`SELECT id, name FROM guests WHERE id = ANY($1)`, [ids])).rows) names[row.id] = row.name;
+        const rupees = n => '₹' + Number(n || 0).toLocaleString('en-IN');
+        const cap = w => w ? w.charAt(0).toUpperCase() + w.slice(1) : w;
+        // Review S24 S3: when the person is still to be chosen the label says so ("Janvi?").
+        const label = r => r.i.tool === 'prepare_payment' ? `${(r.i.args.resident_id && names[r.i.args.resident_id]) || (cap(r.i.args.name) || 'Resident') + '?'} · ${rupees(r.i.args.amount)}${r.i.args.mode ? ' · ' + r.i.args.mode : ''}`
+          : r.i.tool === 'prepare_complaint' ? `Complaint · ${r.i.args.description || r.i.args.category || 'issue'}`
+          : `${r.i.args.description || 'expense'} · ${rupees(r.i.args.amount)}`;
+        return { tool: null, clarify: 'I heard two different things — tap the right one.', via: 'quick', kind: pick.i.kind, ask: 'which_reading',
+          options: [pick, rival].map(r => ({ label: label(r), tool: r.i.tool, args: { ...r.i.args, source: 'quick' }, heard: r.t })) };
+      }
+      if (pick.t !== heardText) return { ...pick.i, heard: heardText, understood: pick.t, via: 'quick' };
+      first = pick.i;
+    } else if (completeness(best.i) > completeness(first)) first = { ...best.i, heard: heardText, understood: best.t };
+  }
   if (!weak(first)) return first;
   const { rows: residents } = await pool.query(`SELECT g.id, g.name, r.room_number FROM guests g LEFT JOIN rooms r ON r.id=g.room_id WHERE g.is_active=true`);
   const fix = await repairVoice(String(text || '').trim(), opts.alternatives, residents);
   if (fix) {
     const second = await classify(fix.phrase, user, context, { allowModel: true });
-    if (second) return { ...second, heard: String(text || '').trim(), understood: fix.phrase, repair_confidence: fix.confidence };
+    const heard = [String(text || '').trim(), ...(opts.alternatives || [])];
+    const verdict = checkRepair(first, second, heard, residents, await historyIndex());
+    if (verdict.ok) return { ...second, heard: String(text || '').trim(), understood: fix.phrase, repair_confidence: fix.confidence };
+    if (second && second.tool === 'prepare_payment') {
+      // Review 21.2 S3: never slide from a payment the model could not prove into
+      // an expense preview of the same money. Ask who it was — with what was HEARD.
+      if (first && first.tool === 'prepare_payment') return first;   // the rules already read a collection (and ask who, or how much)
+      if (verdict.suggest) {
+        const h = verdict.said;
+        return { tool: 'prepare_payment', args: { name: verdict.word, suggest_id: verdict.suggest.id, amount: h.amount || undefined, mode: h.mode || undefined, type: h.type }, via: 'quick', kind: 'collection',
+          fuzzy: [{ id: verdict.suggest.id, name: verdict.suggest.name, room_number: verdict.suggest.room_number, why: 'suggested from what was heard' }] };
+      }
+      if (first && !(first.tool === 'prepare_expense')) return first;
+    } else if (first && !first.tool) return first;   // a rejected repair never replaces the rules' own question
   }
   // No repair possible: give the item one chance at a model category, as typed text gets.
   return classify(text, user, context, { allowModel: true });
 }
 
 async function classify(text, user, context, copts = {}) {
-  const raw = String(text || '').trim();
-  if (!raw || raw.length > 200) return null;
+  // S21: Kannada script (the mic set to ಕನ್ನಡ) is spelt out first — ಈರುಳ್ಳಿ
+  // → eerulli — so names, amounts and the item dictionary all apply. Typed
+  // English comes back unchanged. A complaint keeps her own words.
+  const orig = String(text || '').trim();
+  if (!orig || orig.length > 200) return null;
+  const raw = SMParse.toLatin(orig);
+  if (!raw) return null;
   if (QUESTION.test(raw)) return null;
   const norm = normaliseAmount(raw);
   // Read the room FIRST and take it out — "room 106" is not ₹106.
   const roomHit = SMParse.extractRoom(norm);
   const room = roomHit ? (typeof roomHit === 'string' ? roomHit : roomHit.room) : null;
   const sansRoom = roomHit && roomHit.matched ? norm.replace(roomHit.matched, ' ') : norm;
-  const amt = SMParse.extractAmount(sansRoom);
+  const { rows: residents } = await pool.query(`SELECT g.id, g.name, r.room_number FROM guests g LEFT JOIN rooms r ON r.id=g.room_id WHERE g.is_active=true`);
+  // Review S21 N1/N2: residents' names are blanked before the amount is read —
+  // "Noora five thousand" is ₹5,000, "Noora paid" has no amount.
+  const amt = SMParse.extractAmount(SMParse.maskNames(sansRoom, residents));
   const amount = amt ? amt.amount : null;
   const modeHit = SMParse.extractMode(norm);
   const mode = modeHit ? modeHit.mode : null;
 
   // 2. A resident's name wins.
-  const { rows: residents } = await pool.query(`SELECT g.id, g.name, r.room_number FROM guests g LEFT JOIN rooms r ON r.id=g.room_id WHERE g.is_active=true`);
-  const nameText = norm.replace(MODE_WORDS, ' ');
+  const nameWords = new Set(residents.flatMap(r => String(r.name || '').toLowerCase().split(/\s+/)));
+  if (tokens(raw).some(w => KN_QUESTION_WORDS.has(w) && !nameWords.has(w))) return null;
+  // Review S21: the amount's own words ("nooraivattu", "5000") are never a name.
+  const nameText = (amt && amt.matched ? dropWords(sansRoom, amt.matched) : norm).replace(MODE_WORDS, ' ').split(/\s+/).filter(w => !SMParse.RUPEE_WORD.test(w.toLowerCase().replace(/[^a-z]/g, ''))).join(' ');
   const match = SMParse.matchResident(nameText, residents, room);
   const type = /\bdeposit\b/i.test(norm) ? 'deposit' : /\badvance\b/i.test(norm) ? 'advance' : 'rent';
   if (match) {
-    return { tool: 'prepare_payment', args: { resident_id: match.id, amount: amount || undefined, mode: mode || undefined, type }, via: 'quick', kind: 'collection' };
+    // 21.3: "Jhanavi 80 savera" — ₹80,000 or ₹80? Neither is a usual rent: ask.
+    // ("Jhanavi 5 Savera" is ₹5,000: nobody pays ₹5, and the preview says how it was read.)
+    // Sprint 22: up to ₹25,000 (a rent, a deposit — "hattu savera deposit") the
+    // small reading (₹10) is not believable, so it is prepared with the note.
+    if (amt && amt.alt != null && amt.alt >= 10 && amount > 25000) {
+      const first = String(match.name).split(/\s+/)[0], base = { resident_id: match.id, mode: mode || undefined, type };
+      const big = '₹' + amount.toLocaleString('en-IN'), small = '₹' + amt.alt.toLocaleString('en-IN');
+      return { tool: null, clarify: `Is that ${big} or ${small} from ${match.name}? Tap the right one.`, via: 'quick', kind: 'collection', ask: 'which_amount',
+        options: [{ label: `${big} · ${first}`, tool: 'prepare_payment', args: { ...base, amount } }, { label: `${small} · ${first}`, tool: 'prepare_payment', args: { ...base, amount: amt.alt } }] };
+    }
+    return { tool: 'prepare_payment', args: { resident_id: match.id, amount: amount || undefined, mode: mode || undefined, type }, via: 'quick', kind: 'collection', amount_basis: amountBasis(amt) };
   }
   // Two residents called Jhanavi → this is still a collection; it must ask
   // "which one?", never fall through and become an expense named "jhanavi".
@@ -214,7 +420,7 @@ async function classify(text, user, context, copts = {}) {
 
   // 3. Fault words and no money → a request.
   if (FAULT_WORDS.test(norm) && !amount) {
-    return { tool: 'prepare_complaint', args: { description: raw, room: room || undefined }, via: 'quick', kind: 'request' };
+    return { tool: 'prepare_complaint', args: { description: orig, room: room || undefined }, via: 'quick', kind: 'request' };
   }
 
   // 3b. A name that is nearly a resident's ("janavi" → Jhanavi) → still a
@@ -228,16 +434,103 @@ async function classify(text, user, context, copts = {}) {
 
   // 4. Money without a name → an expense.
   if (amount) {
-    const item = sansRoom.replace(amt.matched, ' ').replace(MODE_WORDS, ' ').replace(NOISE, ' ').replace(/\b(room|rum)\s*[a-z]?\d{1,3}[a-z]?\b/gi, ' ').replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim();
+    const item = cleanItem(dropWords(sansRoom, amt.matched));
     if (!item) {
       // Decision 2: never file a blind rupee figure.
-      return { tool: null, clarify: `What was ₹${amount.toLocaleString('en-IN')} for? Say the item too — e.g. "onion ${amount}".`, retry_text: raw + ' ', via: 'quick', kind: 'expense' };
+      return { tool: null, clarify: `What was ₹${amount.toLocaleString('en-IN')} for? Say the item too — e.g. "onion ${amount}".`, retry_text: raw + ' ', via: 'quick', kind: 'expense', ask: 'what' };
     }
     const vendor = await matchVendor(item);
     const { category, basis, via } = await categorise(vendor ? item.replace(new RegExp(vendor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), ' ') : item, { allowModel: copts.allowModel !== false });
-    return { tool: 'prepare_expense', args: { amount, category: category || 'Other', description: item, mode: mode || undefined, paid_to: vendor || undefined }, via: 'quick', kind: 'expense', category_basis: basis, category_via: via || (category ? 'local' : 'none') };
+    // Hotfix 21.3: "tiffin 80 savera" — ₹80,000, or ₹80 at a place called Savera?
+    // Both are believable for a purchase of ₹10 or more, so she is asked, with
+    // both as taps. (Below ₹10 the plain reading is not: "plumber eradu savera"
+    // is ₹2,000 — and the preview says how it was read.)
+    if (amt.alt != null && amt.alt >= 10) {
+      const word = amt.heardWord.charAt(0).toUpperCase() + amt.heardWord.slice(1);
+      const itemAlt = cleanItem(dropWords(sansRoom, amt.altMatched));
+      const base = { category: category || 'Other', mode: mode || undefined, paid_to: vendor || undefined, source: 'quick' };
+      const big = '₹' + amount.toLocaleString('en-IN'), small = '₹' + amt.alt.toLocaleString('en-IN');
+      return { tool: null, clarify: `Is that ${big} — or ${small} at "${word}"? Tap the right one.`, via: 'quick', kind: 'expense', ask: 'which_amount',
+        options: [{ label: `${big} · ${item}`, tool: 'prepare_expense', args: { ...base, amount, description: item } },
+                  { label: `${small} · ${itemAlt}`, tool: 'prepare_expense', args: { ...base, amount: amt.alt, description: itemAlt } }] };
+    }
+    return { tool: 'prepare_expense', args: { amount, category: category || 'Other', description: item, mode: mode || undefined, paid_to: vendor || undefined }, via: 'quick', kind: 'expense', category_basis: basis, category_via: via || (category ? 'local' : 'none'), amount_basis: amountBasis(amt) };
+  }
+  // 5. S21: an item she buys, with no amount — "pudina soppu", "eerulli" —
+  //    asks how much, instead of "I'm not sure". Review S21 (B2): ONLY when
+  //    every word left (after payment-mode words and rs/rupees/the) is an item
+  //    in the dictionary — so "milk bill", "buy milk", "groceries", "water",
+  //    "menu" and words from old purchase notes still go to the Copilot.
+  const itemOnly = SMParse.stripQuantities(sansRoom).replace(MODE_WORDS, ' ').replace(/\b(rs\.?|rupees?|rupaayi|rupai|inr|the|a|an)\b/gi, ' ').replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim();
+  const words = tokens(itemOnly);
+  if (words.length && words.length <= 4 && !/\d/.test(itemOnly) && words.every(buyableWord)) {
+    return { tool: null, clarify: `How much was the ${itemOnly}? Add the amount — e.g. "${itemOnly} 100".`, retry_text: itemOnly + ' ', via: 'quick', kind: 'expense', ask: 'amount' };
   }
   return null;
+}
+// Words that are in the grocery list but are not an item on their own.
+const NOT_ITEM = new Set(['groceries', 'grocery', 'kirana', 'kirani', 'provisions', 'ration', 'cleaning', 'cleaner', 'water', 'gas', 'cylinder', 'lpg', 'refill', 'can', 'veg', 'nonveg', 'non-veg', 'snacks', 'tiffin', 'thindi', 'tindi', 'oota', 'bhojana', 'naashta', 'nasta', 'sweeping', 'angadi', 'anganadi', 'bakery']);
+// Kannada case endings and English plurals after an item: eerullige, onions.
+const ITEM_SUFFIX = /^(s|es|ge|ige|ke|annu|nnu|na|nu|alli|inda|u|a|i)?$/;
+function buyableWord(w) {
+  if (!w || w.length < 2 || NOT_ITEM.has(w)) return false;
+  const c = DICT_INDEX.get(w);
+  if (c) return BUYABLE.has(c);
+  if (w.length >= 6 && /(kaa?yi|kaai)$/.test(w)) return true;
+  if (w.length < 5) return false;   // "menu" ≠ meenu: short words must match exactly
+  const kw = looseKey(w);
+  for (const [dw, cat] of DICT_KEYS) {
+    if (!BUYABLE.has(cat) || NOT_ITEM.has(dw.word)) continue;
+    if (dw.key.length >= 4 && dw.key === kw) return true;
+    if (dw.word.length >= 5 && similarity(w, dw.word) >= 0.8) return true;
+  }
+  return false;
+}
+const BUYABLE = new Set(['Groceries', 'Cleaning']);
+// The item words of an expense: no rupee, mode, filler or room words.
+function cleanItem(text) {
+  return String(text).split(/\s+/).filter(w => !SMParse.RUPEE_WORD.test(w.toLowerCase().replace(/[^a-z]/g, ''))).join(' ').replace(MODE_WORDS, ' ').replace(NOISE, ' ').replace(/\b(room|rum)\s*[a-z]?\d{1,3}[a-z]?\b/gi, ' ').replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim();
+}
+// For the Copilot (21.3 review): what is left of a phrase once payment modes,
+// rupee words and filler ("paid", "kottlu", "rent", "from") are gone …
+const MODE_SYNS = new RegExp('\\b(' + Object.values(SMParse.MODE_SYNONYMS).flat().map(x => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).sort((a, b) => b.length - a.length).join('|') + ')\\b', 'gi');
+function stripFiller(text) {
+  return String(text || '').replace(MODE_SYNS, ' ').replace(MODE_WORDS, ' ').replace(NOISE, ' ').split(/\s+/).filter(w => w && !SMParse.RUPEE_WORD.test(w.toLowerCase().replace(/[^a-z]/g, ''))).join(' ');
+}
+// … the item words of a phrase ("sound box 500" → "sound box") …
+async function itemOf(text) {
+  const { rows: residents } = await pool.query(`SELECT g.id, g.name FROM guests g WHERE g.is_active=true`);
+  const norm = normaliseAmount(SMParse.toLatin(String(text || '')));
+  const roomHit = SMParse.extractRoom(norm);
+  const sansRoom = roomHit && roomHit.matched ? norm.replace(roomHit.matched, ' ') : norm;
+  const amt = SMParse.extractAmount(SMParse.maskNames(sansRoom, residents));
+  return cleanItem(amt ? dropWords(sansRoom, amt.matched) : sansRoom);
+}
+// … and how its amount was read, when that needed a guess and gave `amount`.
+async function noteFor(text, amount) {
+  const { rows: residents } = await pool.query(`SELECT g.id, g.name FROM guests g WHERE g.is_active=true`);
+  const norm = normaliseAmount(SMParse.toLatin(String(text || '')));
+  const roomHit = SMParse.extractRoom(norm);
+  const amt = SMParse.extractAmount(SMParse.maskNames(roomHit && roomHit.matched ? norm.replace(roomHit.matched, ' ') : norm, residents));
+  return amt && amt.amount === Number(amount) ? amountBasis(amt) : undefined;
+}
+// Hotfix 21.3: when the amount came from a word that is also a name ("noor",
+// "savera"), the preview says how it was read, so a wrong guess is seen.
+function amountBasis(amt) {
+  if (!amt) return undefined;
+  if (amt.lone) return `I read "${amt.lone}" as ₹${amt.amount.toLocaleString('en-IN')}.`;
+  if (amt.alt != null) return `I read "${amt.matched}" as ₹${amt.amount.toLocaleString('en-IN')}.`;
+  return undefined;
+}
+// Hotfix 21.1: take the amount's words out of the text whatever their case.
+// The amount is read in lower case, but Chrome capitalises the first word it
+// hears — "Nooru rupaye" left "Nooru" behind as the item.
+function dropWords(text, matched) {
+  if (!matched) return text;
+  // Whole words only — "ten" is never cut out of "Tenzin" or "Tender" (review 21.1 S2).
+  // Edges are anything that is not a letter or digit — a space, "." "," "!"
+  // or "₹" — so "500." and "500, cash" are cleared too (review 21.1 H1).
+  return String(text).replace(new RegExp('(^|[^\\p{L}\\p{N}])' + matched.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?=[^\\p{L}\\p{N}]|$)', 'iu'), '$1 ');
 }
 
 // ── Fuzzy resident matching (14.2) ──────────────────────────────────────────
@@ -277,8 +570,25 @@ for (const [word, cat] of DICT_INDEX) { const key = looseKey(word); DICT_KEYS.pu
 
 // Residents whose name is CLOSE to something in the text, best first.
 // Returns [] when nothing is close enough — never a wild guess.
+// Review 21.2 B2: only for a word that has never been given a real category.
+// "sweet" filed under Groceries stays an item beside a resident Swathi; a word
+// filed only under Other ("Janvi", from a mis-heard entry) taught nothing and
+// must not bar the resident's name.
+function clearlyAName(w, residents, hist) {
+  const e = hist && hist.get(w);
+  if (!e || Object.keys(e).some(c => c !== 'Other')) return false;
+  const kw = phoneticKey(w), skw = kw.replace(/[aeiou]/g, '');
+  return residents.some(r => String(r.name || '').toLowerCase().split(/\s+/).some(p => {
+    if (p.length < 3) return false;
+    const kp = phoneticKey(p), sk = kp.replace(/[aeiou]/g, '');
+    return p === w || (kp === kw && kp.length >= 3) || (sk.length >= 3 && sk === skw && w.length >= 4);
+  }));
+}
 function fuzzyResidents(text, residents, hist) {
-  const words = tokens(text).filter(w => w.length >= 3 && !NOISE.test(' ' + w + ' ') && !DICT_INDEX.has(w) && !(hist && hist.has(w)));
+  // Hotfix 21.2: a word once saved in an expense note ("Janvi I Savera") used to
+  // be barred as a name for ever — then "Janvi 5000 upi" became an expense. A
+  // history word still counts when it clearly IS a resident's name.
+  const words = tokens(text).filter(w => w.length >= 3 && !NOISE.test(' ' + w + ' ') && !DICT_INDEX.has(w) && !(hist && hist.has(w) && !clearlyAName(w, residents, hist)));
   const out = [];
   for (const r of residents) {
     const parts = String(r.name || '').toLowerCase().split(/\s+/).filter(p => p.length >= 3);
@@ -319,4 +629,4 @@ async function matchVendor(item) {
   return null;
 }
 
-module.exports = { intent, classify, repairVoice, fuzzyResidents, phoneticKey, looseKey, similarity, categorise, normaliseAmount, historyIndex, invalidateHistory, CATEGORIES, DICT, FAULT_WORDS, QUESTION };
+module.exports = { intent, classify, repairVoice, checkRepair, stripFiller, itemOf, noteFor, fuzzyResidents, phoneticKey, looseKey, similarity, categorise, normaliseAmount, historyIndex, invalidateHistory, CATEGORIES, DICT, FAULT_WORDS, QUESTION };

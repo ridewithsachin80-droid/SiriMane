@@ -359,9 +359,45 @@ async function runAtWidth(browser, BASE, width, fixtures) {
     await fillLogin(page, portalPw); await page.evaluate(() => document.getElementById('login-btn').click());
     await page.waitForFunction(() => !document.getElementById('portal-section').classList.contains('hidden'), { timeout: 8000 });
   }
+  // Sprint 24: the Google-review card — once per resident, after 30 days.
+  await pool.query('UPDATE guests SET review_prompt_at=NULL, review_prompt_action=NULL WHERE id=$1', [fixtures.guestId]);
   await page.evaluate(() => showTab('home'));
   await page.waitForSelector('.h-due .amt', { timeout: 12000 });
   const homeTxt = await page.$eval('#p-home', e => e.textContent);
+  await page.waitForSelector('#review-card', { timeout: 8000 });
+  const rv = await page.evaluate(() => { const c = document.getElementById('review-card'); const a = c.querySelector('a'), b = c.querySelector('button'); return { text: c.textContent, href: a.getAttribute('href'), target: a.getAttribute('target'), rel: a.getAttribute('rel'), ah: a.getBoundingClientRect().height, bh: b.getBoundingClientRect().height, right: c.getBoundingClientRect().right }; });
+  ok(/Happy at Siri Mane/.test(rv.text) && /entirely up to you/.test(rv.text), `${tag} S24-7 a resident of 30+ days sees the "Review on Google" card, worded as optional`);
+  ok(rv.href === 'https://g.page/r/CeV_6hO1dexlEBM/review' && rv.target === '_blank' && /noopener/.test(rv.rel), `${tag} S24-7 the button opens the Google review link in a new tab (${rv.href})`);
+  ok(rv.ah >= 44 && rv.bh >= 44 && rv.right <= width + 1, `${tag} S24-7 both taps are thumb-sized and the card fits (${Math.round(rv.ah)}/${Math.round(rv.bh)}px)`);
+  await page.evaluate(() => document.getElementById('review-card').scrollIntoView({ block: 'center' }));
+  await page.screenshot({ path: path.join(SHOTS, `s24-review-card-${width}.png`) });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  if (width === 360) {
+    await page.evaluate(() => document.querySelector('#review-card button').click());
+    await page.waitForFunction(() => !document.getElementById('review-card'), { timeout: 5000 });
+    await sleep(600);
+    const rec = (await pool.query('SELECT review_prompt_action, review_prompt_at FROM guests WHERE id=$1', [fixtures.guestId])).rows[0];
+    ok(rec.review_prompt_action === 'dismissed' && rec.review_prompt_at, `${tag} S24-8 "Not now" removes the card and is remembered on the server`);
+    const again = await page.evaluate(() => apiGuest('/guest-home'));
+    eq(again.review_prompt, null, `${tag} S24-8 …so it never comes back, on any phone`);
+    await page.evaluate(() => apiGuest('/guest-review-prompt', { method: 'POST', body: { action: 'tapped' } }));
+    eq((await pool.query('SELECT review_prompt_action FROM guests WHERE id=$1', [fixtures.guestId])).rows[0].review_prompt_action, 'dismissed', `${tag} S24-8 a second answer cannot overwrite the first`);
+  } else {
+    await page.evaluate(() => reviewPrompt('tapped'));
+    await page.waitForFunction(() => !document.getElementById('review-card'), { timeout: 5000 });
+    await sleep(600);
+    eq((await pool.query('SELECT review_prompt_action FROM guests WHERE id=$1', [fixtures.guestId])).rows[0].review_prompt_action, 'tapped', `${tag} S24-8 tapping "Review on Google" is recorded as tapped`);
+    // Not yet 30 days → no card; no/invalid link → no card. (join_date is put back at once.)
+    await pool.query('UPDATE guests SET review_prompt_at=NULL, review_prompt_action=NULL, join_date=CURRENT_DATE WHERE id=$1', [fixtures.guestId]);
+    const fresh = await page.evaluate(() => apiGuest('/guest-home'));
+    await pool.query(`UPDATE guests SET join_date='2026-06-01' WHERE id=$1`, [fixtures.guestId]);
+    eq(fresh.review_prompt, null, `${tag} S24-9 a resident in her first 30 days is not asked`);
+    await pool.query(`UPDATE app_settings SET value='javascript:alert(1)' WHERE key='google_review_url'`);
+    const badUrl = await page.evaluate(() => apiGuest('/guest-home'));
+    await pool.query(`UPDATE app_settings SET value='https://g.page/r/CeV_6hO1dexlEBM/review' WHERE key='google_review_url'`);
+    eq(badUrl.review_prompt, null, `${tag} S24-9 a review link that is not https is never sent to her phone`);
+    await pool.query('UPDATE guests SET review_prompt_at=NOW(), review_prompt_action=$2 WHERE id=$1', [fixtures.guestId, 'tapped']);
+  }
   ok(/Good (morning|afternoon|evening)/.test(homeTxt), `${tag} portal home greets her`);
   ok(/Today's meals/.test(homeTxt), `${tag} today's meals on home`);
   ok(await page.$('.p-bottomnav'), `${tag} bottom navigation present`);

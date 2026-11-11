@@ -323,3 +323,214 @@ Owner, 9 Nov 07:55: "Yes for both" (delete the route; ask residents to change th
 - edba5d9: **APPROVE** with should-fixes: the skip window started on any Groq error (a one-off 400, or a Groq-only setup with nothing to fall back to); an empty/cut-off Groq answer counted as success; worst case ~50 s (Groq 25 s + Gemini 25 s); no test pinned what Gemini receives or that quick entry falls back (mutants survived). Minor: Gemini without JSON mode, max_tokens deprecated, invalid tablist role. → 86440ce.
 - 86440ce: **APPROVE**. 12/12 ×2 on fresh gate14, 2,907 each. Worst case now ~33 s (8 + 25). Mutants mA2 (extra data to Gemini), mB2 (quick Groq-only), mH (pause without Gemini), mI (cut-off accepted) caught.
 Backlog (minor): the probe still starts the skip window in a Groq-only setup (production has both keys) · no test of Gemini's request body (`responseMimeType`) · "+ Add" clipped in Admin → Staff at 360 px (pre-existing) · the Groq model and JSON/reasoning settings are unverified against the live service — "Test AI connection" after release shows it.
+
+### Sprint 21 — she speaks Kannada: implementer evidence
+- Root cause (owner's Copilot log screenshots, 9 Nov): every mic used `rec.lang='en-IN'`, so spoken Kannada ("eerulli") reached the server as English words ("heroine", "Erode"), with nothing left to repair. The typed-Kanglish failures in the same screenshots date from 17 Sept and do not reproduce on today's code (probe re-run: "eruli 500rs", "pudina soppu 500rs" → Groceries).
+- `SMParse.toLatin` (new, in the shared speech-parser.js): Kannada script → WhatsApp-style Latin, Kannada digits, loan words (ಕ್ಯಾಶ್ → cash, ಯುಪಿಐ → upi, ರೂಪಾಯಿ → rupees, ಫಿನಾಯಿಲ್ → phenyl). Input with no Kannada letters is returned unchanged. It is used by quick.classify, parseCollection, parseComplaint, the purchase-form voice and `/copilot/category`.
+- Kannada number words (teens, the one-word hundreds such as ಐನೂರು, ಸಾವಿರದ); Kannada fault phrases; Kannada question words; "-kaayi" → Groceries; more dictionary words (hal, hittu, koli …).
+- An item with no amount asks "How much was the …?". The check is every word ∈ Groceries/Cleaning, and the deterministic dictionary is used, never the model.
+- Mic language: per phone (`sm_voice_lang`, try/catch). Two buttons switch it: one while listening and one after a result. `language-not-supported` → back to English. Both voice engines share it.
+- `POST /copilot/category`: auth, 120-character cap, dictionary and history only (the model is never called; a test proves it).
+- Copilot log outcome is in one block; Collect and Complaint voice previews escape what was heard.
+- Mutations M1–M7 were all caught:
+  - M1 transliteration off;
+  - M2 no amount-question;
+  - M3 mic hard-coded to English;
+  - M4 no purchase-category lookup;
+  - M5 old log layout;
+  - M6 unescaped preview;
+  - M7 category route allowed to call the model.
+- UI flake: the second mic tap after the Kannada preview missed 2 of 5 runs. The test now waits for network idle before tapping and has a diagnostic catch, and it then passed 3/3 plus both full runs. The cause was not proven (likely a late re-layout of the preview moving the mic).
+- Gates on e19eb58: 12/12 ×2, 3,023 each (Sprint 20 approved at 2,907); quick 280, ui 954.
+- **Not verified:** Chrome's real ಕನ್ನಡ output on an Android phone (numbers as digits or words, loan-word spellings). The owner tries it on Test.
+
+### Sprint 21 — independent review round 1: **BLOCK** (e19eb58) → fixes 9be9c8a
+- B1 (money): common Kannada amounts were read as confident wrong figures ("ಐದೂವರೆ ಸಾವಿರ" → ₹1,000; "ಇನ್ನೂರ ಐವತ್ತು" → ₹50). Now the -ವರೆ halves, joined tens+ones, hundreds compounds and joining forms are read, and the short forms work before ಸಾವಿರ. A ಸಾವಿರ after an unreadable word gives no amount (she is asked). English "onion hundred" stays ₹100. A regression I found while fixing ("aidu nooru" read as 105) is fixed and tested.
+- B2: the "How much was…" question took over typed English ("milk bill", "groceries", "water", "menu", words from old purchase notes). It now uses dictionary items only, with a not-an-item list and no history.
+- S1: a spoken item with no amount called the voice-repair model, which could invent an amount. That question is now final, and a test proves 0 model calls.
+- S2/S3: Kannada question words now count anywhere in the sentence, and resident names are exempt ("Elli 5000" is a payment again).
+- S4: compound Kannada numbers (₹25, ₹75, ₹150, ₹600, ₹700).
+- S5: the mic switch now works when browser storage is blocked and when abort() throws.
+- S6: a quantity ("5 kg", "ಐದು ಕೆಜಿ", "2 packets") is no longer read as the price.
+- Minor: tests now cover -kaayi, the 4-word cap and the CSS. Added more Kannada complaint wordings and leftover words. Short dictionary words no longer stretch ("raveena" → Other). Transliteration goes word by word with NFC. Comment moved.
+- Mutations N1–N9 (every fix above removed in turn) are all caught. Quick 362, UI 958.
+- Test-only: the fake recogniser could fire onerror before its delayed onstart. The test now waits for "Listening in ಕನ್ನಡ" first; this is the likely cause of the earlier intermittent miss.
+
+### Sprint 21 — independent review round 2: **BLOCK** (9be9c8a) → fixes 0baa5b8, 9a776d0
+- Every round-1 finding was verified fixed by the reviewer's probes. Three regressions came from my own rewrite:
+  - R1: a full stop after a number ("5000.", "1.5k.") lost the amount or changed it to ₹2;
+  - R2: the bare letters "g" and "l" counted as quantities ("6000 g pay");
+  - R3: the new suffix rule broke English prefixes ("milkman", "toiletries").
+- Fixed:
+  - A full stop that is not a decimal point is treated as punctuation.
+  - The bare g/l were removed; a glued "500g" or "2l" is still a quantity. A pay-word guard I added turned out to be dead code once g/l were gone (its mutation survived), so I removed it.
+  - The suffix rule applies only to the short Kannada words added in S21.
+  - The amount's own words are removed before resident matching (a resident named Noora is no longer taken from "ನೂರೈವತ್ತು").
+  - A quantity with no price asks how much ("ಹಾಲು ಮೂರು ಪ್ಯಾಕೆಟ್" → "How much was the haalu?").
+- A bug I introduced while fixing (operator precedence turned the Kannada grocery list into one word) was caught by the existing tests before commit.
+- Test isolation: one quick run collided with a full gate run on the same database, so both were discarded and re-run sequentially.
+- Mutations P1–P5 (full stop, bare g/l, suffix scope, amount words in names, quantity strip) were all caught.
+- Gates on 9a776d0: 12/12 ×2, 3,133 each (quick 386, ui 958).
+
+### Sprint 21 — independent review round 3: **BLOCK** (9a776d0) → fixes f9cc936, 6e743f4
+- All round-2 findings were verified fixed against b79cae1 (full stops, G Pay, English prefixes, amount words kept out of names, quantities asking the price). Across the reviewer's 140+ typed-English phrases, every difference from base is an intended S21 change.
+- N1 (money, typed English): a resident named **Noora** got a made-up ₹100. "Noora paid" read ನೂರ (noora, the joining form I added in round 2) as ×100. The reviewer says it was already visible at 9be9c8a but missed in their round-2 report.
+- Fixed:
+  - "noora" is a number only when another number word follows it.
+  - In both quick.classify and the on-device Collect parser, an amount made only of a resident's name words is dropped, so she is asked. This also covers "Ainoor" (500).
+- Mutations Q1–Q3 were all caught. Q3 survived at first, then an Ainoor parser test was added.
+- Gates on 6e743f4: 12/12 ×2, 3,151 each (quick 404, ui 958).
+
+### Sprint 21 — independent review round 4: **BLOCK** (6e743f4) → fix 950f54b
+- N1 was verified fixed ("Noora paid", "Ainoor paid" give no amount; an existing ₹10 for "Priya Das paid" is also gone).
+- N2 (money): her name before her amount still added ₹100 ("Noora five thousand" → ₹5,100, also in plain English).
+- Fix: a general rule replaces the per-case guards. Every word of every active resident's name is blanked (`SMParse.maskNames`) before any amount is read, in Quick Entry and in the on-device Collect parser.
+  - With a resident named Noora, the spaced "noora aivattu" reads as her name + ₹50, which is the pre-S21 result; the joined "ನೂರೈವತ್ತು" stays ₹150.
+  - "aidu noora" now gives no amount, so she is asked.
+- Mutations T1–T3 caught. Gates on 950f54b: 12/12 ×2, 3,164 each (quick 417, ui 958).
+
+### Sprint 21 — independent review round 5: **BLOCK**, one narrow item (950f54b) → fix d103b88
+- N2 was verified fixed against base on about 230 phrases. The masking also fixes some errors that predate Sprint 21:
+  - "Priya Das five thousand": ₹15,000 → ₹5,000;
+  - "five thousand.": ₹5 → ₹5,000;
+  - "eradu saavirada ainooru": ₹2 → ₹2,500.
+- N3: a surname that is also a number ("Das" = 10) could shrink someone else's amount. With a Priya Das living here, "Kavya das hazaar" was read as ₹1,000.
+- Fix: a multiplier straight after a blanked name gives no amount, so she is asked. Mutation U1 is caught.
+- Gates on d103b88: 12/12 ×2, 3,169 each (quick 422, ui 958).
+
+### Sprint 21 — independent review round 6: **APPROVE** (d103b88)
+- N3 verified fixed in quick.classify and the Collect parser.
+- Across about 230 English, Kanglish and Kannada phrases re-run against b79cae1, nothing gives a wrong rupee figure that base got right. Every remaining difference is one of three kinds:
+  - an intended S21 change;
+  - a base error that is now correct ("Priya Das five thousand" ₹15,000 → ₹5,000, "five thousand." ₹5 → ₹5,000, …);
+  - a guess that now asks instead ("Priya thousand", "Hema saavira" — the B1/N3 rules).
+- Still open (minor):
+  - with a resident named Noora, the spaced "noora aivattu" reads as her name + ₹50, the same as base;
+  - Chrome's real ಕನ್ನಡ output on an Android phone has to be checked by the owner on Test (S21-15).
+- Review: 6 rounds — BLOCK ×5, then APPROVE. Final gates 12/12 ×2, 3,169 each.
+
+### Hotfix 21.1 — the owner's phone on Test, English-mode mic (9 Nov, 19:13–19:15)
+- Evidence:
+  - "Nooru rupaye" was filed as an item called "Nooru" with a model-guessed category. `amt.matched` is lower case and was removed case-sensitively, while Chrome capitalises the first word.
+  - "Jaanvi I sawida upi" (ಐದು ಸಾವಿರ) gave no amount.
+- Fix:
+  - `dropWords` removes the amount case-insensitively, whole words only. Any non-letter or non-digit counts as an edge, so "500." and "500, cash" still ask.
+  - English-mode spellings of ಸಾವಿರ (sawida, sawira, savida …) were added, with B1 "unclear, ask" protection.
+  - `EN_HEARD` handles short hearings (I/eye → 5, aru → 6, …), only right before a Kannada multiplier.
+- Review (G3), 3 rounds:
+  - 03c6613: APPROVE with two should-fixes (I before English "thousand"; mid-word cuts such as "Tenzin").
+  - 1e7e8e0: **BLOCK**, H1: the whole-word edge missed punctuation, so "500." became a blind expense.
+  - d47f73b: **APPROVE**. About 140 phrases re-run against a80e191; no worse rupee figure anywhere.
+- Mutations H1–H6 all caught. H5 survived once, until the "Kitten food ten" and "Paneer 1500g 500" tests were added.
+- Test isolation: one full run picked up a test edit made mid-run and was discarded.
+- Gates on d47f73b: 12/12 ×2, 3,207 each (quick 460, ui 958). No migration.
+
+### Hotfix 21.2 — the owner's phone on Test, English-mode mic (10 Nov, 16:13–16:15)
+- Evidence (seven screenshots, mic still in English mode in all of them):
+  - "Nooru rupee" → the rules asked "What was ₹100 for?", then the voice-repair model rewrote it as "Sachin Gs 100 cash deposit" and a ₹100 deposit from Sachin Gs was previewed. Nobody said a name or "deposit".
+  - "noorulu upay" → the repair invented "groceries 100 upi".
+  - "Janvi I do Savera upi" (ಐದು ಸಾವಿರ) → a ₹2 expense "Janvi I Savera" ("do" read as Hindi 2; and "Janvi" was barred as a name because an earlier expense note contained it).
+  - "Janvi I Jo Savera upi" → no amount. "Noor upay" → fell through to the Copilot, which answered about rent.
+- Fix, first cut (71b51de): a guard on the repair (resident, type, amount and item must have been heard), "I do/I jo" + ಸಾವಿರ = 5, savera/noor/upay spellings, a history word no longer bars a clear resident name.
+- Review round 1: **BLOCK** (71b51de).
+  - B1: "noor"/"savera" as free multipliers gave wrong figures ("Noor salary aidu saavira" → ₹100; with a Noorjahan, "Noor, five thousand upi" → ₹5,100; "savera hotel tiffin two hundred" → ₹1,000).
+  - B2: the name-over-history rule fired on any skeleton match ("sweet" filed under Groceries → "Did you mean Swathi?").
+  - B3: the guard counted amount, rupee and mode words as proof of a name ("aaru savira upi" → Savitha), and let the model choose between two Priyas.
+  - S1–S6: mode swap, type swap/drop/Kannada-script bypass, rejected payment falling to an expense preview, "I do sabira" → ₹2, re-worded questions, room number read as a heard amount.
+- Fixes (e471434, bbbe8ad):
+  - Noor/Savera multiply only straight after a number; a lone "noor" is ₹100 only when it ends the phrase; names (and 4+-letter name prefixes that are not real number words) are blanked before any amount is read.
+  - A history word bars a name unless its history is solely "Other".
+  - The repair check reads each heard transcript the way the rules do (room out, names blanked) and compares resident, type, amount and mode against it; a shared first name is never settled by the model; a re-worded question is rejected.
+  - A resident the model recognised but nobody can prove becomes "Did you mean …?" with a tap (new optional `suggest_id` on prepare_payment), using only the amount, mode and type that were heard — and only when a heard word resembles the name.
+  - Found while replaying the review table, present before this hotfix: "rupai"/"rupaye" matched a resident named Rupa by prefix. Rupee words are no longer name evidence.
+- Deliberate change to an existing test (Sprint 14, VOICE "janvi five thousand upi"): with two Jhanavis the model used to pick one; it now asks with both offered.
+- Mutations: J1–J9 on the first cut and K1–K20 + K6b on the fixes, all caught. Two survived at first (J9 name evidence, K6b second rupee filter) until tests were added for them.
+- Review round 2: **BLOCK** (bbbe8ad). Round-1 findings verified fixed; all four owner incidents replay correctly.
+  - N1 (my own regression): a number under 100 before a shop name was multiplied — "rice 50 Noor stores" → ₹5,000, "tiffin 80 Savera hotel" → ₹80,000.
+  - S-a similar names (Sowmya/Soumya) still settled by the model; S-b more rupee spellings read as Rupa; S-c "rice from Noor" → ₹100; S-d a heard "deposit" dropped through an alternative transcript; S-e on a resident's page, a different spoken name went to the page's resident.
+- Fixes (f7979a4):
+  - A heard multiplier counts only if the count fits (ನೂರು takes 1–9, ಸಾವಿರ 1–99) and what follows is the end, a rupee/mode word, a payment word or more of the number. Otherwise a real number stands as said, and a guessed one ("I do", "I") gives no amount.
+  - A heard word must sound like the chosen resident and like no other; rupee spellings extended and removed from name evidence and from the expense item; "noor" after from/to/by/salary is a person; a "deposit" in the first transcript must be kept; prepare_payment uses the page's resident only when no name was said.
+- Mutations L1–L11 on these fixes, all caught.
+- Review round 3: **APPROVE** (f7979a4). No phrase worse than base on rupee figure or resident, apart from the known residuals below. The reviewer stubbed the repair model throughout: the real model's behaviour is not tested here, so the owner replays the four phrases on Test.
+- Gates on f7979a4: 12/12 ×2, 3,338 each (quick 591, ui 958). No migration, no new dependency.
+- Open, from the review (none blocking):
+  - S-e is half closed: copilot.js `localIntent`/`enrichRawArgs` (phrases with a 3–6 digit number and a mode word, e.g. "Suchin 6000 cash" on Jhanavi's page) still fall back to the page's resident, as at base. The new comment in tools.js cites that very phrase and is therefore inaccurate until this is fixed.
+  - A resident's name or "for" right after a heard multiplier stops it multiplying ("five savera Jhanavi" → ₹5, as at base).
+  - A vendor called Savera or Noor as the LAST word: "tiffin 80 savera" → ₹80,000, "rice 5 noor" → ₹500 (base ₹80, ₹5). Comes with reading "5 Savera" as 5,000.
+  - Items filed only under Other still flip to a resident question (bindi → Bindu); the "Did you mean" suggestion matches on first letter alone; an invented expense item passes when the amount was heard; Hindi fraction words.
+
+### Hotfix 21.3 — follow-ups from the 21.2 review (owner, 10 Nov 17:10: "start … keep working, stop whenever my decision is required")
+- Scope: a vendor called Savera/Noor as the last word ("tiffin 80 savera" → ₹80,000); the second half of the resident-page fix; smaller leftovers from the 21.2 review.
+- First cut (d80ab49):
+  - `extractAmount` keeps the other reading of a name-like multiplier (`alt`) and marks a lone "noor" (`lone`).
+  - An expense with a count of 10+ asks "Is that ₹80,000 — or ₹80 at "Savera"?" with both as taps; below 10 (and a lone "noor") the multiplied reading is prepared and the preview says "I read "5 noor" as ₹500."
+  - "Did you mean …?" gains "Not a resident — expense: …" for near-matches with an amount.
+  - The model may not turn a collection into a purchase; the resident suggestion needs half-resemblance or the same first two consonants.
+  - Copilot answer taps are 44 px on phones and wrap.
+- Review round 1: **BLOCK** (d80ab49). B1: my stop-list for the page-resident rule was too aggressive — 58 of 111 ordinary phrasings on a resident's page ("6000 cash kottlu", "6000 cash last month rent") answered "I could not find that resident". Should-fix: the bought/purchase path skipped the new question; "and" after the multiplier hid it; the way-out named one word; no note after a near-match tap.
+- Fixes (bb31178):
+  - The list no longer decides. Filler and mode words are stripped; a leftover word that resembles nobody is asked about — "Is this ₹6,000 from Jhanavi — the resident on this page?" — with her tap and the expense way-out; one that resembles others offers them, then her.
+  - bought/purchase phrases with a name-like multiplier are re-read by Quick Entry; trailing "and" is not part of an amount; the way-out uses the whole item; the note is attached after the tool runs (recomputed for taps).
+  - A matched resident with a count of 10+ ("Jhanavi 80 savera upi") is asked ₹80,000 or ₹80.
+  - "6 savera 5 noor" / "6 thousand 5 hundred" = 6,500; a heard multiplier after a 1–9 count is not masked as a name; "for" is a follower only before a payment word or a name.
+- Review round 2: **APPROVE** (bb31178). 111 no-name phrasings on a resident's page: 84 prepare her payment directly, 27 ask with her tap, none dead-end. No phrase where 21.3 prepares an entry for a resident that 21.2 did not. The reviewer did not run the UI suite and stubbed the repair model.
+- Mutations: M1–M17 (+M4b, M7b) on the first cut and N1–N15 on the fixes, 33 in all, every one caught (N13 needed a "bindi box 20" test first).
+- Gates on bb31178: 12/12 ×2, 3,454 each (quick 685, ui 980 at 360/390 px). No migration, no new dependency.
+- Open, from the review (none blocking):
+  - On a resident's page, an ordinary leftover word that sits inside another resident's name lists that resident before the page's resident ("6000 cash all dues" → Pallavi first). A question, her tap is labelled; 21.2 prepared her directly.
+  - More filler words still cost a tap (avalu, maadidlu, old, remaining, morning, hostel, mess, token, booking, qr, code …).
+  - "Jhanavi hattu savera deposit" asks ₹10,000 or ₹10 — the small reading is not believable for a payment.
+  - Hundreds of a weight are added to a price ("rice 2 thousand 5 hundred grams" → ₹2,500).
+  - Prefix name-matching (present before 21.x): "6000 upi rose" → Rosemary.
+  - Unchanged: "6 thousand 500" = ₹6,000; glued "80savera"; Hindi fraction words.
+
+### Sprint 22 — stability sweep: evidence and review
+- Scope: nine backlog items from the 17–21.x reviews (PHASE_STATUS S22-1…9). No migration, no new dependency.
+- Mutations P1–P11 (10: candidate filter, weight after hundreds, digit re-read, unit after multiplier, ₹25,000 threshold, probe pause, Gemini JSON flag, closed-day message, mic-off message, header wrap) all caught.
+- Review (G3): **APPROVE** first round (code 3c2b159). Verified against e87d3b8 with a 39-name roster and the 21.2 corpora; no money regression. The reviewer did not run the UI suite (S22-8/9 verified by code reading); the UI gate here passes at 360/390 px.
+- Test flake found by the full run: "Bhav 6000 cash" tied with another fixture's name in one database state and asked instead of preparing. The assertion now accepts either path that leads to Bhavana (e482643).
+- One xss run hit a 30 s navigation timeout on page load (a suite this sprint does not touch); it passed on both reruns.
+- Gates on e482643: 12/12, 3,490 (first full run); second run 11/12 + xss rerun 2/2 (141).
+- Open, from the review (none blocking):
+  - 3-letter name prefixes ("Anu" for Anusha) on a resident's page now ask about the page resident instead of offering the other resident.
+  - Off a resident's page, a phrase made only of stop words ("6000 cash all dues") says "I could not find that resident" where a "from whom?" question would be better.
+  - A quantity unit after "N thousand M hundred" for a resident's payment now asks the amount rather than preparing it.
+
+### Sprint 23 — local SEO: evidence and review
+- Owner confirmed (10 Nov 20:20): address and pincode as shown, enquiry hours 9 am – 8 pm, phone 9880217627. The other page claims (electricity included, resident warden, distances, room types) were not separately confirmed; they repeat what the site already said before this sprint, except "electricity", which he should check.
+- Mutations Q1–Q7 (redirect off, redirect on POST, noindex off, noindex everywhere, canonical removed, H1 demoted, FAQ question changed) all caught.
+- Review (G3): **APPROVE** first round (c067245). Should-fixes taken before merge: HEAD redirected too, FAQ structured answers word-for-word, title under 65 chars (d578ea3).
+- Known test limitation: headless:'new' Chromium does not toggle <details> on a synthetic click/tap (a default launch does), so the UI test opens the row via the DOM property and checks the tap lands on the summary and the answer renders in full.
+- Test isolation: a full run and an api run collided on one database (old tests failed); both were discarded and re-run alone.
+- Gates on d578ea3: 12/12 ×2, 3,520 each (api 492, ui 996). No migration, no new dependency.
+- Open: point `hasMap` at the real Google Business Profile once it exists; add real room photos with alt text when the owner sends them.
+
+### Sprint 23.1 — owner-confirmed facts in the copy (10 Nov 20:21)
+- Owner confirmed: hours 9–8 every day; rent includes everything; resident warden and visitor log; SIT is a 4–5 minute walk.
+- Copy updated accordingly (hero, FAQ 1 and 3, business description); FAQPage structured data regenerated from the page text. No code change.
+- Gates: api 492, ui 996 (full run below). Lighter review: parse + diff only, since the words are the owner's.
+
+### Sprint 24 — two ears on the mic + Google-review card: evidence and review
+**What was built.** `app.js smVoice`: a second recogniser in the other language per tap; whichever hears first is shown ("Heard: …"), the other gets 1.2 s, both transcripts go up with `dual:true`; the language button appears only when the phone gives one ear. `quick.js intent()`: `completeness()` scores each transcript's rules reading, `sameEntry()` decides whether two readings are the same entry; best wins, ties → `ask:'which_reading'` with `options` the Copilot turns into taps. `copilot.js` tries the dual path before its own local intent. `experience.js`: `review_prompt` on `/guest-home` and `POST /guest-review-prompt`; `guest.html` card; `migrate-google-review.js`.
+
+**Server-side readings (quick suite, S24 block, 0 AI calls unless stated):** Kannada ear wins for groceries and Kanglish names (fixture `Sachin Q…`); complete English kept; ₹5,000 vs ₹6,000 tie → two taps labelled `name · ₹ · mode`; onion vs garlic tie asked; same reading in two scripts → one entry; two-Jhanavis question loses to a complete reading; complaint with room wins; nonsense → 1 repair call, invented amount refused; single-ear control unchanged. Copilot route: tie shows 2 taps, tapping prepares ₹6,000, nothing saved.
+
+**Phone (ui suite, 360/390, fake recogniser keyed by language):** one tap → `en-IN` + `kn-IN` ears, status "Listening…" with no button; English garble + Kannada ear → onion ₹100 preview, nothing saved, "Heard:" without a button; Kannada ear silent → result in < 4 s and the silent ear closed; tie → two 44 px taps (screenshot `s24-two-readings-*.png`); second ear refused → single `en-IN` ear with the ಕನ್ನಡ button, switch works and is remembered, Kannada result previews; stop → "Mic is off"; language-not-supported → back to English; storage blocked + abort() throwing → still switches (S5). Purchase-form mic unchanged.
+
+**Resident app (portal suite):** card for a 30+-day resident with the exact g.page link, `target=_blank rel=noopener`, both taps ≥ 44 px, fits; "Not now" → card gone, `dismissed` recorded, `/guest-home` returns null, a later `tapped` does not overwrite; "Review on Google" → `tapped`; first-30-days → null; non-https link → null. Screenshots `s24-review-card-*.png`.
+
+**Found while testing (fixed before review):** the fake's `onstart` had not fired when the test spoke (real phones never do this) — tests now wait for both ears to start; the slow ear was left listening after a timer delivery — `deliver()` now aborts it; the language button showed beside "Heard:" after a two-ear result — hidden when both ears worked.
+
+**Gate:** 12/12 twice on the review commit, 3,557 assertions (quick 727, ui 1,004, portal 274). **Mutations:** 13/13 killed (best reading not chosen; tie guessed; onion=garlic; Copilot ignores second ear; second ear never opened; slow ear left on; language button stays with two ears; dual flag not sent; review card returns after answering; asked in first 30 days; non-https link sent; second answer overwrites; link without new tab/noopener). **Migration:** `node backend/scripts/migrate-google-review.js` (also in migrate-all).
+
+**Review round 1 (BLOCK, 028fd58) → fixed:**
+- B1 (MONEY): the tie check fired only on equal scores, so the Kannada ear's fuzzy name (−1) let the English ear's amount win silently ("Jhanavi K 5000 UPI" vs ₹6,000 in Kannada → ₹5,000 prepared). Now `conflicts()` compares the best reading with every usable one (score ≥ 4): different amounts, different people (resident_id or fuzzy sets that do not overlap), rent vs deposit, income vs expense, onion vs garlic → two taps regardless of score. Same amount with a fuzzy name → one entry. Tests: exact ₹5,000 vs fuzzy ₹6,000 asked; same ₹5,000 prepared; Sachin vs Savitha asked; "sugar 5000" vs "ಸಚಿನ್ ಐದು ಸಾವಿರ" asked both ways.
+- S1: a complaint is kept over a payment reading that found nobody (Kannada noise "ಜಾನವಿ ಕೆ ಐದು ಸಾವಿರ" beside "fan not working"); a payment that found its resident and an amount is offered beside the complaint as a second tap ("Complaint · fan not working").
+- S2 (phone): if the first recogniser ends silently within 1.5 s of starting while the second is live and not by her tap, the mic restarts with one ear and the ಕನ್ನಡ button, and `smDualOff` keeps it single-ear for the visit (no loop). UI test: fake that kills the first ear when the second starts → one `en-IN` ear, understood, next tap opens one ear, stop works. **Still to confirm on the owner's phone that both ears start at all** — headless cannot.
+- S3: unresolved-person taps are labelled "Janvi? · ₹6,000 · UPI".
+- Minor: dead `best !== reads[0]` branch removed.
+
+**Gate after round 1 fixes:** 12/12 twice, 3,570 (quick 734, ui 1,010, portal 274). Round-1 mutants: 7/7 killed (amount conflict, people conflict, income-vs-expense, complaint vs noise, resolved payment beside complaint, dual not switched off, no single-ear restart).
+
+**Review round 2: APPROVE (d5edc3c).** Should-fix taken: a complaint vs an expense with an amount is now asked too (test added). Follow-up noted, not done: a QUESTION match in the primary ear losing to an unresolved Kannada-ear payment ("Did you mean…", not a preview). Owner to confirm on his phone that both ears start before releasing to main.

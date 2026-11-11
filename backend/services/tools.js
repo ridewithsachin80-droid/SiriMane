@@ -165,9 +165,36 @@ const TOOLS = {
   // ═══════════════════ PREPARE ═══════════════════
   prepare_payment: {
     description: 'Draft a rent/deposit payment record from a sentence like "record 8000 rent from Ananya by UPI". Returns a preview; the user confirms before anything is saved.',
-    args: { name: 'string?', resident_id: 'number?', room: 'string?', amount: 'number?', mode: 'string?', type: 'string?', date: 'string?', source: 'string?' }, role: 'staff', level: 'prepare',
+    args: { name: 'string?', resident_id: 'number?', suggest_id: 'number?', room: 'string?', amount: 'number?', mode: 'string?', type: 'string?', date: 'string?', source: 'string?' }, role: 'staff', level: 'prepare',
     async run(a, ctx) {
-      const { match, candidates } = await resolveResident({ id: a.resident_id || ctx.context?.resident_id, name: a.name, room: a.room });
+      // Review 21.2 r2 S-e: the page's resident is used only when no name was
+      // passed. (The Copilot's own sentence parser decides that for typed
+      // "record …" phrases — see enrichRawArgs.)
+      let { match, candidates } = await resolveResident({ id: a.resident_id || (!a.name && !a.suggest_id ? ctx.context?.resident_id : undefined), name: a.name, room: a.room });
+      // Hotfix 21.2: a resident the voice repair could not prove was named is
+      // offered as a question with a tap — never used as the answer.
+      if (!match && !candidates.length && a.suggest_id) {
+        const s = await resolveResident({ id: a.suggest_id });
+        if (s.match) candidates = [{ ...s.match, why: 'suggested from what was heard' }];
+      }
+      // Hotfix 21.3 (review): typed on a resident's page with a word that is not
+      // her name. If it resembles nobody, ask whether it is her payment — one
+      // tap — instead of "I could not find that resident". If it resembles
+      // someone else, she is still offered as well.
+      let pageOnly = false;
+      const pageId = a.name && !a.resident_id ? ctx.context?.resident_id : undefined;
+      if (!match && pageId) {
+        // Sprint 22 (review 21.3): "6000 cash all dues" is not about Pallavi. On a
+        // resident's page keep only candidates that were really named — a whole
+        // name word, the start of one (4+ letters), or a near-match by sound.
+        const toks = String(a.name || '').toLowerCase().split(/\s+/).filter(Boolean);
+        candidates = candidates.filter(c => c.why || String(c.name || '').toLowerCase().split(/\s+/).some(p => toks.some(t => t === p || (t.length >= 4 && p.startsWith(t)))));
+      }
+      if (!match && pageId && !candidates.some(c => String(c.id) === String(pageId))) {
+        const s = await resolveResident({ id: pageId });
+        if (s.match) { pageOnly = candidates.length === 0; candidates = [...candidates, { ...s.match, why: 'the resident on this page', page: true }]; }
+      }
+      if (!match && pageOnly) return { clarify: `Is this ${Number(a.amount) > 0 ? fmt(Number(a.amount)) + ' ' : ''}from ${candidates[0].name} — the resident on this page?`, candidates };
       if (!match) return { clarify: candidates.length ? (candidates.some(c => c.why) ? `Did you mean ${candidates.length === 1 ? candidates[0].name : 'one of these'}?` : 'Which resident do you mean?') : 'I could not find that resident — check the name or room.', candidates };
       const amount = Number(a.amount);
       if (!amount || amount <= 0) return { clarify: `How much did ${match.name} pay?`, resident: match };
