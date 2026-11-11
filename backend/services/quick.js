@@ -244,7 +244,7 @@ function weak(i) {
   if (!i) return true;
   if (i.kind === 'expense' && i.tool && (!i.args.category || i.args.category === 'Other')) return true;   // item nobody recognised
   if (i.kind === 'collection' && i.tool && !i.args.resident_id) return true;                                // name not resolved
-  if (!i.tool && i.clarify && i.ask !== 'amount' && i.ask !== 'which_amount') return true;                                            // e.g. only a number was heard ("How much was the eerulli?" is a real answer — review S21 S1)
+  if (!i.tool && i.clarify && i.ask !== 'amount' && i.ask !== 'which_amount' && i.ask !== 'which_reading') return true;                                            // e.g. only a number was heard ("How much was the eerulli?" is a real answer — review S21 S1)
   return false;
 }
 
@@ -252,9 +252,98 @@ function weak(i) {
 // Spoken: deterministic pass with NO model; if it is weak, repair the
 // transcript once and classify the repaired phrase (model allowed there).
 // A clearly-heard "onion 100" therefore never touches the model at all.
+// Sprint 24: the mic listens in English AND Kannada at once, so the
+// transcripts come in two scripts ("Jhanavi 5000 UPI" / "ಜಾನವಿ ಐದು ಸಾವಿರ
+// ಯುಪಿಐ"). How complete a reading is: a resident or an item found, an amount,
+// a mode, a type/room — each one point; a question or nothing is 0.
+function completeness(i) {
+  if (!i) return 0;
+  if (!i.tool) return i.ask ? 1 : 0;
+  const a = i.args || {};
+  let n = 2;   // the rules read SOMETHING (an entry, not a question)
+  if (i.tool === 'prepare_payment') { if (a.resident_id) n += 2; else if (i.fuzzy && i.fuzzy.length) n += 1; if (a.amount) n += 2; if (a.mode) n += 1; if (a.type && a.type !== 'rent') n += 1; }
+  else if (i.tool === 'prepare_expense') { if (a.amount) n += 2; if (a.description) n += 1; if (a.category && a.category !== 'Other') n += 1; if (a.mode) n += 1; }
+  else if (i.tool === 'prepare_complaint') { n += 2; if (a.room) n += 1; }
+  return n;
+}
+// Two readings that disagree on money or on the person are never guessed between.
+function sameEntry(a, b) {
+  if (!a || !b || a.tool !== b.tool) return false;
+  const x = a.args || {}, y = b.args || {};
+  if ((x.resident_id || null) !== (y.resident_id || null) || Number(x.amount || 0) !== Number(y.amount || 0) || (x.type || 'rent') !== (y.type || 'rent')) return false;
+  // For a purchase the item matters too — onion ₹100 is not garlic ₹100 (same spelling in two scripts is the same item).
+  if (a.tool === 'prepare_expense') { const k = d => looseKey(SMParse.toLatin(String(d || '')).toLowerCase()); if (k(x.description) !== k(y.description) && (x.category || 'Other') === (y.category || 'Other')) return false; }
+  return true;
+}
+// Review S24 B1: the people a reading could mean — the matched resident, or
+// the fuzzy candidates ("jaanavi" from the Kannada ear is fuzzy, never exact).
+function peopleOf(i) {
+  if (!i || i.tool !== 'prepare_payment') return null;
+  if (i.args && i.args.resident_id) return [Number(i.args.resident_id)];
+  if (i.fuzzy && i.fuzzy.length) return i.fuzzy.map(f => Number(f.id));
+  return null;
+}
+// Does reading b contradict reading a on anything that matters — money, the
+// person, income vs expense, the item? Score gaps never settle these.
+function conflicts(a, b) {
+  if (!a || !b || !a.tool || !b.tool) return false;
+  const x = a.args || {}, y = b.args || {};
+  const money = t => t === 'prepare_payment' || t === 'prepare_expense';
+  if (a.tool !== b.tool) {
+    if (money(a.tool) && money(b.tool)) return true;                          // income vs expense
+    // complaint vs money: a payment that found its resident AND an amount, or an expense with an amount, contests it
+    const pay = a.tool === 'prepare_payment' ? a : b.tool === 'prepare_payment' ? b : null;
+    const exp = a.tool === 'prepare_expense' ? a : b.tool === 'prepare_expense' ? b : null;
+    return !!((pay && pay.args && pay.args.resident_id && pay.args.amount) || (exp && exp.args && exp.args.amount));
+  }
+  if (x.amount && y.amount && Number(x.amount) !== Number(y.amount)) return true;
+  if (a.tool === 'prepare_payment') {
+    const pa = peopleOf(a), pb = peopleOf(b);
+    if (pa && pb && !pa.some(id => pb.includes(id))) return true;             // different people
+    if (x.type && y.type && x.type !== y.type) return true;                   // rent vs deposit
+  }
+  if (a.tool === 'prepare_expense' && !sameEntry(a, b) && x.amount && y.amount) return true;   // onion vs garlic
+  return false;
+}
 async function intent(text, user, context, opts = {}) {
   if (!opts.voice) return classify(text, user, context, { allowModel: true });
-  const first = await classify(text, user, context, { allowModel: false });
+  let first = await classify(text, user, context, { allowModel: false });
+  // Sprint 24: with transcripts from a second language, the rules read each
+  // one; the most complete reading wins — unless another usable reading
+  // contradicts it on money, the person, income vs expense or the item, in
+  // which case both are shown as taps (ask:'which_reading'). Never guessed between.
+  const others = (opts.alternatives || []).map(a => String(a || '').trim()).filter(a => a && a !== String(text || '').trim()).slice(0, 5);
+  if (others.length && opts.dual) {
+    const heardText = String(text || '').trim();
+    const reads = [{ t: heardText, i: first }];
+    for (const t of others) reads.push({ t, i: await classify(t, user, context, { allowModel: false }) });
+    reads.sort((p, q) => completeness(q.i) - completeness(p.i));
+    const usable = reads.filter(r => r.i && r.i.tool && completeness(r.i) >= 4);
+    const best = usable[0] || reads[0];
+    // Review S24 S1: English speech makes Kannada noise in the other ear, and
+    // that noise can fuzzy-match a name. A reading that found nobody cannot
+    // outrank a complaint, and a complaint is kept over such a payment.
+    const complaint = usable.find(r => r.i.tool === 'prepare_complaint');
+    const unresolvedPay = r => r.i.tool === 'prepare_payment' && !(r.i.args && r.i.args.resident_id);
+    const pick = complaint && usable.every(r => r === complaint || unresolvedPay(r)) ? complaint : best;
+    if (pick.i && pick.i.tool && completeness(pick.i) >= 4) {
+      const rival = usable.find(r => r !== pick && conflicts(pick.i, r.i));
+      if (rival) {
+        const ids = [pick, rival].map(r => r.i.args && r.i.args.resident_id).filter(Boolean);
+        const names = {}; if (ids.length) for (const row of (await pool.query(`SELECT id, name FROM guests WHERE id = ANY($1)`, [ids])).rows) names[row.id] = row.name;
+        const rupees = n => '₹' + Number(n || 0).toLocaleString('en-IN');
+        const cap = w => w ? w.charAt(0).toUpperCase() + w.slice(1) : w;
+        // Review S24 S3: when the person is still to be chosen the label says so ("Janvi?").
+        const label = r => r.i.tool === 'prepare_payment' ? `${(r.i.args.resident_id && names[r.i.args.resident_id]) || (cap(r.i.args.name) || 'Resident') + '?'} · ${rupees(r.i.args.amount)}${r.i.args.mode ? ' · ' + r.i.args.mode : ''}`
+          : r.i.tool === 'prepare_complaint' ? `Complaint · ${r.i.args.description || r.i.args.category || 'issue'}`
+          : `${r.i.args.description || 'expense'} · ${rupees(r.i.args.amount)}`;
+        return { tool: null, clarify: 'I heard two different things — tap the right one.', via: 'quick', kind: pick.i.kind, ask: 'which_reading',
+          options: [pick, rival].map(r => ({ label: label(r), tool: r.i.tool, args: { ...r.i.args, source: 'quick' }, heard: r.t })) };
+      }
+      if (pick.t !== heardText) return { ...pick.i, heard: heardText, understood: pick.t, via: 'quick' };
+      first = pick.i;
+    } else if (completeness(best.i) > completeness(first)) first = { ...best.i, heard: heardText, understood: best.t };
+  }
   if (!weak(first)) return first;
   const { rows: residents } = await pool.query(`SELECT g.id, g.name, r.room_number FROM guests g LEFT JOIN rooms r ON r.id=g.room_id WHERE g.is_active=true`);
   const fix = await repairVoice(String(text || '').trim(), opts.alternatives, residents);

@@ -22,7 +22,7 @@ router.post('/ask', auth, async (req, res) => {
       ? { tool: String(req.body.tool).slice(0, 60), args: req.body.args } : null;
     const voice = req.body.voice === true;
     const alternatives = Array.isArray(req.body.alternatives) ? req.body.alternatives.slice(0, 5).map(a => String(a || '').slice(0, 200)) : [];
-    res.json(await copilot.ask({ user: req.user, text, context: ctx, tap, voice, alternatives, authorization: 'Bearer ' + req.authToken, port: req.socket.localPort }));
+    res.json(await copilot.ask({ user: req.user, text, context: ctx, tap, voice, alternatives, dual: req.body.dual === true, authorization: 'Bearer ' + req.authToken, port: req.socket.localPort }));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

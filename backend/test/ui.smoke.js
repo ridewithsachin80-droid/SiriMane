@@ -516,81 +516,131 @@ async function runAtWidth(browser, BASE, width) {
 
   // ── Sprint 21: the mic listens in Kannada ─────────────────────────────
   // Headless Chrome has no speech engine: a stand-in records the language it
-  // was started in and plays back what "she said".
+  // was started in and plays back what "she said". Sprint 24: every tap opens
+  // TWO ears (English and Kannada); __say(text, lang) speaks into one of them.
   await page.evaluate(() => {
     try { localStorage.removeItem('sm_voice_lang'); } catch (e) {}
     window.__recs = [];
-    window.webkitSpeechRecognition = class { constructor() { this.lang = ''; window.__recs.push(this); }
-      start() { setTimeout(() => this.onstart && this.onstart(), 0); }
-      stop() { setTimeout(() => this.onend && this.onend(), 0); }
-      abort() { this.aborted = true; if (window.__abortThrows) throw new Error('abort failed'); setTimeout(() => { this.onerror && this.onerror({ error: 'aborted' }); this.onend && this.onend(); }, 0); } };
+    window.webkitSpeechRecognition = class { constructor() { this.lang = ''; this.state = 'new'; window.__recs.push(this); }
+      start() { if (window.__refuseSecond && window.__recs.some(r => r !== this && r.state === 'on')) { this.state = 'refused'; setTimeout(() => { this.onerror && this.onerror({ error: 'aborted' }); this.onend && this.onend(); }, 0); return; } if (window.__killFirst) { const other = window.__recs.find(r => r !== this && r.state === 'on'); if (other) { other.state = 'off'; setTimeout(() => { other.onerror && other.onerror({ error: 'aborted' }); other.onend && other.onend(); }, 0); } }
+        this.state = 'on'; setTimeout(() => { this.started = !!this.onstart; this.onstart && this.onstart(); }, 0); }
+      stop() { if (this.state === 'on') { this.state = 'off'; setTimeout(() => this.onend && this.onend(), 0); } }
+      abort() { this.aborted = true; if (window.__abortThrows) { this.state = 'off'; throw new Error('abort failed'); } if (this.state === 'on') { this.state = 'off'; setTimeout(() => { this.onerror && this.onerror({ error: 'aborted' }); this.onend && this.onend(); }, 0); } } };
     window.SpeechRecognition = window.webkitSpeechRecognition;
-    window.__say = (t) => { const r = window.__recs[window.__recs.length - 1]; r.onresult({ results: [[{ transcript: t }]] }); r.onend && r.onend(); };
-    window.__fail = (err) => { const r = window.__recs[window.__recs.length - 1]; r.onerror({ error: err }); r.onend && r.onend(); };
+    window.__ear = lang => [...window.__recs].reverse().find(r => r.state === 'on' && (!lang || r.lang === lang));
+    window.__open = () => window.__recs.filter(r => r.state === 'on').map(r => r.lang);
+    window.__ready = n => { const o = window.__recs.filter(r => r.state === 'on'); return o.length === n && o.every(r => r.started); };
+    window.__say = (t, lang) => { const r = window.__ear(lang); r.state = 'off'; r.onresult({ results: [[{ transcript: t }]] }); r.onend && r.onend(); };
+    window.__fail = (err, lang) => { const r = window.__ear(lang); r.state = 'off'; r.onerror({ error: err }); r.onend && r.onend(); };
+    window.__silence = lang => { const r = window.__ear(lang); r.state = 'off'; r.onerror({ error: 'no-speech' }); r.onend && r.onend(); };
   });
-  await page.tap('#copilot-mic');
-  await page.waitForSelector('#copilot-voice-status .voice-lang', { timeout: 5000 });
-  eq(await page.evaluate(() => window.__recs[0].lang), 'en-IN', `${tag} S21-10 the mic starts in English by default`);
-  const sw = await page.$eval('#copilot-voice-status .voice-lang', b => { const r = b.getBoundingClientRect(); return { t: b.textContent, h: r.height, right: r.right }; });
-  ok(sw.t === 'ಕನ್ನಡದಲ್ಲಿ ಹೇಳಿ' && /Listening in English/.test(await page.$eval('#copilot-voice-status', e => e.textContent)), `${tag} S21-10 while listening, the status line offers ಕನ್ನಡ (${sw.t})`);
-  ok(sw.h >= 44 && sw.right <= width + 0.5, `${tag} S21-10 …as a 44 px button on screen (${Math.round(sw.h)} px, right ${Math.round(sw.right)})`);
-  await page.tap('#copilot-voice-status .voice-lang');
-  await page.waitForFunction(() => window.__recs.length === 2 && /Listening in ಕನ್ನಡ/.test(document.getElementById('copilot-voice-status').textContent), { timeout: 5000 });
-  const sw2 = await page.evaluate(() => ({ lang: window.__recs[1].lang, aborted: !!window.__recs[0].aborted, saved: localStorage.getItem('sm_voice_lang') }));
-  ok(sw2.lang === 'kn-IN' && sw2.aborted && sw2.saved === 'kn-IN', `${tag} S21-10 one tap stops, switches to Kannada and listens again (${JSON.stringify(sw2)})`);
   const purchasesBefore = (await pool.query(`SELECT COUNT(*)::int AS n FROM purchases`)).rows[0].n;
-  await page.evaluate(() => window.__say('ಈರುಳ್ಳಿ 100 ರೂಪಾಯಿ'));
-  await page.waitForSelector('#copilot-out .copilot-preview', { timeout: 10000 });
-  const knPrev = await page.$eval('#copilot-out', e => e.textContent);
-  ok(/Groceries/.test(knPrev) && /100/.test(knPrev), `${tag} S21-11 spoken "ಈರುಳ್ಳಿ 100 ರೂಪಾಯಿ" previews onion ₹100 in Groceries (${knPrev.replace(/\s+/g, ' ').slice(0, 120)})`);
-  await sleep(300);
-  eq((await pool.query(`SELECT COUNT(*)::int AS n FROM purchases`)).rows[0].n, purchasesBefore, `${tag} S21-11 …as a preview to confirm — nothing is saved until she taps confirm`);
-  await page.evaluate(() => document.getElementById('copilot-bar').scrollIntoView({ block: 'center' }));
-  await page.screenshot({ path: path.join(SHOTS, `s21-kannada-voice-${width}.png`) });
-  ok(/Heard: "ಈರುಳ್ಳಿ 100 ರೂಪಾಯಿ"/.test(await page.$eval('#copilot-voice-status', e => e.textContent)) && await page.$eval('#copilot-voice-status .voice-lang', b => b.textContent) === 'Speak English', `${tag} S21-11 she sees what was heard, and can switch back to English`);
-  // The choice stays on this phone for the next time.
-  await page.waitForNetworkIdle({ idleTime: 300, timeout: 8000 }).catch(() => {});   // let the preview finish drawing so the mic stays put
+  // S24-3 One tap, two ears, no language button needed.
   await page.tap('#copilot-mic');
-  await page.waitForFunction(() => window.__recs.length === 3, { timeout: 5000 }).catch(async e => { console.log('DEBUG', await page.evaluate(() => { const m = document.getElementById('copilot-mic').getBoundingClientRect(); const at = document.elementFromPoint(m.left + m.width / 2, m.top + m.height / 2); return JSON.stringify({ n: window.__recs.length, smRec: !!smRec, at: at && (at.id || at.className), m: [m.top, m.left], status: document.getElementById('copilot-voice-status').textContent }); })); throw e; });
-  eq(await page.evaluate(() => window.__recs[2].lang), 'kn-IN', `${tag} S21-12 the next tap listens in Kannada again`);
+  await page.waitForFunction(() => window.__ready(2), { timeout: 5000 });
+  const ears = await page.evaluate(() => window.__open().sort());
+  eq(ears.join(','), 'en-IN,kn-IN', `${tag} S24-3 one tap opens an English ear and a Kannada ear`);
+  await page.waitForFunction(() => /Listening…/.test(document.getElementById('copilot-voice-status').textContent) && !document.querySelector('#copilot-voice-status .voice-lang'), { timeout: 5000 }).catch(() => {});
+  const st3 = await page.evaluate(() => ({ t: document.getElementById('copilot-voice-status').textContent, btn: !!document.querySelector('#copilot-voice-status .voice-lang') }));
+  ok(/Listening…/.test(st3.t) && !/Listening in/.test(st3.t) && !st3.btn, `${tag} S24-3 the status says "Listening…" with no language button to press (${JSON.stringify(st3)})`);
+  // The English ear garbles the Kannada; the Kannada ear got it. No button, no AI: onion ₹100.
+  await page.evaluate(() => { window.__say('heroine Nooru rupaye', 'en-IN'); window.__say('ಈರುಳ್ಳಿ ನೂರು ರೂಪಾಯಿ', 'kn-IN'); });
+  await page.waitForSelector('#copilot-out .copilot-preview', { timeout: 10000 });
+  const knPrev = await page.$eval('#copilot-out', e => e.textContent.replace(/\s+/g, ' '));
+  ok(/Groceries/.test(knPrev) && /₹100/.test(knPrev) && /eerulli|onion/i.test(knPrev), `${tag} S24-3 "heroine" (en) + "ಈರುಳ್ಳಿ" (kn) → onion ₹100 in Groceries, without touching anything (${knPrev.slice(0, 120)})`);
+  await sleep(300);
+  eq((await pool.query(`SELECT COUNT(*)::int AS n FROM purchases`)).rows[0].n, purchasesBefore, `${tag} S24-3 …as a preview to confirm — nothing is saved`);
+  await page.evaluate(() => document.getElementById('copilot-bar').scrollIntoView({ block: 'center' }));
+  await page.screenshot({ path: path.join(SHOTS, `s24-dual-voice-${width}.png`) });
+  ok(/Heard: "heroine Nooru rupaye"/.test(await page.$eval('#copilot-voice-status', e => e.textContent)) && !(await page.$('#copilot-voice-status .voice-lang')), `${tag} S24-3 she sees what the first ear heard, with no language button to press`);
+  // S24-4 Only one ear hears (the other times out silent): still one clean result, after a short wait.
+  await page.waitForNetworkIdle({ idleTime: 300, timeout: 8000 }).catch(() => {});
+  await page.tap('#copilot-mic');
+  await page.waitForFunction(() => window.__ready(2), { timeout: 5000 });
+  const t0 = Date.now();
+  await page.evaluate(() => { window.__say('onion 100', 'en-IN'); });
+  await page.waitForFunction(() => /onion/i.test(document.getElementById('copilot-out').textContent) && document.querySelector('#copilot-out .copilot-preview'), { timeout: 10000 });
+  const waited = Date.now() - t0;
+  ok(waited < 4000, `${tag} S24-4 with the Kannada ear silent, the English result shows after a short wait (${waited} ms)`);
+  await page.waitForFunction(() => window.__open().length === 0, { timeout: 3000 }).catch(() => {});
+  eq(await page.evaluate(() => window.__open().length), 0, `${tag} S24-4 …and the silent ear is closed, so the mic is not left on`);
+  // S24-5 A tie: ₹5,000 (en) vs ₹6,000 (kn) for the same resident → two taps, never a guess.
+  await page.waitForNetworkIdle({ idleTime: 300, timeout: 8000 }).catch(() => {});
+  await page.tap('#copilot-mic');
+  await page.waitForFunction(() => window.__ready(2), { timeout: 5000 });
+  await page.evaluate(() => { window.__say('Jhanavi 5000 upi', 'en-IN'); window.__say('ಜಾನವಿ ಆರು ಸಾವಿರ ಯುಪಿಐ', 'kn-IN'); });
+  await page.waitForFunction(() => document.querySelectorAll('#copilot-out .copilot-actions button').length >= 2, { timeout: 10000 });
+  const tie = await page.evaluate(() => ({ text: document.querySelector('#copilot-out .copilot-text').textContent.trim(), taps: [...document.querySelectorAll('#copilot-out .copilot-actions button')].map(b => ({ t: b.textContent.trim(), h: b.getBoundingClientRect().height })), preview: !!document.querySelector('#copilot-out .copilot-preview') }));
+  ok(/^(I heard two different things|Which resident do you mean)/.test(tie.text) && !tie.preview && tie.taps.length >= 2 && tie.taps.every(b => b.h >= 44), `${tag} S24-5 two different amounts are asked about, not guessed (${tie.text.slice(0, 50)} · ${JSON.stringify(tie.taps.map(b => b.t))})`);
+  await page.screenshot({ path: path.join(SHOTS, `s24-two-readings-${width}.png`) });
+  await page.evaluate(() => copilotDismiss());
+  // Review S24 S2: a phone that ENDS the first ear when the second starts → back to one ear, with the button, for the visit.
+  await page.evaluate(() => { window.__killFirst = true; });
+  await page.tap('#copilot-mic');
+  await page.waitForFunction(() => window.__ready(1) && document.querySelector('#copilot-voice-status .voice-lang') && /Listening/.test(document.getElementById('copilot-voice-status').textContent), { timeout: 5000 });
+  const s2 = await page.evaluate(() => ({ open: window.__open(), off: smDualOff, status: document.getElementById('copilot-voice-status').textContent }));
+  ok(s2.open.length === 1 && s2.open[0] === 'en-IN' && s2.off === true, `${tag} S2 first ear killed by the second → one English ear, dual off for this visit (${JSON.stringify(s2)})`);
+  await page.evaluate(() => window.__say('onion 100', 'en-IN'));
+  await page.waitForFunction(() => /onion/i.test(document.getElementById('copilot-out').textContent) && document.querySelector('#copilot-out .copilot-preview'), { timeout: 10000 });
+  ok(true, `${tag} S2 …and she is understood on that one ear`);
+  await page.waitForNetworkIdle({ idleTime: 300, timeout: 8000 }).catch(() => {});
+  await page.tap('#copilot-mic');
+  await page.waitForFunction(() => window.__ready(1), { timeout: 5000 });
+  await sleep(200);
+  eq(await page.evaluate(() => window.__recs.filter(r => r.state === 'on').length), 1, `${tag} S2 the next tap opens one ear only — no second attempt, no loop`);
+  await page.tap('#copilot-mic');
+  await page.waitForFunction(() => /Mic is off/.test(document.getElementById('copilot-voice-status').textContent), { timeout: 5000 });
+  await page.evaluate(() => { window.__killFirst = false; smDualOff = false; });
+  // S24-6 A phone that refuses the second ear: one ear, exactly as before, with the language button.
+  await page.evaluate(() => { window.__refuseSecond = true; });
+  await page.tap('#copilot-mic');
+  await page.waitForFunction(() => window.__ready(1) && document.querySelector('#copilot-voice-status .voice-lang'), { timeout: 5000 });
+  eq(await page.evaluate(() => window.__open()[0]), 'en-IN', `${tag} S24-6 second ear refused → one English ear`);
+  const sw = await page.$eval('#copilot-voice-status .voice-lang', b => { const r = b.getBoundingClientRect(); return { t: b.textContent, h: r.height, right: r.right }; });
+  ok(sw.t === 'ಕನ್ನಡದಲ್ಲಿ ಹೇಳಿ' && sw.h >= 44 && sw.right <= width + 0.5, `${tag} S21-10 …and the ಕನ್ನಡ button is still there as a 44 px fallback (${sw.t})`);
+  await page.tap('#copilot-voice-status .voice-lang');
+  await page.waitForFunction(() => window.__ready(1) && window.__open()[0] === 'kn-IN', { timeout: 5000 });
+  eq(await page.evaluate(() => localStorage.getItem('sm_voice_lang')), 'kn-IN', `${tag} S21-10 one tap switches the single ear to Kannada and remembers it`);
+  await page.evaluate(() => window.__say('ಈರುಳ್ಳಿ 100 ರೂಪಾಯಿ', 'kn-IN'));
+  await page.waitForSelector('#copilot-out .copilot-preview', { timeout: 10000 });
+  ok(/Groceries/.test(await page.$eval('#copilot-out', e => e.textContent)), `${tag} S21-11 spoken "ಈರುಳ್ಳಿ 100 ರೂಪಾಯಿ" on one Kannada ear previews Groceries`);
   // Sprint 22: tapping the mic again to stop leaves no stale "Listening…".
-  await page.waitForFunction(() => /Listening in ಕನ್ನಡ/.test(document.getElementById('copilot-voice-status').textContent), { timeout: 5000 });
+  await page.waitForNetworkIdle({ idleTime: 300, timeout: 8000 }).catch(() => {});
+  await page.tap('#copilot-mic');
+  await page.waitForFunction(() => /Listening/.test(document.getElementById('copilot-voice-status').textContent) && window.__open().length === 1, { timeout: 5000 });
   await page.tap('#copilot-mic');
   await page.waitForFunction(() => /Mic is off — tap it to speak/.test(document.getElementById('copilot-voice-status').textContent), { timeout: 5000 });
   ok(!/Listening/.test(await page.$eval('#copilot-voice-status', e => e.textContent)) && await page.$('#copilot-voice-status .voice-lang'), `${tag} S22 stopping the mic says it is off (and keeps the language switch)`);
-  await page.tap('#copilot-mic');
-  await page.waitForFunction(() => window.__recs.length === 4, { timeout: 5000 });
   // A phone without Kannada speech falls back to English and says so.
-  // (A real recogniser starts before it can fail: wait for "Listening" first.)
-  await page.waitForFunction(() => /Listening in ಕನ್ನಡ/.test(document.getElementById('copilot-voice-status').textContent), { timeout: 5000 });
-  await page.evaluate(() => window.__fail('language-not-supported'));
+  await page.tap('#copilot-mic');
+  await page.waitForFunction(() => window.__ready(1) && /Listening/.test(document.getElementById('copilot-voice-status').textContent), { timeout: 5000 });
+  await page.evaluate(() => window.__fail('language-not-supported', 'kn-IN'));
   await page.waitForFunction(() => /switched back to English/.test(document.getElementById('copilot-voice-status').textContent), { timeout: 5000 });
   eq(await page.evaluate(() => localStorage.getItem('sm_voice_lang')), 'en-IN', `${tag} S21-12 no Kannada voice on this phone → back to English, and it says so`);
+  await page.evaluate(() => { window.__refuseSecond = false; });
   // Review S21 (S5): with browser storage blocked the switch still works; and
   // if the old recogniser's abort() throws, the mic still restarts.
-  const nBlk = await page.evaluate(() => {
+  await page.evaluate(() => {
     window.__gi = Storage.prototype.getItem; window.__si = Storage.prototype.setItem;
     Storage.prototype.getItem = function () { throw new Error('storage blocked'); };
     Storage.prototype.setItem = function () { throw new Error('storage blocked'); };
-    smVoiceLangNow = null; window.__abortThrows = true; return window.__recs.length;
+    smVoiceLangNow = null; window.__abortThrows = true; window.__refuseSecond = true;
   });
   await page.tap('#copilot-mic');
-  await page.waitForFunction(n => window.__recs.length === n + 1, { timeout: 5000 }, nBlk);
-  await page.waitForFunction(() => /Listening in English/.test(document.getElementById('copilot-voice-status').textContent) && document.querySelector('#copilot-voice-status .voice-lang'), { timeout: 5000 });
+  await page.waitForFunction(() => window.__ready(1) && window.__open()[0] === 'en-IN' && document.querySelector('#copilot-voice-status .voice-lang'), { timeout: 5000 });
   await page.tap('#copilot-voice-status .voice-lang');
-  await page.waitForFunction(n => window.__recs.length === n + 2 && /Listening in ಕನ್ನಡ/.test(document.getElementById('copilot-voice-status').textContent), { timeout: 5000 }, nBlk).catch(() => {});
-  const blk = await page.evaluate(n => ({ count: window.__recs.length - n, first: window.__recs[n] && window.__recs[n].lang, second: window.__recs[n + 1] && window.__recs[n + 1].lang, status: document.getElementById('copilot-voice-status').textContent }), nBlk);
-  await page.evaluate(() => { Storage.prototype.getItem = window.__gi; Storage.prototype.setItem = window.__si; window.__abortThrows = false; const r = window.__recs[window.__recs.length - 1]; r.onend && r.onend(); });
-  ok(blk.count === 2 && blk.first === 'en-IN' && blk.second === 'kn-IN' && /Listening in ಕನ್ನಡ/.test(blk.status), `${tag} S5 storage blocked + abort() throwing: one tap still switches to ಕನ್ನಡ and listens (${JSON.stringify(blk)})`);
+  await page.waitForFunction(() => window.__ready(1) && window.__open()[0] === 'kn-IN' && /Listening/.test(document.getElementById('copilot-voice-status').textContent), { timeout: 5000 }).catch(() => {});
+  const blk = await page.evaluate(() => ({ open: window.__open(), status: document.getElementById('copilot-voice-status').textContent }));
+  await page.evaluate(() => { Storage.prototype.getItem = window.__gi; Storage.prototype.setItem = window.__si; window.__abortThrows = false; window.__refuseSecond = false; const r = window.__ear(); if (r) { r.state = 'off'; r.onend && r.onend(); } });
+  ok(blk.open.length === 1 && blk.open[0] === 'kn-IN' && /Listening/.test(blk.status), `${tag} S5 storage blocked + abort() throwing: one tap still switches to ಕನ್ನಡ and listens (${JSON.stringify(blk)})`);
   // S21-13 The purchase form: Kannada words, spoken numbers, a category its own list lacks.
   await page.evaluate(() => { smSetVoiceLang('kn-IN'); purchaseModal(); });
   await page.waitForSelector('#pu-mic-btn', { timeout: 8000 });
   const catBefore = await page.$eval('#pu-cat', e => e.value);
-  const nPu = await page.evaluate(() => window.__recs.length);
   await page.tap('#pu-mic-btn');
-  await page.waitForFunction(n => window.__recs.length === n + 1, { timeout: 5000 }, nPu);
-  eq(await page.evaluate(() => window.__recs[window.__recs.length - 1].lang), 'kn-IN', `${tag} S21-13 the purchase mic uses the same language`);
-  await page.evaluate(() => window.__say('ಫಿನಾಯಿಲ್ ನೂರು ಇಪ್ಪತ್ತು ಕ್ಯಾಶ್'));
+  await page.waitForFunction(() => window.__ready(1), { timeout: 5000 });
+  eq(await page.evaluate(() => window.__open()[0]), 'kn-IN', `${tag} S21-13 the purchase mic uses the same language`);
+  await page.evaluate(() => window.__say('ಫಿನಾಯಿಲ್ ನೂರು ಇಪ್ಪತ್ತು ಕ್ಯಾಶ್', 'kn-IN'));
   await page.waitForFunction(() => document.getElementById('pu-cat').value === 'Cleaning', { timeout: 8000 }).catch(() => {});
   const pu = await page.evaluate(() => ({ amt: document.getElementById('pu-amt').value, cat: document.getElementById('pu-cat').value, desc: document.getElementById('pu-desc').value, mode: document.getElementById('pu-mode').value }));
   ok(catBefore !== 'Cleaning' && pu.cat === 'Cleaning', `${tag} S21-13 "ಫಿನಾಯಿಲ್" fills Cleaning (was ${catBefore}; ${JSON.stringify(pu)})`);
