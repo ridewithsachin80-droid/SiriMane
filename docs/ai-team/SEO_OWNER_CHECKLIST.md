@@ -12,7 +12,7 @@ These are now written on the website. Tell me if any is wrong and I will change 
 1. On your phone, open Google Maps and search **Siri Mane Ladies PG**. If a pin exists, tap it → "Claim this business". If not, in Maps tap your profile picture → "Add your business".
 2. Business name exactly: **Siri Mane Ladies PG** (no extra words — Google suspends profiles with keywords stuffed into the name).
 3. Category: primary **Hostel** or **Women's hostel** if offered; secondary **Boarding house**. Do not choose "Hotel".
-4. Address, phone, website: use exactly the ones in section 0 and **https://sirimane.in** (no www).
+4. Address, phone, website: use exactly the ones in section 0 and **https://www.sirimane.in** (with www — that is the address that exists; the bare domain has no DNS record).
 5. Hours: 9:00 am – 8:00 pm, Monday to Sunday (or your real hours — then tell me).
 6. Verification: Google will offer a video call, a video of the premises, or a postcard (5–14 days). Choose video if offered; it is fastest. Show the name board, the entrance and the street.
 7. After verification, fill in:
