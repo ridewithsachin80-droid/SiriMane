@@ -650,12 +650,31 @@ async function main() {
           // Hotfix 23.2: www.sirimane.in is the address that exists. It is SERVED, never redirected — the app lives there.
           for (const p of ['/', '/management.html', '/guest.html', '/some/page?x=1']) ok([200, 404].includes((await raw('GET', p, 'www.sirimane.in')).status), `H23.2 www.sirimane.in${p} is served, not redirected`);
           eq((await raw('HEAD', '/', 'www.sirimane.in')).status, 200, 'H23.2 HEAD on www is served too');
+          // Sprint 25: the redirect exists only when CANONICAL_HOST is set (a Railway variable). Unset → nothing is redirected.
+          eq(app.locals.CANONICAL_HOST, '', 'S25-1 CANONICAL_HOST is unset in the gate');
+          for (const h of ['sirimane.in', 'www.sirimane.in', 'sirimane-test.up.railway.app']) ok([200, 404].includes((await raw('GET', '/some/page?x=1', h)).status), `S25-1 with CANONICAL_HOST unset, ${h} is served as-is — no redirect anywhere`);
+          app.locals.CANONICAL_HOST = 'www.sirimane.in'; app.locals.CANONICAL_TWIN = 'sirimane.in';
           const bare = await raw('GET', '/some/page?x=1', 'sirimane.in');
-          ok(bare.status === 301 && bare.location === 'https://www.sirimane.in/some/page?x=1', `S23-3 bare sirimane.in → www, path and query kept (${bare.status} ${bare.location})`);
+          ok(bare.status === 301 && bare.location === 'https://www.sirimane.in/some/page?x=1', `S25-1 CANONICAL_HOST=www.sirimane.in: bare → www, path and query kept (${bare.status} ${bare.location})`);
           const barePost = await raw('POST', '/api/guest-login', 'sirimane.in');
-          ok(barePost.status !== 301 && barePost.status !== 302, `S23-3 …but an API call is never redirected (a redirect would drop the body) (${barePost.status})`);
-          eq((await raw('GET', '/', 'sirimane-test.up.railway.app')).status, 200, 'S23-3 the Test site is untouched');
-          const head = await raw('HEAD', '/x', 'sirimane.in'); ok(head.status === 301 && head.location === 'https://www.sirimane.in/x', `S23-3 HEAD on the bare domain is redirected too (${head.status})`);
+          ok(barePost.status !== 301 && barePost.status !== 302, `S25-1 …but an API call is never redirected (a redirect would drop the body) (${barePost.status})`);
+          ok([200, 404].includes((await raw('GET', '/api/rooms', 'sirimane.in')).status) || (await raw('GET', '/api/rooms', 'sirimane.in')).status === 401, 'S25-1 …not even a GET to the API');
+          eq((await raw('GET', '/', 'www.sirimane.in')).status, 200, 'S25-1 the canonical host itself is served');
+          eq((await raw('GET', '/', 'sirimane-test.up.railway.app')).status, 200, 'S25-1 the Test site is untouched');
+          const head = await raw('HEAD', '/x', 'sirimane.in'); ok(head.status === 301 && head.location === 'https://www.sirimane.in/x', `S25-1 HEAD on the twin is redirected too (${head.status})`);
+          app.locals.CANONICAL_HOST = 'sirimane.in'; app.locals.CANONICAL_TWIN = 'www.sirimane.in';
+          const w = await raw('GET', '/p', 'www.sirimane.in'); ok(w.status === 301 && w.location === 'https://sirimane.in/p', `S25-1 the other way round works the same (${w.status} ${w.location})`);
+          app.locals.CANONICAL_HOST = ''; app.locals.CANONICAL_TWIN = '';
+          // Review S25: a mis-set variable is normalised — scheme, path and case stripped.
+          const norm = v => { try { return new URL('https://' + String(v).trim().replace(/^https?:\/\//i, '')).hostname.toLowerCase(); } catch { return ''; } };
+          eq(norm('https://WWW.Sirimane.in/'), 'www.sirimane.in', 'S25-1 CANONICAL_HOST "https://WWW.Sirimane.in/" is read as www.sirimane.in');
+          eq(norm('not a host'), '', 'S25-1 …and nonsense means no redirect rather than a broken one');
+          // check-live.js: refuses to run without hosts; a name that does not resolve is a ❌ with the word DNS.
+          const cp = require('child_process');
+          const usage = cp.spawnSync('node', ['backend/scripts/check-live.js'], { cwd: require('path').join(__dirname, '..', '..'), encoding: 'utf8' });
+          eq(usage.status, 2, 'S25-2 check-live.js without hosts prints usage and exits 2');
+          const nx = cp.spawnSync('node', ['backend/scripts/check-live.js', 'this-name-does-not-exist.invalid'], { cwd: require('path').join(__dirname, '..', '..'), encoding: 'utf8', timeout: 20000 });
+          ok(nx.status === 1 && /❌ this-name-does-not-exist\.invalid: DNS/.test(nx.stdout) && /do not release/.test(nx.stdout), `S25-2 a hostname with no DNS record is a ❌ and blocks the release (${(nx.stdout || '').trim().split('\n')[0]})`);
           for (const p of ['/guest.html', '/management.html', '/api/rooms']) eq((await fetch(BASE + p)).headers.get('x-robots-tag'), 'noindex, nofollow', `S23-4 ${p} tells search engines to stay out`);
           for (const p of ['/', '/home.html', '/robots.txt', '/sitemap.xml']) eq((await fetch(BASE + p)).headers.get('x-robots-tag'), null, `S23-4 …while ${p} is indexable`);
           const robots = await (await fetch(BASE + '/robots.txt')).text(); const sitemap = await (await fetch(BASE + '/sitemap.xml')).text();

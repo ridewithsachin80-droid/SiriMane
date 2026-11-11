@@ -313,13 +313,21 @@ async function intent(text, user, context, opts = {}) {
   // contradicts it on money, the person, income vs expense or the item, in
   // which case both are shown as taps (ask:'which_reading'). Never guessed between.
   const others = (opts.alternatives || []).map(a => String(a || '').trim()).filter(a => a && a !== String(text || '').trim()).slice(0, 5);
+  // Sprint 25 (review S24 follow-up): "who has not paid" in the English ear is a
+  // question; Kannada noise that half-matches a name plus a number must not
+  // turn it into "Did you mean Jhanavi?". The other ear only counts when it
+  // actually found a resident.
+  const primaryIsQuestion = !(first && first.tool) && (QUESTION.test(String(text || '').trim()) || tokens(String(text || '')).some(w => KN_QUESTION_WORDS.has(w)));
   if (others.length && opts.dual) {
     const heardText = String(text || '').trim();
     const reads = [{ t: heardText, i: first }];
     for (const t of others) reads.push({ t, i: await classify(t, user, context, { allowModel: false }) });
     reads.sort((p, q) => completeness(q.i) - completeness(p.i));
-    const usable = reads.filter(r => r.i && r.i.tool && completeness(r.i) >= 4);
-    const best = usable[0] || reads[0];
+    let usable = reads.filter(r => r.i && r.i.tool && completeness(r.i) >= 4);
+    if (primaryIsQuestion) usable = usable.filter(r => !(r.i.tool === 'prepare_payment' && !(r.i.args && r.i.args.resident_id)));
+    const best = usable[0] || (primaryIsQuestion ? null : reads[0]);
+    if (!best) return first;   // a question in her ear, nothing trustworthy in the other: the question stands (no repair call — the Copilot answers it)
+    {   // (block kept only to avoid re-indenting the Sprint 24 code below)
     // Review S24 S1: English speech makes Kannada noise in the other ear, and
     // that noise can fuzzy-match a name. A reading that found nobody cannot
     // outrank a complaint, and a complaint is kept over such a payment.
@@ -343,6 +351,7 @@ async function intent(text, user, context, opts = {}) {
       if (pick.t !== heardText) return { ...pick.i, heard: heardText, understood: pick.t, via: 'quick' };
       first = pick.i;
     } else if (completeness(best.i) > completeness(first)) first = { ...best.i, heard: heardText, understood: best.t };
+    }
   }
   if (!weak(first)) return first;
   const { rows: residents } = await pool.query(`SELECT g.id, g.name, r.room_number FROM guests g LEFT JOIN rooms r ON r.id=g.room_id WHERE g.is_active=true`);
