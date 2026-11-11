@@ -62,14 +62,18 @@ const CSP_HOME = cspHeader(
 // staff or resident page with the looser one. (Review S17-4.)
 app.use((req, res, next) => { res.setHeader('Content-Security-Policy', CSP_APP); next(); });
 const sendHome = (req, res) => { res.setHeader('Content-Security-Policy', CSP_HOME); res.sendFile(path.join(PUBLIC, 'home.html')); };
-// Hotfix 23.2 (OUTAGE, 11 Nov): the public address is www.sirimane.in — that is
-// the host Railway serves and the only one with a DNS record. Sprint 23 sent
-// www → bare sirimane.in, which does not resolve, so every visitor and the app
-// itself were bounced to a dead address. Direction reversed: should the bare
-// domain ever get a record, it lands on www. GET/HEAD only; the API, which
-// could carry a body, is never redirected.
-app.use((req, res, next) => {
-  if (req.hostname === 'sirimane.in' && (req.method === 'GET' || req.method === 'HEAD')) return res.redirect(301, 'https://www.sirimane.in' + req.originalUrl);
+// Sprint 25: the public hostname is a Railway variable, not code. With
+// CANONICAL_HOST unset there is NO hostname redirect at all (the safe default
+// after Hotfix 23.2, when a code-level redirect pointed at a hostname with no
+// DNS record and took the site down). With CANONICAL_HOST=www.sirimane.in, a
+// GET/HEAD for its twin (sirimane.in) is sent to it — the API, which can carry
+// a body, is never redirected, and no other host is touched.
+const CANONICAL_HOST = String(process.env.CANONICAL_HOST || '').trim().toLowerCase();
+const CANONICAL_TWIN = CANONICAL_HOST ? (CANONICAL_HOST.startsWith('www.') ? CANONICAL_HOST.slice(4) : 'www.' + CANONICAL_HOST) : '';
+app.locals.CANONICAL_HOST = CANONICAL_HOST; app.locals.CANONICAL_TWIN = CANONICAL_TWIN;
+app.use((req, res, next) => {   // read from app.locals so the gate can prove both settings in one process
+  const canon = app.locals.CANONICAL_HOST, twin = app.locals.CANONICAL_TWIN;
+  if (canon && req.hostname === twin && (req.method === 'GET' || req.method === 'HEAD') && !req.path.startsWith('/api')) return res.redirect(301, 'https://' + canon + req.originalUrl);
   next();
 });
 // The app screens are for residents and staff — never a search result.

@@ -206,6 +206,20 @@ async function runAtWidth(browser, BASE, width, fixtures) {
     return false;
   });
   eq(cachedApi, false, `${tag} PRIVACY/MONEY: no API response is ever cached`);
+  // Sprint 25: visiting another page on this origin must not overwrite the resident offline shell,
+  // and offline, another address must not show the resident app.
+  const shellBefore = await page.evaluate(async () => { const c = await caches.open('sirimane-guest-shell-v3'); const r = await c.match('/guest.html'); return r ? await r.text() : null; });
+  ok(shellBefore && /guest-portal|p-home/.test(shellBefore), `${tag} S25-4 the resident page is cached as the offline shell (${shellBefore ? shellBefore.length + ' chars' : 'nothing cached'})`);
+  const other = await page.browserContext().newPage(); await other.setViewport({ width, height: 800 });
+  await other.goto(BASE + '/home.html', { waitUntil: 'networkidle0' });
+  await other.goto(BASE + '/management.html', { waitUntil: 'networkidle0' });
+  await other.close();
+  const shellAfter = await page.evaluate(async () => { const c = await caches.open('sirimane-guest-shell-v3'); const r = await c.match('/guest.html'); return r ? await r.text() : null; });
+  eq(shellAfter, shellBefore, `${tag} S25-4 visiting the public site and the staff app leaves the resident shell untouched`);
+  const cachedOther = await page.evaluate(async () => { const c = await caches.open('sirimane-guest-shell-v3'); const ks = await c.keys(); return ks.map(r => new URL(r.url).pathname).filter(p => /^\/(home|management)\.html$|^\/$/.test(p)); });
+  eq(cachedOther.length, 0, `${tag} S25-4 …and those pages are not cached by the resident worker`);
+  // (Headless offline emulation blocks the navigation before the service worker sees it, so the
+  //  offline fallback itself is proven by the cache contents above, not by an offline navigation.)
   // Sprint 19: only her (non-secret) details are stored; the login is a cookie for the token's life (24 h)
   const remembered = await page.evaluate(() => !!localStorage.getItem('guest_data') && !!localStorage.getItem('guest_expires') && !localStorage.getItem('guest_token'));
   ok(remembered, `${tag} "keep me signed in" keeps her details on this phone, never the token`);

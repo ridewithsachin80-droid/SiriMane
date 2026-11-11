@@ -317,6 +317,17 @@ Recommendation taken: two recognisers per tap (English and Kannada), both transc
 | S24-9 | No card in her first 30 days; no card unless the link in app_settings is https | SEC |
 | S24-10 | Migration `migrate-google-review.js` additive (two guests columns + one setting), re-runnable, in migrate-all; gates 12/12 twice; mutations caught; independent review before merge | QA |
 
-**Sprint 24 status:** BLOCK in round 1 (028fd58: a score gap let one ear's amount win over a different amount) → fixed; APPROVED round 2 (d5edc3c); round-2 should-fix (complaint vs expense) taken. Gates 12/12 (3,571) on the final tree, 12/12 ×2 (3,570) on d5edc3c. Mutations 20/21 killed, 1 equivalent replaced and killed. Migration: `node backend/scripts/migrate-google-review.js`. Merged to ai/test. Owner to confirm on his phone that both ears start before main.
+**Sprint 24 status:** BLOCK in round 1 (028fd58: a score gap let one ear's amount win over a different amount) → fixed; APPROVED round 2 (d5edc3c); round-2 should-fix (complaint vs expense) taken. Gates 12/12 (3,571) on the final tree, 12/12 ×2 (3,570) on d5edc3c. Mutations 20/21 killed, 1 equivalent replaced and killed. Migration: `node backend/scripts/migrate-google-review.js`. Merged to ai/test. Owner confirmed on his phone after release (11 Nov 12:35): "voice is working fine" — two ears start on his Android.
 
 **Hotfix 23.2 status:** post-hoc review APPROVE (59f99f3) with follow-ups taken in the same PR: welcome WhatsApp text now says www.sirimane.in/guest; checklist URL-inspection line on www. Process rule recorded above; reviewer also suggests a `CANONICAL_HOST` env var so Test and production can differ without a code change — noted for a later sprint.
+
+## Sprint 25 — hardening after the 23.2 outage (owner, 11 Nov 12:35: "voice is working fine"; no new screen)
+Note: D-17-1 (HttpOnly-cookie login + CSRF) was first planned here and found already shipped in Sprint 19 — dropped.
+
+| ID | Acceptance criterion | Review |
+|---|---|---|
+| S25-1 | The hostname redirect is a Railway variable: with `CANONICAL_HOST` unset nothing is redirected on any host; with `CANONICAL_HOST=www.sirimane.in` a GET/HEAD for `sirimane.in` → 301 to www with path and query; the API (any method) and every other host are never touched; the other direction works the same | SEC |
+| S25-2 | `backend/scripts/check-live.js <host…>`: DNS lookup + GET /health per host without following redirects; a non-resolving name or a redirect to an unchecked/dead host is ❌ and exit 1; the owner checklist tells him to run it from the Railway console before any hostname/DNS/redirect release | QA |
+| S25-3 | Two ears: a question in the English ear ("who has not paid") is not turned into a payment by Kannada noise that only fuzzy-matches a name; the question stands with no repair call; a Kannada ear that found the resident and an amount is still used | AI |
+| S25-4 | Resident service worker: only /guest and /guest.html are cached as the offline shell; visiting the public site or the staff app no longer overwrites it and those pages are not cached by the resident worker (cache name bumped to v3 so old shells are dropped) | UX |
+| S25-5 | Gates 12/12 twice; mutations caught; independent review before merge; no migration | QA |
