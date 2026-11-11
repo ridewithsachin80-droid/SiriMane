@@ -904,6 +904,8 @@ const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toI
         ok(i && i.tool === 'prepare_complaint' && !i.ask, `S24-3 (S1) "fan not working" is kept over Kannada noise that half-matched a name (got ${JSON.stringify(i && [i.tool, i.ask, i.args || i.options])})`);
         i = await dual('fan not working', ['fan not working', 'ಸಚಿನ್ ಐದು ಸಾವಿರ ಯುಪಿಐ']);
         ok(i && i.ask === 'which_reading' && i.options.some(o => o.tool === 'prepare_complaint' && /^Complaint/.test(o.label)) && i.options.some(o => o.tool === 'prepare_payment' && o.args.resident_id === sg2.id), `S24-3 (S1) …but a payment that found its resident and an amount is offered beside it (got ${JSON.stringify(i && (i.options ? i.options.map(o => o.label) : i.args))})`);
+        i = await dual('fan not working', ['fan not working', 'ಈರುಳ್ಳಿ ನೂರು']);
+        ok(i && i.ask === 'which_reading' && i.options.some(o => o.tool === 'prepare_complaint') && i.options.some(o => o.tool === 'prepare_expense' && o.args.amount === 100), `S24-3 (review 2) a complaint vs an expense with an amount is asked, not guessed (got ${JSON.stringify(i && (i.options ? i.options.map(o => o.label) : [i.tool, i.args]))})`);
         await pool.query(`UPDATE guests SET is_active=false WHERE id = ANY($1)`, [[sg2.id, sv2.id]]);
         // English first and correct: kept as the primary, nothing re-ordered.
         i = await dual(`Jhanavi ${alpha} 5000 upi`, [`Jhanavi ${alpha} 5000 upi`, 'ಜಾನವಿ ಐದು ಸಾವಿರ']);

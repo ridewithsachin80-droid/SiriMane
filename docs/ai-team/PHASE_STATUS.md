@@ -316,3 +316,5 @@ Recommendation taken: two recognisers per tap (English and Kannada), both transc
 | S24-8 | "Not now" or "Review on Google" removes the card and is remembered on the server (once per resident, any phone); the first answer is never overwritten; nothing about the review is stored | PRIV |
 | S24-9 | No card in her first 30 days; no card unless the link in app_settings is https | SEC |
 | S24-10 | Migration `migrate-google-review.js` additive (two guests columns + one setting), re-runnable, in migrate-all; gates 12/12 twice; mutations caught; independent review before merge | QA |
+
+**Sprint 24 status:** BLOCK in round 1 (028fd58: a score gap let one ear's amount win over a different amount) → fixed; APPROVED round 2 (d5edc3c); round-2 should-fix (complaint vs expense) taken. Gates 12/12 (3,571) on the final tree, 12/12 ×2 (3,570) on d5edc3c. Mutations 20/21 killed, 1 equivalent replaced and killed. Migration: `node backend/scripts/migrate-google-review.js`. Merged to ai/test. Owner to confirm on his phone that both ears start before main.

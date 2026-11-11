@@ -291,9 +291,10 @@ function conflicts(a, b) {
   const money = t => t === 'prepare_payment' || t === 'prepare_expense';
   if (a.tool !== b.tool) {
     if (money(a.tool) && money(b.tool)) return true;                          // income vs expense
-    // complaint vs a payment: only a payment that found its resident AND an amount can contest it
+    // complaint vs money: a payment that found its resident AND an amount, or an expense with an amount, contests it
     const pay = a.tool === 'prepare_payment' ? a : b.tool === 'prepare_payment' ? b : null;
-    return !!(pay && pay.args && pay.args.resident_id && pay.args.amount);
+    const exp = a.tool === 'prepare_expense' ? a : b.tool === 'prepare_expense' ? b : null;
+    return !!((pay && pay.args && pay.args.resident_id && pay.args.amount) || (exp && exp.args && exp.args.amount));
   }
   if (x.amount && y.amount && Number(x.amount) !== Number(y.amount)) return true;
   if (a.tool === 'prepare_payment') {

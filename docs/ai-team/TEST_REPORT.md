@@ -532,3 +532,5 @@ Backlog (minor): the probe still starts the skip window in a Groq-only setup (pr
 - Minor: dead `best !== reads[0]` branch removed.
 
 **Gate after round 1 fixes:** 12/12 twice, 3,570 (quick 734, ui 1,010, portal 274). Round-1 mutants: 7/7 killed (amount conflict, people conflict, income-vs-expense, complaint vs noise, resolved payment beside complaint, dual not switched off, no single-ear restart).
+
+**Review round 2: APPROVE (d5edc3c).** Should-fix taken: a complaint vs an expense with an amount is now asked too (test added). Follow-up noted, not done: a QUESTION match in the primary ear losing to an unresolved Kannada-ear payment ("Did you mean…", not a preview). Owner to confirm on his phone that both ears start before releasing to main.
