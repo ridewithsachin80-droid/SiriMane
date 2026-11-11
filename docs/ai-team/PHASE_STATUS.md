@@ -292,7 +292,7 @@ The public page already had a title, description, Open Graph/Twitter tags, geo t
 | ID | Acceptance criterion | Review |
 |---|---|---|
 | S23-1 | Structured data is valid JSON-LD: LodgingBusiness (phone, address, pincode, hours, area served), FAQPage whose questions are word-for-word the ones shown on the page, WebSite | SEO |
-| S23-2 | Exactly one H1, carrying the search phrase ("Safe Ladies PG in Tumakuru, near S.I.T. Extension"); a local title; a canonical link to https://sirimane.in/ | SEO |
+| S23-2 | Exactly one H1, carrying the search phrase ("Safe Ladies PG in Tumakuru, near S.I.T. Extension"); a local title; a canonical link to https://sirimane.in/ (Hotfix 23.2: moved to https://www.sirimane.in/ — the bare domain has no DNS record) | SEO |
 | S23-3 | GET on www.sirimane.in → 301 to sirimane.in with path and query kept; API calls are never redirected; other hosts (Test site) untouched | SEC |
 | S23-4 | /guest.html, /management.html and /api/* send X-Robots-Tag noindex; the home page, robots.txt and sitemap.xml do not | SEO |
 | S23-5 | robots.txt points at the sitemap; the sitemap lists the home page with a current lastmod | SEO |
@@ -318,3 +318,5 @@ Recommendation taken: two recognisers per tap (English and Kannada), both transc
 | S24-10 | Migration `migrate-google-review.js` additive (two guests columns + one setting), re-runnable, in migrate-all; gates 12/12 twice; mutations caught; independent review before merge | QA |
 
 **Sprint 24 status:** BLOCK in round 1 (028fd58: a score gap let one ear's amount win over a different amount) → fixed; APPROVED round 2 (d5edc3c); round-2 should-fix (complaint vs expense) taken. Gates 12/12 (3,571) on the final tree, 12/12 ×2 (3,570) on d5edc3c. Mutations 20/21 killed, 1 equivalent replaced and killed. Migration: `node backend/scripts/migrate-google-review.js`. Merged to ai/test. Owner to confirm on his phone that both ears start before main.
+
+**Hotfix 23.2 status:** post-hoc review APPROVE (59f99f3) with follow-ups taken in the same PR: welcome WhatsApp text now says www.sirimane.in/guest; checklist URL-inspection line on www. Process rule recorded above; reviewer also suggests a `CANONICAL_HOST` env var so Test and production can differ without a code change — noted for a later sprint.

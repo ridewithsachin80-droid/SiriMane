@@ -644,20 +644,22 @@ async function main() {
           ok(/<title>[^<]{20,65}<\/title>/.test(home), 'S23-2 the title fits a search result (under 65 characters)');
 
           ok((home.match(/<h1[\s>]/g) || []).length === 1 && /<h1 class="hero-title">Safe Ladies PG in Tumakuru, near S\.I\.T\. Extension<\/h1>/.test(home), 'S23-2 one H1, carrying the search phrase');
-          ok(/<link rel="canonical" href="https:\/\/sirimane\.in\/"\/>/.test(home) && /<title>Siri Mane \| Safe Ladies PG in Tumakuru near S\.I\.T\. Extension/.test(home), 'S23-2 canonical link and a local title');
+          ok(/<link rel="canonical" href="https:\/\/www\.sirimane\.in\/"\/>/.test(home) && /<title>Siri Mane \| Safe Ladies PG in Tumakuru near S\.I\.T\. Extension/.test(home), 'S23-2 canonical link and a local title');
           // (Node's fetch drops a custom Host header, so these go through the http module.)
           const raw = (method, p, host) => new Promise(res => { const q = require('http').request(BASE + p, { method, headers: { Host: host, 'Content-Type': 'application/json' } }, r => { r.resume(); r.on('end', () => res({ status: r.statusCode, location: r.headers.location || null })); }); q.end(method === 'POST' ? '{}' : undefined); });
-          const www = await raw('GET', '/some/page?x=1', 'www.sirimane.in');
-          ok(www.status === 301 && www.location === 'https://sirimane.in/some/page?x=1', `S23-3 www.sirimane.in → sirimane.in, path and query kept (${www.status} ${www.location})`);
-          const wwwPost = await raw('POST', '/api/guest-login', 'www.sirimane.in');
-          ok(wwwPost.status !== 301 && wwwPost.status !== 302, `S23-3 …but an API call is never redirected (a redirect would drop the body) (${wwwPost.status})`);
-          eq((await raw('GET', '/', 'sirimane.in')).status, 200, 'S23-3 sirimane.in itself is served');
-          eq((await raw('GET', '/', 'sirimane-test.up.railway.app')).status, 200, 'S23-3 …and so is the Test site, untouched');
-          const head = await raw('HEAD', '/x', 'www.sirimane.in'); ok(head.status === 301 && head.location === 'https://sirimane.in/x', `S23-3 HEAD on www is redirected too (Googlebot uses HEAD) (${head.status})`);
+          // Hotfix 23.2: www.sirimane.in is the address that exists. It is SERVED, never redirected — the app lives there.
+          for (const p of ['/', '/management.html', '/guest.html', '/some/page?x=1']) ok([200, 404].includes((await raw('GET', p, 'www.sirimane.in')).status), `H23.2 www.sirimane.in${p} is served, not redirected`);
+          eq((await raw('HEAD', '/', 'www.sirimane.in')).status, 200, 'H23.2 HEAD on www is served too');
+          const bare = await raw('GET', '/some/page?x=1', 'sirimane.in');
+          ok(bare.status === 301 && bare.location === 'https://www.sirimane.in/some/page?x=1', `S23-3 bare sirimane.in → www, path and query kept (${bare.status} ${bare.location})`);
+          const barePost = await raw('POST', '/api/guest-login', 'sirimane.in');
+          ok(barePost.status !== 301 && barePost.status !== 302, `S23-3 …but an API call is never redirected (a redirect would drop the body) (${barePost.status})`);
+          eq((await raw('GET', '/', 'sirimane-test.up.railway.app')).status, 200, 'S23-3 the Test site is untouched');
+          const head = await raw('HEAD', '/x', 'sirimane.in'); ok(head.status === 301 && head.location === 'https://www.sirimane.in/x', `S23-3 HEAD on the bare domain is redirected too (${head.status})`);
           for (const p of ['/guest.html', '/management.html', '/api/rooms']) eq((await fetch(BASE + p)).headers.get('x-robots-tag'), 'noindex, nofollow', `S23-4 ${p} tells search engines to stay out`);
           for (const p of ['/', '/home.html', '/robots.txt', '/sitemap.xml']) eq((await fetch(BASE + p)).headers.get('x-robots-tag'), null, `S23-4 …while ${p} is indexable`);
           const robots = await (await fetch(BASE + '/robots.txt')).text(); const sitemap = await (await fetch(BASE + '/sitemap.xml')).text();
-          ok(/Disallow: \/guest\.html/.test(robots) && /Sitemap: https:\/\/sirimane\.in\/sitemap\.xml/.test(robots) && /<loc>https:\/\/sirimane\.in\/<\/loc>/.test(sitemap) && /<lastmod>2026-/.test(sitemap), 'S23-5 robots.txt points at the sitemap; the sitemap lists the home page with a current date');
+          ok(/Disallow: \/guest\.html/.test(robots) && /Sitemap: https:\/\/www\.sirimane\.in\/sitemap\.xml/.test(robots) && /<loc>https:\/\/www\.sirimane\.in\/<\/loc>/.test(sitemap) && /<lastmod>2026-/.test(sitemap), 'S23-5 robots.txt points at the sitemap; the sitemap lists the home page with a current date');
         }
         // S16.3-3 reset a resident's app login
         const n163 = '9' + String(Date.now()).slice(-9);

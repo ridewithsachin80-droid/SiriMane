@@ -62,11 +62,14 @@ const CSP_HOME = cspHeader(
 // staff or resident page with the looser one. (Review S17-4.)
 app.use((req, res, next) => { res.setHeader('Content-Security-Policy', CSP_APP); next(); });
 const sendHome = (req, res) => { res.setHeader('Content-Security-Policy', CSP_HOME); res.sendFile(path.join(PUBLIC, 'home.html')); };
-// Sprint 23 (SEO): one address for the home page. www.sirimane.in → sirimane.in,
-// so Google counts links to both as one site. Only the public site; the app
-// screens and the API are untouched (cookies are host-bound).
+// Hotfix 23.2 (OUTAGE, 11 Nov): the public address is www.sirimane.in — that is
+// the host Railway serves and the only one with a DNS record. Sprint 23 sent
+// www → bare sirimane.in, which does not resolve, so every visitor and the app
+// itself were bounced to a dead address. Direction reversed: should the bare
+// domain ever get a record, it lands on www. GET/HEAD only; the API, which
+// could carry a body, is never redirected.
 app.use((req, res, next) => {
-  if (req.hostname === 'www.sirimane.in' && (req.method === 'GET' || req.method === 'HEAD')) return res.redirect(301, 'https://sirimane.in' + req.originalUrl);
+  if (req.hostname === 'sirimane.in' && (req.method === 'GET' || req.method === 'HEAD')) return res.redirect(301, 'https://www.sirimane.in' + req.originalUrl);
   next();
 });
 // The app screens are for residents and staff — never a search result.
