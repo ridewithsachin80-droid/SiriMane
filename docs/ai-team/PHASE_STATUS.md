@@ -300,3 +300,19 @@ The public page already had a title, description, Open Graph/Twitter tags, geo t
 | S23-7 | Gates 12/12 twice; mutations caught; independent review; a step-by-step list for the owner's side (Google Business Profile, Search Console, directories, reviews, photos) | QA |
 
 **Sprint 23 status:** approved by the independent review in round 1 (c067245), should-fixes taken (d578ea3). Gates 12/12 ×2, 3,520. Owner confirmed address, hours and phone on 10 Nov. Merged to ai/test. No migration. Owner-side steps: docs/ai-team/SEO_OWNER_CHECKLIST.md.
+
+## Sprint 24 — no language button: the mic hears English and Kannada at once (owner, 11 Nov: "it should be automatic, this extra pressing is not appropriate" · "it could be Kanglish also" · "go ahead with your recommendation")
+Recommendation taken: two recognisers per tap (English and Kannada), both transcripts to the server, the rules read each and keep the more complete reading; equally complete readings that disagree are shown as two taps; a phone that refuses the second recogniser falls back to the single-language mic with the ಕನ್ನಡ button exactly as in Sprint 21. Plus the "Review us on Google" card in the resident app (owner's review link, once per resident after 30 days, dismissible, no reward).
+
+| ID | Acceptance criterion | Review |
+|---|---|---|
+| S24-1 | One mic tap opens an English ear and a Kannada ear; no language button is shown while both are open; the status reads "Listening…" | UX |
+| S24-2 | Server: with two transcripts the more complete reading wins ("heroine Nooru rupaye" + "ಈರುಳ್ಳಿ ನೂರು ರೂಪಾಯಿ" → onion ₹100; "Suchin I sawida" + "ಸಚಿನ್ ಐದು ಸಾವಿರ ಯುಪಿಐ" → ₹5,000 UPI), without an AI call; a complete English reading is kept | AI |
+| S24-3 | Readings equally complete that differ in amount, person, type or item are never guessed between: "I heard two different things — tap the right one" with two 44 px taps; a tap prepares that reading; nothing is saved | MONEY |
+| S24-4 | The same reading in two scripts is one entry; a reading that only asks a question (two Jhanavis) loses to a complete one; nonsense in both ears still goes through the Sprint 21 repair with its honesty guard | AI |
+| S24-5 | If only one ear hears, the result shows after at most ~1.2 s and the silent ear is closed (mic not left on); a phone that refuses the second ear gets the single-language mic and ಕನ್ನಡ button as before; "Mic is off", storage-blocked and abort-throws cases still pass | UX |
+| S24-6 | Quick Entry and the Copilot bar both send both ears (`dual`); the Copilot route shows the tie as taps | UX |
+| S24-7 | Resident app: a resident of 30+ days sees one optional "Review on Google" card linking to the owner's g.page review link in a new tab; two 44 px taps; fits 360/390 | UX |
+| S24-8 | "Not now" or "Review on Google" removes the card and is remembered on the server (once per resident, any phone); the first answer is never overwritten; nothing about the review is stored | PRIV |
+| S24-9 | No card in her first 30 days; no card unless the link in app_settings is https | SEC |
+| S24-10 | Migration `migrate-google-review.js` additive (two guests columns + one setting), re-runnable, in migrate-all; gates 12/12 twice; mutations caught; independent review before merge | QA |

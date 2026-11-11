@@ -149,7 +149,7 @@ async function enrichRawArgs(toolName, args, context) {
 }
 
 // ── 2. Ask ────────────────────────────────────────────────────────────────
-async function ask({ user, text, context, tap, voice, alternatives, authorization, port }) {
+async function ask({ user, text, context, tap, voice, alternatives, dual, authorization, port }) {
   const t0 = Date.now();
   const q = String(text || '').trim().slice(0, 500);
   const audit = { user_id: user.id, request_text: q, context: context || null, interpretation: null, tools_read: [], proposal_id: null, result_text: null, error: null };
@@ -168,6 +168,9 @@ async function ask({ user, text, context, tap, voice, alternatives, authorizatio
   if (tap && tools.TOOLS[tap.tool] && tools.TOOLS[tap.tool].level !== 'execute' && tools.allowed(tools.TOOLS[tap.tool], user)) {
     intent = { tool: tap.tool, args: { ...tap.args }, via: 'tap' };
   }
+  // Sprint 24: two ears heard her — the rules must weigh BOTH transcripts, so
+  // Quick Entry goes first (the local rules see only one text).
+  if (!intent && dual && voice && Array.isArray(alternatives) && alternatives.length > 1) intent = await quick.intent(q, user, context, { voice: true, alternatives, dual: true });
   if (!intent) intent = localIntent(q, user, context);
   // 21.3 review: "bought tiffin 80 savera" must get the same ₹80,000-or-₹80
   // question (or the "I read…" note) as "tiffin 80 savera". Only phrases whose
@@ -178,7 +181,7 @@ async function ask({ user, text, context, tap, voice, alternatives, authorizatio
   }
   // Sprint 14: a bare phrase — "onion 100rs", "jhanavi 500", "tap leaking
   // room 106" — needs no verb. Deterministic, keyless, before the model.
-  if (!intent) intent = await quick.intent(q, user, context, { voice: !!voice, alternatives: Array.isArray(alternatives) ? alternatives : [] });
+  if (!intent) intent = await quick.intent(q, user, context, { voice: !!voice, alternatives: Array.isArray(alternatives) ? alternatives : [], dual: !!dual });
   if (!intent) intent = await modelIntent(q, user, context);
   if (intent && intent.error) audit.error = intent.error;
   if (!intent || (!intent.tool && !intent.clarify)) {

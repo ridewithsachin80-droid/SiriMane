@@ -862,6 +862,58 @@ const daysAgo = n => new Date(Date.now() + 5.5 * 3600 * 1000 - n * 86400000).toI
     }
     await pool.query(`UPDATE guests SET is_active=false WHERE id = ANY($1)`, [[bh.id, rn.id]]);
     await pool.query(`UPDATE guests SET is_active=false WHERE id = ANY($1)`, [[bd.id, sc.id, kv2.id]]);
+    // ── Sprint 24: one mic, two languages — the rules pick, no button, no AI ──
+    {
+      let calls = 0; const keep = ai.providers.groqText, keepStub = ai.providers._stub;
+      ai.providers._stub = true; ai.providers.groqDownUntil = 0; ai.providers.groqText = async () => { calls++; return '{"phrase":"onion 100","confidence":"high"}'; };
+      const dual = (t, alts) => quick.intent(t, adminUser, {}, { voice: true, alternatives: alts, dual: true });
+      try {
+        // English ear garbles the Kannada; the Kannada ear got it: the Kannada reading wins.
+        i = await dual('heroine Nooru rupaye', ['heroine Nooru rupaye', 'ಈರುಳ್ಳಿ ನೂರು ರೂಪಾಯಿ']);
+        ok(i && i.tool === 'prepare_expense' && i.args.description === 'eerulli' && i.args.amount === 100 && i.args.category === 'Groceries' && i.understood === 'ಈರುಳ್ಳಿ ನೂರು ರೂಪಾಯಿ', `S24-1 "heroine" (en) + "ಈರುಳ್ಳಿ" (kn) → onion ₹100 from the Kannada ear (got ${JSON.stringify(i && [i.tool, i.args, i.understood])})`);
+        eq(calls, 0, 'S24-1 …with no AI call');
+        // Kanglish: the English ear hears the name and UPI, the Kannada ear the amount — the more complete reading wins.
+        const sg2 = (await A('POST', '/guests', { name: `Sachin Q${alpha}`, phone: `97${uniq}41`.slice(0, 10), room_id: room5.id, bed_number: '5', monthly_rent: 6000, deposit_amount: 0, join_date: daysAgo(30), id_proof_type: 'Aadhaar' })).data;
+        i = await dual('Suchin I sawida', ['Suchin I sawida', 'ಸಚಿನ್ ಐದು ಸಾವಿರ ಯುಪಿಐ']);
+        ok(i && i.tool === 'prepare_payment' && i.args.resident_id === sg2.id && i.args.amount === 5000 && i.args.mode === 'UPI', `S24-1 Kanglish "Sachin aidu saavira upi": the English ear garbled it, the Kannada ear is complete → ₹5,000 UPI (got ${JSON.stringify(i && [i.args, i.understood])})`);
+        // Equally complete readings that disagree on money: two taps, never a guess.
+        i = await dual('Sachin 5000 upi', ['Sachin 5000 upi', 'ಸಚಿನ್ ಆರು ಸಾವಿರ ಯುಪಿಐ']);
+        ok(i && !i.tool && i.ask === 'which_reading' && i.options.length === 2 && i.options.every(o => o.tool === 'prepare_payment' && o.args.resident_id === sg2.id) && new Set(i.options.map(o => o.args.amount)).size === 2 && i.options.every(o => /₹[56],000 · UPI/.test(o.label) && /^Sachin Q/.test(o.label)), `S24-2 ₹5,000 vs ₹6,000 for the same resident is asked, with two taps (got ${JSON.stringify(i && (i.options ? i.options.map(o => o.label) : i.args))})`);
+        eq(calls, 0, 'S24-2 …the AI is not asked to break the tie');
+        i = await dual('Sachin 5000 upi', ['Sachin 5000 upi', 'ಸಚಿನ್ 5000 ಯುಪಿಐ']);
+        ok(i && i.tool === 'prepare_payment' && !i.ask && i.args.amount === 5000, 'S24-2 the same reading in two scripts is simply prepared');
+        // A reading that cannot tell two Jhanavis apart is less complete than one that can: no tie.
+        i = await dual(`Jhanavi ${alpha} 5000 upi`, [`Jhanavi ${alpha} 5000 upi`, 'ಜಾನವಿ ಆರು ಸಾವಿರ ಯುಪಿಐ']);
+        ok(i && i.tool === 'prepare_payment' && i.args.resident_id === jh.id && i.args.amount === 5000, `S24-2 the reading that names her fully wins over one that could be either Jhanavi (got ${JSON.stringify(i && (i.args || i.options))})`);
+        await pool.query(`UPDATE guests SET is_active=false WHERE id=$1`, [sg2.id]);
+        // English first and correct: kept as the primary, nothing re-ordered.
+        i = await dual(`Jhanavi ${alpha} 5000 upi`, [`Jhanavi ${alpha} 5000 upi`, 'ಜಾನವಿ ಐದು ಸಾವಿರ']);
+        ok(i && i.tool === 'prepare_payment' && i.args.resident_id === jh.id && i.args.amount === 5000 && i.args.mode === 'UPI' && !i.understood, `S24-1 a complete English reading stays (got ${JSON.stringify(i && [i.args, i.understood])})`);
+        eq(calls, 0, 'S24-1 …still no AI call');
+        i = await dual('onion 100', ['onion 100', 'ಬೆಳ್ಳುಳ್ಳಿ ನೂರು']);
+        ok(i && i.ask === 'which_reading' && i.options.map(o => o.args.description).sort().join(',') === 'bellulli,onion', `S24-2 onion vs garlic at ₹100 is asked (got ${JSON.stringify(i && (i.options ? i.options.map(o => o.label) : i.args))})`);
+        // A complaint is never offered as a tie; the fuller one (with a room) wins.
+        i = await dual('tap leaking', ['tap leaking', 'ನಲ್ಲಿ ಸೋರುತ್ತಿದೆ ರೂಮ್ 106']);
+        ok(i && i.tool === 'prepare_complaint' && i.args.room === '106', `S24-1 the complaint with the room number wins (got ${JSON.stringify(i && i.args)})`);
+        // Neither ear made sense: the old path (AI repair, with its guards) still applies.
+        i = await dual('heroine urupai', ['heroine urupai', 'ಹೀರೋಯಿನ್ ಉರುಪೈ']);
+        ok(calls === 1 && (!i || !i.tool), `S24-1 nonsense in both ears goes to the repair step once — and its invented "₹100" is still refused (${calls} call; got ${JSON.stringify(i && (i.args || i.clarify))})`);
+        i = await dual('heerly Nooru rupaye', ['heerly Nooru rupaye', 'ಹೀರ್ಲಿ ನೂರು ರೂಪಾಯಿ']);
+        ok(calls === 2 && i && i.tool === 'prepare_expense' && i.args.description === 'onion' && i.args.amount === 100, `S24-1 …while a repair that only fixes the item word is still used (got ${JSON.stringify(i && i.args)})`);
+        // Without the dual flag (one ear, as before) the behaviour is unchanged.
+        calls = 0; i = await quick.intent('heroine Nooru rupaye', adminUser, {}, { voice: true, alternatives: ['heroine Nooru rupaye', 'ಈರುಳ್ಳಿ ನೂರು ರೂಪಾಯಿ'] });
+        ok(i && i.tool === 'prepare_expense', 'S24-1 (control) the single-ear path is as before');
+      } finally { ai.providers.groqText = keep; ai.providers._stub = keepStub; ai.providers.groqDownUntil = 0; }
+      // Through the Copilot: the tie is a question with two preview taps; a tap prepares; nothing saved.
+      const before = (await pool.query(`SELECT COUNT(*)::int AS n FROM collections`)).rows[0].n;
+      const sg3 = (await A('POST', '/guests', { name: `Sachin Q${alpha}`, phone: `97${uniq}42`.slice(0, 10), room_id: room5.id, bed_number: '6', monthly_rent: 6000, deposit_amount: 0, join_date: daysAgo(30), id_proof_type: 'Aadhaar' })).data;
+      r = await api('POST', '/copilot/ask', { text: 'Sachin 5000 upi', voice: true, dual: true, alternatives: ['Sachin 5000 upi', 'ಸಚಿನ್ ಆರು ಸಾವಿರ ಯುಪಿಐ'], context: { page: 'home' } }, adminTok);
+      ok(r.data.answer === 'I heard two different things — tap the right one.' && !r.data.proposal && r.data.actions.length === 2 && r.data.actions.every(a => a.tool === 'prepare_payment' && a.level === 'prepare'), `S24-2 the Copilot shows the two readings as taps (got ${r.data.answer} · ${JSON.stringify(r.data.actions.map(a => a.label))})`);
+      const t5 = await api('POST', '/copilot/ask', { text: 'Sachin 5000 upi', tool: r.data.actions[1].tool, args: r.data.actions[1].args, context: { page: 'home' } }, adminTok);
+      ok(t5.data.proposal && Number(t5.data.proposal.preview.amount) === 6000 && t5.data.proposal.preview.guest_id === sg3.id, `S24-2 tapping ₹6,000 prepares ₹6,000 for her to confirm (got ${JSON.stringify(t5.data.proposal && t5.data.proposal.preview)})`);
+      eq((await pool.query(`SELECT COUNT(*)::int AS n FROM collections`)).rows[0].n, before, 'S24-2 …and nothing is saved');
+      await pool.query(`UPDATE guests SET is_active=false WHERE id=$1`, [sg3.id]);
+    }
     console.log('✓ S21 Kannada');
 
     // ── Audit ────────────────────────────────────────────────────────────

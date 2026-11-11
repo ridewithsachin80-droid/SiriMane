@@ -3536,6 +3536,14 @@ function smLangButton(active, again) {
 const SM_VOICE_ERRORS = { 'no-speech': 'Didn\'t hear anything — tap the mic and try again', 'audio-capture': 'No microphone found', 'not-allowed': 'Microphone permission denied — allow it in Chrome settings', 'network': 'Network error — check your signal', 'language-not-supported': 'ಕನ್ನಡ voice isn\'t available on this phone — switched back to English', 'aborted': '' };
 
 let smRec = null;
+// Sprint 24: the mic listens in English AND Kannada at the same time, so
+// "Jhanavi aidu saavira upi" needs no language button. Two recognisers share
+// the microphone; whichever hears something first is shown, the other is given
+// a moment to finish, and both transcripts go to the server, which keeps the
+// more complete reading (or asks, with two taps, when they tie). A phone that
+// refuses the second recogniser silently falls back to one language — the
+// one chosen with the button, as before.
+const SM_DUAL_WAIT_MS = 1200;
 function smVoice(btnId, statusId, onText, hint) {
   const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition || null;
   const btn = document.getElementById(btnId);
@@ -3544,36 +3552,57 @@ function smVoice(btnId, statusId, onText, hint) {
   const again = () => smVoice(btnId, statusId, onText, hint);
   const say = (msg, err, offer) => { status.textContent = msg; status.classList.toggle('voice-error', !!err); if (offer) { status.appendChild(document.createTextNode(' ')); status.appendChild(smLangButton(() => smRec, again)); } };
   if (!Ctor) { say('Voice needs Chrome on Android. Please type instead.', true); return; }
-  if (smRec) { try { smRec.stop(); } catch {} smRec = null; return; }
+  if (smRec) { try { smRec.stop(); } catch {} if (smRec.__twin) { try { smRec.__twin.abort(); } catch {} } smRec = null; return; }
   try {
+    const lang = smVoiceLang(), other = lang === 'kn-IN' ? 'en-IN' : 'kn-IN';
     const rec = new Ctor();
     smRec = rec;
-    const lang = smVoiceLang();
-    // 14.1: Chrome's 2nd or 3rd guess is often the right one for Indian
-    // English and Kannada words — keep five and let the server choose.
     rec.lang = lang; rec.continuous = false; rec.interimResults = false; rec.maxAlternatives = 5;
-    let settled = false;   // Sprint 22: a result or an error has replaced "Listening…"
-    rec.onstart = () => { btn.classList.add('listening'); btn.textContent = '⏹'; say(`Listening in ${SM_VOICE_LANGS[lang]}… ` + (hint || 'speak now'), false, true); };
-    rec.onresult = e => {
-      settled = true;
-      const t = e.results && e.results[0] && e.results[0][0] ? e.results[0][0].transcript : '';
-      if (!t) { say('Didn\'t catch that — tap the mic and try again', true, true); return; }
-      const alts = e.results && e.results[0] ? Array.from(e.results[0]).map(a => a.transcript).filter(Boolean) : [t];
-      say(`Heard: "${t}"`, false, true);
-      try { onText(t, alts); } catch (err) { console.error(err); say('Couldn\'t understand that — please fill the form', true); }
+    // The second ear. Created up front; if the phone refuses it (error / never starts) nothing changes.
+    let twin = null, twinAlive = false, twinAlts = null, twinDone = false;
+    try { twin = new Ctor(); twin.lang = other; twin.continuous = false; twin.interimResults = false; twin.maxAlternatives = 5; } catch (e) { twin = null; }
+    rec.__twin = twin;
+    let settled = false, primaryAlts = null, primaryDone = false, delivered = false, timer = null;
+    const alts = e => e && e.results && e.results[0] ? Array.from(e.results[0]).map(a => a.transcript).filter(Boolean) : [];
+    const deliver = () => {
+      if (delivered) return; delivered = true; if (timer) clearTimeout(timer);
+      // The slower ear is closed, so the mic does not stay on after the result is shown.
+      if (twin && !twinDone) { try { twin.abort(); } catch (x) {} }
+      if (!primaryDone) { try { rec.abort(); } catch (x) {} }
+      const a = primaryAlts || [], b = twinAlts || [];
+      const all = [...a, ...b];
+      if (!all.length) { say('Didn\'t catch that — tap the mic and try again', true, true); return; }
+      const shown = a[0] || b[0];
+      say(`Heard: "${shown}"`, false, !twinAlive);   // both ears worked → no language to pick
+      try { onText(shown, all, { dual: twinAlive && !!(a.length && b.length) }); } catch (err) { console.error(err); say('Couldn\'t understand that — please fill the form', true); }
     };
+    const maybeDeliver = () => { if (primaryDone && (twinDone || !twinAlive)) deliver(); else if ((primaryAlts || twinAlts) && !timer) timer = setTimeout(deliver, SM_DUAL_WAIT_MS); };
+    // While both ears are open there is nothing to choose, so the language
+    // button only appears when this phone gives us a single ear.
+    const listening = offer => say(`Listening… ` + (hint || 'speak now'), false, offer);
+    rec.onstart = () => { btn.classList.add('listening'); btn.textContent = '⏹'; listening(!twin || !twinAlive); };
+    rec.onresult = e => { settled = true; primaryAlts = alts(e); if (!primaryAlts.length) primaryAlts = null; };
     rec.onerror = e => {
       if (e && e.error === 'language-not-supported') smSetVoiceLang('en-IN');
+      if (e && e.error === 'no-speech' && twinAlts) return;   // the other ear heard her
       const msg = e && e.error in SM_VOICE_ERRORS ? SM_VOICE_ERRORS[e.error] : 'Voice input failed — please fill the form';
-      if (msg) { settled = true; say(msg, true, e.error === 'no-speech'); }
+      if (msg) { settled = true; delivered = true; if (twin) { try { twin.abort(); } catch (x) {} } say(msg, true, e.error === 'no-speech'); }
     };
     rec.onend = () => {
+      primaryDone = true;
       if (smRec === rec) smRec = null; btn.classList.remove('listening'); btn.textContent = '🎤';
-      if (rec.__then) { const go = rec.__then; rec.__then = null; go(); return; }
-      // The mic closed with nothing heard and no error (she tapped stop, or it timed out): say so.
-      if (!settled) say('Mic is off — tap it to speak', false, true);
+      if (rec.__then) { const go = rec.__then; rec.__then = null; if (twin) { try { twin.abort(); } catch (x) {} } go(); return; }
+      if (settled && !delivered) { maybeDeliver(); return; }
+      if (!settled && !delivered && !twinAlts) { if (twinAlive && !twinDone) { maybeDeliver(); return; } say('Mic is off — tap it to speak', false, true); }
     };
+    if (twin) {
+      twin.onstart = () => { twinAlive = true; if (!settled && !delivered) listening(false); };
+      twin.onresult = e => { twinAlts = alts(e); if (!twinAlts.length) twinAlts = null; settled = true; if (!primaryAlts && twinAlts) { try { rec.stop(); } catch (x) {} } maybeDeliver(); };
+      twin.onerror = () => { twinAlive = false; if (!settled && !delivered && !primaryDone) listening(true); };
+      twin.onend = () => { twinDone = true; if (primaryDone && settled && !delivered) deliver(); else if (primaryDone && !settled && !delivered) say('Mic is off — tap it to speak', false, true); };
+    }
     rec.start();
+    if (twin) { try { twin.start(); } catch (e) { twin = null; rec.__twin = null; } }
   } catch { smRec = null; say('Could not start voice on this device', true); }
 }
 
@@ -4053,7 +4082,7 @@ function initCopilotBar() {
   content.parentNode.insertBefore(bar, content);
   renderCopilotChips();
 }
-function copilotVoice() { smVoice('copilot-mic', 'copilot-voice-status', (t, alts) => copilotAsk(t, { voice: true, alternatives: alts }), 'ask or tell me what to record'); }
+function copilotVoice() { smVoice('copilot-mic', 'copilot-voice-status', (t, alts, m) => copilotAsk(t, { voice: true, alternatives: alts, dual: !!(m && m.dual) }), 'ask or tell me what to record'); }
 
 let copilotBusy = false;
 async function copilotAsk(text, opts) {
@@ -4066,7 +4095,7 @@ async function copilotAsk(text, opts) {
   out.innerHTML = `<div class="copilot-answer"><div class="sm-skel"><div class="sm-skel-line" style="width:70%"></div><div class="sm-skel-line" style="width:40%"></div></div></div>`;
   copilotBusy = true;
   try {
-    const r = await apiFetch('/copilot/ask', { method: 'POST', body: { text: q, voice: !!(opts && opts.voice), alternatives: (opts && opts.alternatives) || [], context: { page: smContext.page, resident_id: smContext.resident_id, resident_name: smContext.resident_name, room_number: smContext.room_number } } });
+    const r = await apiFetch('/copilot/ask', { method: 'POST', body: { text: q, voice: !!(opts && opts.voice), alternatives: (opts && opts.alternatives) || [], dual: !!(opts && opts.dual), context: { page: smContext.page, resident_id: smContext.resident_id, resident_name: smContext.resident_name, room_number: smContext.room_number } } });
     renderCopilotResult(r);
   } catch (e) { out.innerHTML = `<div class="copilot-answer copilot-err">${esc(e.message)}</div>`; }
   finally { copilotBusy = false; input.select(); }
@@ -4322,13 +4351,13 @@ function quickEntrySubmit(e) {
   closeQuickActions();
   const bar = document.getElementById('copilot-q');
   if (bar) { bar.value = text; bar.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
-  copilotAsk(text, { voice, alternatives: voice ? alts : [] });
+  copilotAsk(text, { voice, alternatives: voice ? alts : [], dual: voice && inp.dataset && inp.dataset.dual === '1' });
   return false;
 }
 function quickEntryVoice() {
   // Same recogniser as the Copilot bar (on-device on Android, Gemini fallback
   // on iOS); the words land in the box so she sees them before they go anywhere.
-  smVoice('qe-mic', 'qe-voice-status', (t, alts) => { const i = document.getElementById('qe-input'); if (i) { i.value = t; i.dataset.voice = '1'; i.dataset.alts = JSON.stringify(alts || []); i.focus(); } }, 'say what happened');
+  smVoice('qe-mic', 'qe-voice-status', (t, alts, m) => { const i = document.getElementById('qe-input'); if (i) { i.value = t; i.dataset.voice = '1'; i.dataset.dual = m && m.dual ? '1' : ''; i.dataset.alts = JSON.stringify(alts || []); i.focus(); } }, 'say what happened');
 }
 function closeQuickActions() { ['qa-sheet', 'qa-backdrop'].forEach(id => { const e = document.getElementById(id); if (e) e.remove(); }); }
 function runQuickAction(i) { const list = QUICK_ACTIONS.filter(a => !a.admin || isAdmin()); closeQuickActions(); list[i].run(); }

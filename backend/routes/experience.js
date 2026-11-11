@@ -35,7 +35,7 @@ const { noticeWhere, residentContext } = require('../services/notices');
 router.get('/guest-home', guestAuth, wrap(async (req, res) => {
   const c = await residentContext(req.guest.id);
   const today = istToday();
-  const [portal, menu, ratings, requests, notices, visitors, satisfied] = await Promise.all([
+  const [portal, menu, ratings, requests, notices, visitors, satisfied, review] = await Promise.all([
     pool.query(`SELECT 1`), // placeholder to keep the shape obvious
     pool.query(`SELECT meal_type, items FROM daily_menu WHERE day_of_week=$1`, [weekday()]),
     pool.query(`SELECT meal_type, stars FROM meal_ratings WHERE guest_id=$1 AND rating_date=$2`, [req.guest.id, today]),
@@ -44,7 +44,10 @@ router.get('/guest-home', guestAuth, wrap(async (req, res) => {
                   FROM announcements a LEFT JOIN announcement_reads r ON r.announcement_id=a.id AND r.guest_id=$1
                  WHERE ${noticeWhere()} ORDER BY a.created_at DESC LIMIT 10`, [req.guest.id, c.room_number, c.floor]),
     pool.query(`SELECT id, visitor_name, status, expected_at FROM visitors WHERE guest_id=$1 AND status IN ('expected','in') ORDER BY expected_at NULLS LAST LIMIT 5`, [req.guest.id]),
-    pool.query(`SELECT 1 FROM satisfaction_submitted WHERE guest_id=$1 AND month=$2`, [req.guest.id, istMonth()])
+    pool.query(`SELECT 1 FROM satisfaction_submitted WHERE guest_id=$1 AND month=$2`, [req.guest.id, istMonth()]),
+    // Sprint 24: ask for a Google review once, after her first 30 days, and never again once she has tapped or dismissed it.
+    pool.query(`SELECT (SELECT value FROM app_settings WHERE key='google_review_url') AS url
+                  FROM guests WHERE id=$1 AND is_active=true AND review_prompt_at IS NULL AND join_date <= (${IST_TODAY_SQL})::date - 30`, [req.guest.id])
   ]);
   const ratedBy = new Map(ratings.rows.map(r => [r.meal_type, r.stars]));
   res.json({
@@ -56,8 +59,17 @@ router.get('/guest-home', guestAuth, wrap(async (req, res) => {
     notices: notices.rows,
     unread_notices: notices.rows.filter(n => !n.read).length,
     visitors: visitors.rows,
-    satisfaction_due: !satisfied.rows[0]
+    satisfaction_due: !satisfied.rows[0],
+    review_prompt: review.rows[0] && /^https:\/\//.test(review.rows[0].url || '') ? { url: review.rows[0].url } : null
   });
+}));
+
+// Sprint 24: she tapped "Review on Google" or "Not now" — either way the card
+// is gone for good. Nothing about the review itself is stored (Google has it).
+router.post('/guest-review-prompt', guestAuth, json, wrap(async (req, res) => {
+  const action = req.body && req.body.action === 'tapped' ? 'tapped' : 'dismissed';
+  await pool.query(`UPDATE guests SET review_prompt_at = COALESCE(review_prompt_at, NOW()), review_prompt_action = COALESCE(review_prompt_action, $2) WHERE id=$1`, [req.guest.id, action]);
+  res.json({ ok: true, action });
 }));
 
 // ── Meal ratings ─────────────────────────────────────────────────────────
