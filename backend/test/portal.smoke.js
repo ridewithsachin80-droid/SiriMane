@@ -220,6 +220,26 @@ async function runAtWidth(browser, BASE, width, fixtures) {
   eq(cachedOther.length, 0, `${tag} S25-4 …and those pages are not cached by the resident worker`);
   // (Headless offline emulation blocks the navigation before the service worker sees it, so the
   //  offline fallback itself is proven by the cache contents above, not by an offline navigation.)
+  // Sprint 26: the resident app shows "New version available — Refresh" too.
+  {
+    const build0 = app.locals.BUILD;
+    await page.evaluate(() => window.smVersionCheck.check()); await sleep(300);
+    ok(!(await page.$('#sm-update-bar')), `${tag} S26-6 same build → no bar in the resident app`);
+    app.locals.BUILD = 'deploy-g' + width;
+    await page.evaluate(() => apiGuest('/guest-home').catch(() => {}));
+    await page.waitForSelector('#sm-update-bar', { timeout: 5000 });
+    const ub = await page.evaluate(() => { const b = document.getElementById('sm-update-bar'); const r = b.getBoundingClientRect(); return { text: b.textContent, right: r.right, bottom: r.bottom, goH: b.querySelector('.sm-update-go').getBoundingClientRect().height, laterH: b.querySelector('.sm-update-later').getBoundingClientRect().height, overNav: r.bottom <= (document.querySelector('.p-nav, .bottom-nav, nav') ? document.querySelector('.p-nav, .bottom-nav, nav').getBoundingClientRect().top + 1 : 9999) }; });
+    ok(/New version available/.test(ub.text) && ub.right <= width + 0.5 && ub.goH >= 44 && ub.laterH >= 44, `${tag} S26-6 the bar appears after her next ordinary API call; fits; 44 px taps`);
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.screenshot({ path: path.join(SHOTS, `s26-update-bar-guest-${width}.png`) });
+    const nav = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 20000 });
+    await page.tap('#sm-update-go');
+    await nav; await sleep(500);
+    ok(!(await page.$('#sm-update-bar')) && (await page.evaluate(() => window.smVersionCheck._state().current)) === 'deploy-g' + width, `${tag} S26-6 Refresh reloads onto the new build (through the service worker's network-first shell)`);
+    ok(await page.evaluate(() => apiGuest('/guest-home').then(h => !!h && 'satisfaction_due' in h).catch(() => false)), `${tag} S26-6 she is still signed in after the refresh`);
+    app.locals.BUILD = build0;
+    await page.evaluate(() => { const b = document.getElementById('sm-update-bar'); if (b) b.remove(); window.smVersionCheck._reset(); });
+  }
   // Sprint 19: only her (non-secret) details are stored; the login is a cookie for the token's life (24 h)
   const remembered = await page.evaluate(() => !!localStorage.getItem('guest_data') && !!localStorage.getItem('guest_expires') && !localStorage.getItem('guest_token'));
   ok(remembered, `${tag} "keep me signed in" keeps her details on this phone, never the token`);

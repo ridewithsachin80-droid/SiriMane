@@ -210,6 +210,12 @@
     .install-bar p { flex:1; font-size:13px; color:var(--p-accent-ink); }
     .receipt-line { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--p-surface-2); }
     .receipt-line:last-child { border-bottom:none; }
+    /* Sprint 26: "New version available — Refresh" bar */
+    #sm-update-bar { position: fixed; left: 12px; right: 12px; bottom: calc(72px + env(safe-area-inset-bottom)); z-index: 2000; display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 14px; background: #1f2937; color: #fff; box-shadow: 0 8px 24px rgba(0,0,0,.35); font-size: 14px; }
+    #sm-update-bar .sm-update-text { flex: 1; font-weight: 600; }
+    #sm-update-bar button { min-height: 44px; padding: 0 16px; border-radius: 10px; border: 0; font-size: 14px; font-weight: 700; cursor: pointer; }
+    #sm-update-bar .sm-update-later { background: transparent; color: #cbd5e1; }
+    #sm-update-bar .sm-update-go { background: #c9a84c; color: #1a1a1a; }
   </style>
 </head>
 <body>
@@ -1236,5 +1242,6 @@ function fmtDate(d) { if(!d) return '—'; return new Date(d).toLocaleDateString
   <button data-nav="help" onclick="showTab('help')"><span>🙋</span>Help<small>ಸಹಾಯ</small></button>
   <button data-nav="me" onclick="showTab('me')"><span>👤</span>Me<small>ನಾನು</small></button>
 </nav>
+<script src="/js/version-check.js"></script>
 </body>
 </html>

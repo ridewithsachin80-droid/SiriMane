@@ -15,6 +15,15 @@ const PUBLIC = path.join(__dirname, '../frontend/public');
 app.set('trust proxy', 1);
 
 app.use(helmet({ contentSecurityPolicy: false }));
+
+// ── Sprint 26: build id, so phones notice a new version ─────────────────────
+// Railway sets RAILWAY_GIT_COMMIT_SHA on every deploy; locally the boot time
+// stands in. Every API response carries it as X-Build and /api/version serves
+// it plainly; the pages compare and show "New version available — Refresh".
+const BUILD = String(process.env.RAILWAY_GIT_COMMIT_SHA || process.env.BUILD_ID || '').trim().slice(0, 12) || ('dev-' + Date.now().toString(36));
+app.locals.BUILD = BUILD;
+app.use((req, res, next) => { res.setHeader('X-Build', app.locals.BUILD); next(); });
+app.get('/api/version', (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json({ build: app.locals.BUILD }); });
 // ── Content Security Policy (Sprint 17, S17-4) ────────────────────────────
 // What a page may load and where it may send data. The app pages (staff and
 // resident) may talk only to this server: even if someone slipped a script
@@ -61,7 +70,8 @@ const CSP_HOME = cspHeader(
 // (e.g. /MANAGEMENT, which Express matches case-insensitively) can serve a
 // staff or resident page with the looser one. (Review S17-4.)
 app.use((req, res, next) => { res.setHeader('Content-Security-Policy', CSP_APP); next(); });
-const sendHome = (req, res) => { res.setHeader('Content-Security-Policy', CSP_HOME); res.sendFile(path.join(PUBLIC, 'home.html')); };
+const NO_CACHE = { headers: { 'Cache-Control': 'no-cache' } };   // Sprint 26: revalidate pages every open
+const sendHome = (req, res) => { res.setHeader('Content-Security-Policy', CSP_HOME); res.sendFile(path.join(PUBLIC, 'home.html'), NO_CACHE); };
 // Sprint 25: the public hostname is a Railway variable, not code. With
 // CANONICAL_HOST unset there is NO hostname redirect at all (the safe default
 // after Hotfix 23.2, when a code-level redirect pointed at a hostname with no
@@ -214,18 +224,24 @@ app.get('/health', (req, res) => {
 });
 
 app.get('/home.html', sendHome);   // before static, so it gets the home policy
-app.use(express.static(PUBLIC));
+// Sprint 26: no silent staleness. Pages, scripts and styles are always
+// revalidated (ETag makes that a cheap 304 on 4G); only images may be kept for
+// a day. Before this, Android kept old app.js for hours after a deploy.
+app.use(express.static(PUBLIC, { etag: true, lastModified: true, setHeaders: (res, filePath) => {
+  if (/\.(png|jpg|jpeg|webp|svg|ico|woff2?)$/i.test(filePath)) res.setHeader('Cache-Control', 'public, max-age=86400');
+  else res.setHeader('Cache-Control', 'no-cache');
+} }));
 
 // Root
 app.get('/', sendHome);
 
 // Guest portal
-app.get('/siri-mane-guest-portal', (req, res) => res.sendFile(path.join(PUBLIC, 'guest.html')));
-app.get('/guest', (req, res) => res.sendFile(path.join(PUBLIC, 'guest.html')));
+app.get('/siri-mane-guest-portal', (req, res) => res.sendFile(path.join(PUBLIC, 'guest.html'), NO_CACHE));
+app.get('/guest', (req, res) => res.sendFile(path.join(PUBLIC, 'guest.html'), NO_CACHE));
 
 // Management (the file is management.html — there is no index.html)
-app.get('/siri-mane-management', (req, res) => res.sendFile(path.join(PUBLIC, 'management.html')));
-app.get('/management', (req, res) => res.sendFile(path.join(PUBLIC, 'management.html')));
+app.get('/siri-mane-management', (req, res) => res.sendFile(path.join(PUBLIC, 'management.html'), NO_CACHE));
+app.get('/management', (req, res) => res.sendFile(path.join(PUBLIC, 'management.html'), NO_CACHE));
 
 // Catch-all for the public site
 app.get('*', sendHome);

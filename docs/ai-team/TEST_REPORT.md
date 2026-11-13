@@ -542,3 +542,11 @@ Backlog (minor): the probe still starts the skip window in a Groq-only setup (pr
 **Mutations 7/7 killed:** redirect hard-coded regardless of CANONICAL_HOST; API redirected; query dropped; check-live passes a dead host; question outranked by noise; question falls to the other ear; every page cached as the shell.
 **Gate:** 12/12 twice, 3,592 each; 12/12 (3,594) after the review fixes.
 **Review: APPROVE (5ca33b4).** Should-fixes taken: check-live passes a non-redirect host only on 200 and flags redirect chains/loops; `CANONICAL_HOST` normalised (scheme/path/case) and logged once at boot; checklist says the bare-domain ❌ DNS line is expected until the record exists. Noted (reviewer): "did Sachin pay 5000?" in English with a Kannada ear that resolves Sachin ₹5,000 previews a payment rather than answering — unlikely, recorded as a follow-up.
+
+### Sprint 26 — update bar: evidence
+**Server:** `BUILD` from `RAILWAY_GIT_COMMIT_SHA` (12 chars) else `dev-<boot>`; `X-Build` middleware; `/api/version` no-store; `express.static` setHeaders no-cache / images 1 day; the five sendFile pages also no-cache. api suite S26-1/2: X-Build on /api/version and on a 401 /api/rooms; no-cache on /management.html, /guest.html, /js/app.js, /js/version-check.js, /css/style.css, /, /guest, /management; logo max-age=86400; ETag present.
+**Phone (ui 360/390):** same build → no bar and `current` = server build; `app.locals.BUILD` changed → the next `API.getRooms()` reply shows the bar (screenshot `s26-update-bar-*.png`, above the tab bar, 44 px taps); Later → gone, check() with the new build still there → stays gone, snooze ≈ 30 min; snooze cleared → bar returns; Refresh → navigation, page reports the new build, bar gone, `/api/auth/me` 200.
+**Resident (portal 360/390):** same flow via `apiGuest('/guest-home')`; Refresh through the service worker; still signed in. Screenshot `s26-update-bar-guest-*.png`.
+**Not exercised:** the `updatefound` path (a new sw-guest.js installing) — headless cannot swap the worker file mid-test; the code path is a bar() call only. The 5-minute timer and `visibilitychange`/`online` listeners are called directly via `check()`.
+**Mutations 7/7 killed:** no X-Build; scripts heuristically cached; /api/version cacheable; Later ignored; API replies not watched; Refresh doesn't reload; bar on every open.
+**Gate:** 12/12 twice, 3,629 each.

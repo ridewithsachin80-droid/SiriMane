@@ -661,6 +661,16 @@ async function main() {
           ok([200, 404].includes((await raw('GET', '/api/rooms', 'sirimane.in')).status) || (await raw('GET', '/api/rooms', 'sirimane.in')).status === 401, 'S25-1 …not even a GET to the API');
           eq((await raw('GET', '/', 'www.sirimane.in')).status, 200, 'S25-1 the canonical host itself is served');
           eq((await raw('GET', '/', 'sirimane-test.up.railway.app')).status, 200, 'S25-1 the Test site is untouched');
+          // Sprint 26: build id on every API reply; /api/version; pages and scripts never silently stale.
+          const http = require('http');
+          const hdr = p => new Promise(resolve => { const rq = http.request(BASE + p, { method: 'GET' }, rs => { rs.resume(); rs.on('end', () => resolve({ status: rs.statusCode, h: rs.headers })); }); rq.on('error', () => resolve({ status: 0, h: {} })); rq.end(); });
+          ok(app.locals.BUILD && app.locals.BUILD.length >= 6, `S26-1 the server knows its build (${app.locals.BUILD})`);
+          const v = await hdr('/api/version');
+          ok(v.status === 200 && v.h['x-build'] === app.locals.BUILD && /no-store/.test(v.h['cache-control'] || ''), `S26-1 /api/version answers with the build, never cached (${v.h['cache-control']})`);
+          ok((await hdr('/api/rooms')).h['x-build'] === app.locals.BUILD, 'S26-1 every API reply carries X-Build (even a 401)');
+          for (const p of ['/management.html', '/guest.html', '/js/app.js', '/js/version-check.js', '/css/style.css', '/', '/guest', '/management']) { const r = await hdr(p); ok(r.status === 200 && /no-cache/.test(r.h['cache-control'] || ''), `S26-2 ${p} is always revalidated (${r.h['cache-control']})`); }
+          const img = await hdr('/images/logo.png'); ok(img.status === 200 && /max-age=86400/.test(img.h['cache-control'] || ''), `S26-2 images may be kept for a day (${img.h['cache-control']})`);
+          const et = await hdr('/js/app.js'); ok(!!et.h.etag, 'S26-2 scripts carry an ETag so the revalidation is a cheap 304');
           const head = await raw('HEAD', '/x', 'sirimane.in'); ok(head.status === 301 && head.location === 'https://www.sirimane.in/x', `S25-1 HEAD on the twin is redirected too (${head.status})`);
           app.locals.CANONICAL_HOST = 'sirimane.in'; app.locals.CANONICAL_TWIN = 'www.sirimane.in';
           const w = await raw('GET', '/p', 'www.sirimane.in'); ok(w.status === 301 && w.location === 'https://sirimane.in/p', `S25-1 the other way round works the same (${w.status} ${w.location})`);
