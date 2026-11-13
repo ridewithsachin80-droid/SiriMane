@@ -331,3 +331,15 @@ Note: D-17-1 (HttpOnly-cookie login + CSRF) was first planned here and found alr
 | S25-3 | Two ears: a question in the English ear ("who has not paid") is not turned into a payment by Kannada noise that only fuzzy-matches a name; the question stands with no repair call; a Kannada ear that found the resident and an amount is still used | AI |
 | S25-4 | Resident service worker: only /guest and /guest.html are cached as the offline shell; visiting the public site or the staff app no longer overwrites it and those pages are not cached by the resident worker (cache name bumped to v3 so old shells are dropped) | UX |
 | S25-5 | Gates 12/12 twice; mutations caught; independent review before merge; no migration | QA |
+
+## Sprint 26 — "New version available — Refresh" (owner, 13 Nov: "they should get new version available refresh option as it is there in AttendEase and fuel station")
+
+| ID | Acceptance criterion | Review |
+|---|---|---|
+| S26-1 | The server knows its build (Railway commit, else boot time); every API reply carries `X-Build`; `GET /api/version` returns it with `Cache-Control: no-store` | QA |
+| S26-2 | Pages, scripts and styles are served `Cache-Control: no-cache` with ETags (revalidated on every open — a 304 on 4G); images `max-age=86400`. Before: Android kept old app.js for hours after a deploy | UX |
+| S26-3 | Staff app: the page remembers the build it opened with; when a different build is seen — on any ordinary API reply, on return to the foreground, on coming back online, or on the 5-minute check — a bar "New version available · Later · Refresh" appears above the tab bar, fits 360/390, 44 px taps; same build → never a bar | UX |
+| S26-4 | "Later" hides the bar for 30 minutes even though the new build is still there; nothing ever reloads by itself (she may be mid-entry) | UX |
+| S26-5 | "Refresh" asks the service worker to update (if any) and reloads; the page then runs the new build, the bar is gone and the cookie login survives | SEC |
+| S26-6 | Resident app: the same bar (inline CSS, script shared), after her next API call; Refresh goes through the worker's network-first shell and she stays signed in | UX |
+| S26-7 | No new dependency; no migration; gates 12/12 ×2; mutations caught; independent review before merge | QA |

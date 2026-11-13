@@ -52,7 +52,20 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // Static assets: serve from cache, refresh in the background.
+  // Sprint 26: scripts and styles are network-first (the cached copy only when
+  // offline), so a Refresh after a deploy really runs the new code. The
+  // "instant" value of the shell is the page and the icons, not the scripts.
+  if (/^\/(js|css)\//.test(url.pathname)) {
+    event.respondWith(
+      fetch(req).then(res => {
+        if (res && res.ok) { const copy = res.clone(); caches.open(SHELL_CACHE).then(c => c.put(req, copy)).catch(() => {}); }
+        return res;
+      }).catch(() => caches.match(req))
+    );
+    return;
+  }
+
+  // Images, fonts, manifest: serve from cache, refresh in the background.
   event.respondWith(
     caches.match(req).then(hit => {
       const network = fetch(req).then(res => {

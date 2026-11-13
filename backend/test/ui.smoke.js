@@ -1925,6 +1925,58 @@ async function runAtWidth(browser, BASE, width) {
   ok(await page.$eval('#pay-waiting', e => /waiting for confirmation/.test(e.textContent)), `${tag} S15-6 pending money shown separately as "waiting"`);
   eq(Number((await page.$eval('#pay-waiting', e => e.textContent)).split('waiting')[0].replace(/[^0-9]/g, '')), s15Pending, `${tag} S15-6 the waiting line equals the s15Pending s15Rows`);
   await pool.query(`DELETE FROM collections WHERE receipt_number LIKE 'S15-${width}-%'`);
+  // ── Sprint 26: "New version available — Refresh" ─────────────────────
+  {
+    const build0 = app.locals.BUILD;
+    eq(await page.$eval('meta[name="x-build"]', m => m.content), build0, `${tag} S26-3 the page carries the build it was served from`);
+    await page.evaluate(() => window.smVersionCheck.check());
+    await sleep(300);
+    ok(!(await page.$('#sm-update-bar')) && (await page.evaluate(() => window.smVersionCheck._state().current)) === build0, `${tag} S26-3 same build → no bar; the page knows the build it opened with`);
+    // Review S1: a page served from an OLD build whose first API reply is already the new build must still get the bar.
+    // (served for real: the page is intercepted and stamped "older-build", then loads normally)
+    await page.setRequestInterception(true);
+    const stale = req => {
+      if (req.resourceType() === 'document' && /\/management(\.html)?(\?.*)?$/.test(req.url())) {
+        require('http').get(req.url(), rs => { let t = ''; rs.on('data', d => { t += d; }); rs.on('end', () => req.respond({ status: 200, contentType: 'text/html', body: t.replace(/<meta name="x-build" content="[^"]*">/, '<meta name="x-build" content="older-build">') })); }).on('error', () => req.continue());
+      } else req.continue();
+    };
+    page.on('request', stale);
+    await page.reload({ waitUntil: 'networkidle0' });
+    page.off('request', stale); await page.setRequestInterception(false);
+    eq(await page.$eval('meta[name="x-build"]', m => m.content), 'older-build', `${tag} S26-3 (S1) …a page served from an older build`);
+    await page.waitForSelector('#sm-update-bar', { timeout: 8000 });
+    ok(true, `${tag} S26-3 (S1) is told on its own first API replies — even though the API was already new`);
+    await page.reload({ waitUntil: 'networkidle0' });
+    eq(await page.$eval('meta[name="x-build"]', m => m.content), build0, `${tag} S26-3 (S1) a plain reload serves the current build again`);
+    await sleep(300);
+    ok(!(await page.$('#sm-update-bar')), `${tag} S26-3 (S1) …and no bar`);
+    app.locals.BUILD = 'deploy-' + width;                       // a new deploy lands…
+    await page.evaluate(() => API.getRooms ? API.getRooms().catch(() => {}) : fetch('/api/rooms'));   // …and the next ordinary API reply reveals it
+    await page.waitForSelector('#sm-update-bar', { timeout: 5000 });
+    const ub = await page.evaluate(() => { const b = document.getElementById('sm-update-bar'); const r = b.getBoundingClientRect(); const go = b.querySelector('.sm-update-go').getBoundingClientRect(), later = b.querySelector('.sm-update-later').getBoundingClientRect(); return { text: b.textContent, right: r.right, bottom: r.bottom, goH: go.height, laterH: later.height, goW: go.width }; });
+    ok(/New version available/.test(ub.text) && /Refresh/.test(ub.text) && ub.right <= width + 0.5 && ub.bottom <= 800 && ub.goH >= 44 && ub.laterH >= 44, `${tag} S26-3 the bar appears after an ordinary API call, fits the screen, 44 px taps (${Math.round(ub.goH)}/${Math.round(ub.laterH)}px)`);
+    await page.screenshot({ path: path.join(SHOTS, `s26-update-bar-${width}.png`) });
+    await page.tap('#sm-update-later');
+    await sleep(200);
+    ok(!(await page.$('#sm-update-bar')), `${tag} S26-4 "Later" hides it`);
+    await page.evaluate(() => window.smVersionCheck.check()); await sleep(400);
+    ok(!(await page.$('#sm-update-bar')) && (await page.evaluate(() => window.smVersionCheck._state().snoozedUntil)) > Date.now() + 25 * 60 * 1000, `${tag} S26-4 …for 30 minutes, even though the new build is still there`);
+    // Snooze over → shown again; Refresh reloads the page onto the new build.
+    await page.evaluate(() => window.smVersionCheck._snooze(0));
+    await page.evaluate(() => window.smVersionCheck.check());
+    await page.waitForSelector('#sm-update-bar', { timeout: 5000 });
+    ok(true, `${tag} S26-4 after the snooze the bar comes back`);
+    const nav = page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 15000 });
+    await page.tap('#sm-update-go');
+    await nav;
+    await sleep(300);
+    ok(!(await page.$('#sm-update-bar')) && (await page.evaluate(() => window.smVersionCheck._state().current)) === 'deploy-' + width, `${tag} S26-5 Refresh reloads; the page now runs the new build and the bar is gone`);
+    app.locals.BUILD = build0;
+    await page.evaluate(() => window.smVersionCheck.check()); await sleep(300);
+    // (going "back" to an older build on the server is also a change → a bar; dismiss it so later tests are clean)
+    await page.evaluate(() => { const b = document.getElementById('sm-update-bar'); if (b) b.remove(); window.smVersionCheck._reset(); });
+    ok(await page.evaluate(() => fetch('/api/auth/me', { credentials: 'same-origin' }).then(r => r.status === 200)), `${tag} S26-5 still logged in after the refresh (cookie session)`);
+  }
   // ── Sprint 19: the page can't read the staff login; old phones log in once
   {
     ok(await page.evaluate(() => !/sm_staff/.test(document.cookie) && !localStorage.getItem('sm_token') && !Object.keys(sessionStorage).some(k => /token/i.test(k))), `${tag} S19-1 SECURITY: the page can't read the staff login (not in document.cookie, not in storage)`);
