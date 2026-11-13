@@ -1928,9 +1928,28 @@ async function runAtWidth(browser, BASE, width) {
   // ── Sprint 26: "New version available — Refresh" ─────────────────────
   {
     const build0 = app.locals.BUILD;
+    eq(await page.$eval('meta[name="x-build"]', m => m.content), build0, `${tag} S26-3 the page carries the build it was served from`);
     await page.evaluate(() => window.smVersionCheck.check());
     await sleep(300);
     ok(!(await page.$('#sm-update-bar')) && (await page.evaluate(() => window.smVersionCheck._state().current)) === build0, `${tag} S26-3 same build → no bar; the page knows the build it opened with`);
+    // Review S1: a page served from an OLD build whose first API reply is already the new build must still get the bar.
+    // (served for real: the page is intercepted and stamped "older-build", then loads normally)
+    await page.setRequestInterception(true);
+    const stale = req => {
+      if (req.resourceType() === 'document' && /\/management(\.html)?(\?.*)?$/.test(req.url())) {
+        require('http').get(req.url(), rs => { let t = ''; rs.on('data', d => { t += d; }); rs.on('end', () => req.respond({ status: 200, contentType: 'text/html', body: t.replace(/<meta name="x-build" content="[^"]*">/, '<meta name="x-build" content="older-build">') })); }).on('error', () => req.continue());
+      } else req.continue();
+    };
+    page.on('request', stale);
+    await page.reload({ waitUntil: 'networkidle0' });
+    page.off('request', stale); await page.setRequestInterception(false);
+    eq(await page.$eval('meta[name="x-build"]', m => m.content), 'older-build', `${tag} S26-3 (S1) …a page served from an older build`);
+    await page.waitForSelector('#sm-update-bar', { timeout: 8000 });
+    ok(true, `${tag} S26-3 (S1) is told on its own first API replies — even though the API was already new`);
+    await page.reload({ waitUntil: 'networkidle0' });
+    eq(await page.$eval('meta[name="x-build"]', m => m.content), build0, `${tag} S26-3 (S1) a plain reload serves the current build again`);
+    await sleep(300);
+    ok(!(await page.$('#sm-update-bar')), `${tag} S26-3 (S1) …and no bar`);
     app.locals.BUILD = 'deploy-' + width;                       // a new deploy lands…
     await page.evaluate(() => API.getRooms ? API.getRooms().catch(() => {}) : fetch('/api/rooms'));   // …and the next ordinary API reply reveals it
     await page.waitForSelector('#sm-update-bar', { timeout: 5000 });

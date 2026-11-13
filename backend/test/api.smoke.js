@@ -671,6 +671,13 @@ async function main() {
           for (const p of ['/management.html', '/guest.html', '/js/app.js', '/js/version-check.js', '/css/style.css', '/', '/guest', '/management']) { const r = await hdr(p); ok(r.status === 200 && /no-cache/.test(r.h['cache-control'] || ''), `S26-2 ${p} is always revalidated (${r.h['cache-control']})`); }
           const img = await hdr('/images/logo.png'); ok(img.status === 200 && /max-age=86400/.test(img.h['cache-control'] || ''), `S26-2 images may be kept for a day (${img.h['cache-control']})`);
           const et = await hdr('/js/app.js'); ok(!!et.h.etag, 'S26-2 scripts carry an ETag so the revalidation is a cheap 304');
+          // Review S26 S1: the app pages carry the build they were served from; it follows the server's build.
+          const body = p => new Promise(resolve => { require('http').get(BASE + p, rs => { let t = ''; rs.on('data', d => { t += d; }); rs.on('end', () => resolve(t)); }).on('error', () => resolve('')); });
+          for (const p of ['/management.html', '/management', '/guest.html', '/guest', '/siri-mane-management', '/siri-mane-guest-portal']) ok((await body(p)).includes(`<meta name="x-build" content="${app.locals.BUILD}">`), `S26-1 ${p} is stamped with the current build`);
+          const b0 = app.locals.BUILD; app.locals.BUILD = 'stamp-test';
+          ok((await body('/guest.html')).includes('<meta name="x-build" content="stamp-test">'), 'S26-1 a new build is stamped into the next page load (no restart, no build step)');
+          app.locals.BUILD = b0;
+          ok(!/[0-9a-f]{40}/.test(await body('/api/version')) && app.locals.BUILD.length <= 16, 'S26-1 PRIVACY: the commit id itself is not published — only a short hash');
           const head = await raw('HEAD', '/x', 'sirimane.in'); ok(head.status === 301 && head.location === 'https://www.sirimane.in/x', `S25-1 HEAD on the twin is redirected too (${head.status})`);
           app.locals.CANONICAL_HOST = 'sirimane.in'; app.locals.CANONICAL_TWIN = 'www.sirimane.in';
           const w = await raw('GET', '/p', 'www.sirimane.in'); ok(w.status === 301 && w.location === 'https://sirimane.in/p', `S25-1 the other way round works the same (${w.status} ${w.location})`);

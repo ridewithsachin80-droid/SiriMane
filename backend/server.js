@@ -20,7 +20,8 @@ app.use(helmet({ contentSecurityPolicy: false }));
 // Railway sets RAILWAY_GIT_COMMIT_SHA on every deploy; locally the boot time
 // stands in. Every API response carries it as X-Build and /api/version serves
 // it plainly; the pages compare and show "New version available — Refresh".
-const BUILD = String(process.env.RAILWAY_GIT_COMMIT_SHA || process.env.BUILD_ID || '').trim().slice(0, 12) || ('dev-' + Date.now().toString(36));
+// The commit id itself is not published: the pages only need to tell "same" from "different", so a short hash of it is enough.
+const BUILD = (() => { const raw = String(process.env.RAILWAY_GIT_COMMIT_SHA || process.env.BUILD_ID || '').trim(); return raw ? require('crypto').createHash('sha1').update(raw).digest('hex').slice(0, 10) : ('dev-' + Date.now().toString(36)); })();
 app.locals.BUILD = BUILD;
 app.use((req, res, next) => { res.setHeader('X-Build', app.locals.BUILD); next(); });
 app.get('/api/version', (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json({ build: app.locals.BUILD }); });
@@ -71,6 +72,15 @@ const CSP_HOME = cspHeader(
 // staff or resident page with the looser one. (Review S17-4.)
 app.use((req, res, next) => { res.setHeader('Content-Security-Policy', CSP_APP); next(); });
 const NO_CACHE = { headers: { 'Cache-Control': 'no-cache' } };   // Sprint 26: revalidate pages every open
+// Sprint 26 (review S1): the two app pages carry the build they were served
+// from in <meta name="x-build">, so "your copy is old" is page-vs-server —
+// not "first API reply seen", which goes wrong whenever scripts are stale but
+// the API is new. Read once, stamped per request (the gate changes the build).
+const fs = require('fs');
+const PAGE_SRC = {};
+for (const f of ['management.html', 'guest.html']) PAGE_SRC[f] = fs.readFileSync(path.join(PUBLIC, f), 'utf8');
+if (!/<meta name="x-build" content="">/.test(PAGE_SRC['management.html']) || !/<meta name="x-build" content="">/.test(PAGE_SRC['guest.html'])) throw new Error('app pages must contain <meta name="x-build" content="">');
+const sendPage = f => (req, res) => { res.setHeader('Cache-Control', 'no-cache'); res.type('html').send(PAGE_SRC[f].replace('<meta name="x-build" content="">', `<meta name="x-build" content="${app.locals.BUILD}">`)); };
 const sendHome = (req, res) => { res.setHeader('Content-Security-Policy', CSP_HOME); res.sendFile(path.join(PUBLIC, 'home.html'), NO_CACHE); };
 // Sprint 25: the public hostname is a Railway variable, not code. With
 // CANONICAL_HOST unset there is NO hostname redirect at all (the safe default
@@ -224,6 +234,8 @@ app.get('/health', (req, res) => {
 });
 
 app.get('/home.html', sendHome);   // before static, so it gets the home policy
+app.get('/management.html', sendPage('management.html'));   // Sprint 26: before static, so the build is stamped in
+app.get('/guest.html', sendPage('guest.html'));
 // Sprint 26: no silent staleness. Pages, scripts and styles are always
 // revalidated (ETag makes that a cheap 304 on 4G); only images may be kept for
 // a day. Before this, Android kept old app.js for hours after a deploy.
@@ -236,12 +248,12 @@ app.use(express.static(PUBLIC, { etag: true, lastModified: true, setHeaders: (re
 app.get('/', sendHome);
 
 // Guest portal
-app.get('/siri-mane-guest-portal', (req, res) => res.sendFile(path.join(PUBLIC, 'guest.html'), NO_CACHE));
-app.get('/guest', (req, res) => res.sendFile(path.join(PUBLIC, 'guest.html'), NO_CACHE));
+app.get('/siri-mane-guest-portal', sendPage('guest.html'));
+app.get('/guest', sendPage('guest.html'));
 
 // Management (the file is management.html — there is no index.html)
-app.get('/siri-mane-management', (req, res) => res.sendFile(path.join(PUBLIC, 'management.html'), NO_CACHE));
-app.get('/management', (req, res) => res.sendFile(path.join(PUBLIC, 'management.html'), NO_CACHE));
+app.get('/siri-mane-management', sendPage('management.html'));
+app.get('/management', sendPage('management.html'));
 
 // Catch-all for the public site
 app.get('*', sendHome);

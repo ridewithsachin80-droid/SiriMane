@@ -8,8 +8,10 @@
 // the 5-minute check — a bar appears at the bottom: one tap reloads. "Later"
 // hides it for 30 minutes. Nothing reloads by itself: she may be mid-entry.
 (function () {
-  const KEY = 'sm_build_seen';
-  let current = null, shown = false, snoozedUntil = 0, timer = null;
+  // The build this page was served from (stamped by the server). Compared
+  // against the server's current build: different = this copy is old.
+  const meta = document.querySelector('meta[name="x-build"]');
+  let current = (meta && meta.getAttribute('content')) || null, shown = false, snoozedUntil = 0, timer = null;
 
   function bar() {
     let el = document.getElementById('sm-update-bar');
@@ -17,7 +19,7 @@
     el = document.createElement('div');
     el.id = 'sm-update-bar';
     el.setAttribute('role', 'status');
-    el.innerHTML = '<span class="sm-update-text">New version available</span>' +
+    el.innerHTML = '<span class="sm-update-text">New version available<small>ಹೊಸ ಆವೃತ್ತಿ ಬಂದಿದೆ</small></span>' +
       '<button type="button" class="sm-update-later" id="sm-update-later">Later</button>' +
       '<button type="button" class="sm-update-go" id="sm-update-go">Refresh</button>';
     document.body.appendChild(el);
@@ -29,7 +31,6 @@
   async function refresh() {
     const go = document.getElementById('sm-update-go'); if (go) { go.disabled = true; go.textContent = 'Refreshing…'; }
     try { if ('serviceWorker' in navigator) { const reg = await navigator.serviceWorker.getRegistration(); if (reg) await reg.update(); } } catch (e) {}
-    try { sessionStorage.setItem(KEY, ''); } catch (e) {}
     location.reload();
   }
 
@@ -73,5 +74,5 @@
     }).catch(() => {});
   }
 
-  window.smVersionCheck = { check, _state: () => ({ current, shown, snoozedUntil }), _snooze: ms => { snoozedUntil = Date.now() + ms; }, _reset: () => { shown = false; snoozedUntil = 0; current = null; } };
+  window.smVersionCheck = { check, _state: () => ({ current, shown, snoozedUntil }), _snooze: ms => { snoozedUntil = Date.now() + ms; }, _reset: () => { shown = false; snoozedUntil = 0; const m = document.querySelector('meta[name="x-build"]'); current = (m && m.getAttribute('content')) || null; } };
 })();
