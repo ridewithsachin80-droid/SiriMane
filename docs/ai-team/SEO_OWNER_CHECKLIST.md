@@ -2,6 +2,13 @@
 
 The website side (title, H1, structured data, FAQ, canonical address, sitemap, noindex on the app) is done in Sprint 23. Everything below needs an owner login or a phone with photos, so it is yours. Do them in this order; 1–3 matter most.
 
+## Before ANY change to hostnames, DNS, redirects or Railway domains (2 min)
+Run this in the Railway console (Production service → Console) and release only when every line is ✅:
+```
+node backend/scripts/check-live.js www.sirimane.in sirimane.in
+```
+It looks up each name in DNS and fetches /health. On 11 Nov a redirect to a name with no DNS record took the site down for 30 minutes; this check would have caught it. The redirect itself is now the Railway variable `CANONICAL_HOST` (set it to `www.sirimane.in` on Production if you want the bare domain to forward once it has a DNS record; leave it unset otherwise). After setting it, run the command above again: you need ✅ for `www.sirimane.in` and no ❌ in the lines after the hosts. Today the `sirimane.in` line will say ❌ DNS — that is expected and harmless (nobody can reach that name) until you add the bare domain in Railway → Settings → Networking and the record it gives you at GoDaddy; after that both lines must be ✅.
+
 ## 0. Confirm three facts first (5 min)
 These are now written on the website. Tell me if any is wrong and I will change it the same day.
 - Enquiry hours shown: **9 am – 8 pm, every day**.

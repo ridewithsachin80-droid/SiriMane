@@ -4,7 +4,7 @@
 // opens instantly on patchy 4G. It NEVER caches anything under /api/. Dues,
 // ledgers and payment status must always be live — a stale ₹ figure shown to a
 // resident is worse than a spinner.
-const SHELL_CACHE = 'sirimane-guest-shell-v2';
+const SHELL_CACHE = 'sirimane-guest-shell-v3';
 const SHELL = ['/guest', '/guest.html', '/images/logo.png', '/images/icon-192.png', '/images/icon-512.png', '/manifest-guest.json'];
 
 self.addEventListener('install', event => {
@@ -35,12 +35,16 @@ self.addEventListener('fetch', event => {
 
   // Navigations: network first so a deployed update is picked up immediately;
   // fall back to the cached shell when offline.
+  // Sprint 25: only the resident page itself is the offline shell. Other pages
+  // on this origin (the public site, the staff app) are left to the network —
+  // before this, any page visited was cached AS /guest.html, and offline every
+  // address showed the resident app.
   if (req.mode === 'navigate') {
+    if (!/^\/guest(\.html)?$/.test(url.pathname)) return;
     event.respondWith(
       fetch(req)
         .then(res => {
-          const copy = res.clone();
-          caches.open(SHELL_CACHE).then(c => c.put('/guest.html', copy)).catch(() => {});
+          if (res && res.ok) { const copy = res.clone(); caches.open(SHELL_CACHE).then(c => c.put('/guest.html', copy)).catch(() => {}); }
           return res;
         })
         .catch(() => caches.match('/guest.html').then(r => r || caches.match('/guest')))
